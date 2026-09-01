@@ -1,0 +1,516 @@
+/** 도메인 연산 — 전부 mutate() 한 번으로 끝나는 thin wrapper. */
+import { assertSafeRecordKey, mutate, normalizeWalletAddress } from "./store";
+import {
+  UNCATEGORIZED_PKG,
+  missingRequiredHoles,
+  type Binding,
+  type HoleValue,
+  type PackageDef,
+  type PolicyDef,
+  type StoreSnapshot,
+  type WalletPolicyState,
+} from "./types";
+
+const newBindingId = () => `bind::${crypto.randomUUID()}`;
+
+/** 기본 안전팩(source==="builtin") 보호: 삭제·수정·이름변경을 막는다. 이 함수들이
+ *  모든 쓰기가 지나는 단일 choke point라 여기서 막아야 우회가 안 된다(UI 가림은
+ *  2차 방어선). 시드(ensureSeeded)·마켓 설치·복제는 putDef/putPackage가 아니라
+ *  mutate를 직접 쓰므로 영향받지 않는다. 잠긴 정책을 바꾸려면 duplicateDef로
+ *  "내 정책" 사본을 만들어 편집한다. */
+function assertNotBuiltinDef(d: StoreSnapshot, defId: string): void {
+  if (d.library.defs[defId]?.source === "builtin") {
+    throw new Error("기본 안전팩 정책은 삭제·수정할 수 없어요 (복제해서 내 정책으로 편집하세요)");
+  }
+}
+function assertNotBuiltinPackage(d: StoreSnapshot, pkgId: string): void {
+  if (d.library.packages[pkgId]?.source === "builtin") {
+    throw new Error("기본 안전팩은 삭제·수정할 수 없어요");
+  }
+}
+
+/** 기본 안전팩(팩·템플릿)은 사실상 읽기 전용 — 삭제·수정뿐 아니라 "추가"도 막는다.
+ *  즉 def를 기본 안전팩 라이브러리 폴더(템플릿)에 넣거나, 기본 안전팩 패키지에
+ *  바인딩(적용)하는 것도 금지. 시드는 mutate를 직접 쓰므로 영향받지 않는다. */
+function assertBuiltinPackageReadonly(pkgId: string | undefined): void {
+  // 잠그는 건 기본 안전팩(pkg::builtin.*)뿐. 미분류(pkg::uncategorized)나 그 외
+  // builtin-source 패키지는 추가 허용 — 에디터 UI 가드와 동일한 prefix 기준.
+  if (pkgId !== undefined && pkgId.startsWith("pkg::builtin.")) {
+    throw new Error("기본 안전팩은 읽기 전용이에요 — 정책을 추가할 수 없어요");
+  }
+}
+
+function assertNotBuiltinNamespace(value: string, label: string): void {
+  if (value.startsWith("def::builtin.") || value.startsWith("pkg::builtin.")) {
+    throw new Error(`${label} cannot use the builtin safety-pack namespace`);
+  }
+}
+
+function assertMarketDefCanWrite(d: StoreSnapshot, defId: string): void {
+  assertNotBuiltinNamespace(defId, "market def id");
+  assertNotBuiltinDef(d, defId);
+}
+
+function assertMarketPackageCanWrite(d: StoreSnapshot, pkgId: string): void {
+  assertNotBuiltinNamespace(pkgId, "market package id");
+  assertNotBuiltinPackage(d, pkgId);
+}
+
+/** 마켓 게시 때 블랭킹된 required hole이 안 채워진 def는 지갑에 바인딩
+ *  (패키지 적용)할 수 없다 — 플레이스홀더(제로주소/0)로 평가되면 조용히
+ *  무용지물이거나(양성 비교) 모든 거래에 오발화한다(부정 비교). */
+function assertHolesFilled(
+  def: PolicyDef | undefined,
+  params: Record<string, HoleValue> | undefined,
+): void {
+  if (!def) return;
+  const missing = missingRequiredHoles(def, params);
+  if (missing.length > 0) {
+    throw new Error(
+      `정책 "${def.displayName}"의 빈칸(${missing.join(", ")})을 채워야 적용할 수 있어요`,
+    );
+  }
+}
+
+function refreshBindingParamsForUpdatedDef(
+  def: PolicyDef,
+  binding: Binding,
+  provided: Record<string, HoleValue> | undefined,
+): void {
+  const live = new Set(def.holes.map((h) => h.name));
+  const current = Object.fromEntries(
+    Object.entries(binding.params ?? {}).filter(([k]) => live.has(k)),
+  );
+  const providedLive = Object.fromEntries(
+    Object.entries(provided ?? {}).filter(([k]) => live.has(k)),
+  );
+  const next = { ...providedLive, ...current };
+  binding.params = Object.keys(next).length ? next : undefined;
+  assertHolesFilled(def, binding.params);
+}
+
+function walletAt(
+  draft: StoreSnapshot,
+  address: string,
+  opts: { provisionDefaults?: boolean } = {},
+): WalletPolicyState {
+  const addr = normalizeWalletAddress(address);
+  const existing = draft.wallets.byAddress[addr];
+  if (existing) return existing;
+  const w: WalletPolicyState = { bindings: {}, packages: {}, packageEnabled: {} };
+  draft.wallets.byAddress[addr] = w;
+  if (opts.provisionDefaults === true) bindDefaultDefs(draft, w);
+  return w;
+}
+
+/** 지갑 패키지 실체화: 라이브러리 폴더 id로 바인딩이 들어오면(마켓/시드/범위
+ *  프로비저닝) 같은 id·이름의 지갑 패키지를 만들어 소속시킨다. */
+function ensureWalletPackage(d: StoreSnapshot, w: WalletPolicyState, packageId: string): void {
+  assertSafeRecordKey(packageId, "package id");
+  if (packageId === UNCATEGORIZED_PKG || w.packages[packageId]) return;
+  w.packages[packageId] = {
+    id: packageId,
+    displayName: d.library.packages[packageId]?.displayName ?? packageId,
+    updatedAtMs: Date.now(),
+  };
+}
+
+function bindDefaultDefs(d: StoreSnapshot, w: WalletPolicyState): void {
+  for (const def of Object.values(d.library.defs)) {
+    if (!def.defaults.enabled) continue;
+    if (def.hidden === true) continue;
+    if (missingRequiredHoles(def).length > 0) continue;
+    const packageId = def.defaults.packageId ?? UNCATEGORIZED_PKG;
+    if (Object.values(w.bindings).some((b) => b.defId === def.id && b.packageId === packageId)) {
+      continue;
+    }
+    const b: Binding = {
+      id: newBindingId(),
+      defId: def.id,
+      packageId,
+      enabled: true,
+      params: Object.keys(def.defaults.params).length ? { ...def.defaults.params } : undefined,
+      updatedAtMs: Date.now(),
+    };
+    ensureWalletPackage(d, w, b.packageId);
+    w.bindings[b.id] = b;
+  }
+}
+
+export function putDef(uid: string, def: PolicyDef): Promise<void> {
+  return mutate(uid, (d) => {
+    assertSafeRecordKey(def.id, "def id");
+    assertNotBuiltinDef(d, def.id); // 기존 builtin 덮어쓰기(=수정) 금지
+    // 내 정의(또는 마켓 정의)를 기본 안전팩 템플릿 폴더에 넣는 것 금지. builtin 정의
+    // 자체는 그 폴더가 제자리라 예외(시드가 mutate로 만든 콘텐츠).
+    if (def.source !== "builtin") assertBuiltinPackageReadonly(def.defaults.packageId);
+    d.library.defs[def.id] = def;
+  });
+}
+
+/** 정의 삭제 — 모든 지갑의 해당 바인딩도 함께 삭제(cascade). */
+export function deleteDef(uid: string, defId: string): Promise<void> {
+  return mutate(uid, (d) => {
+    assertSafeRecordKey(defId, "def id");
+    assertNotBuiltinDef(d, defId);
+    delete d.library.defs[defId];
+    for (const w of Object.values(d.wallets.byAddress)) {
+      for (const [bid, b] of Object.entries(w.bindings)) {
+        if (b.defId === defId) delete w.bindings[bid];
+      }
+    }
+  });
+}
+
+/** 명시적 분기: 정의를 복제해 독립 정의로. 바인딩은 복사하지 않는다. */
+/** 정의를 복제한다. `packageId`를 주면 사본을 그 폴더(라이브러리 패키지)에 넣고,
+ *  `UNCATEGORIZED_PKG`면 폴더 없음(개별)으로 둔다. 안 주면 원본 폴더를 따른다. */
+export function duplicateDef(uid: string, defId: string, packageId?: string): Promise<string> {
+  return mutate(uid, (d) => {
+    assertSafeRecordKey(defId, "def id");
+    if (packageId !== undefined) assertSafeRecordKey(packageId, "package id");
+    assertBuiltinPackageReadonly(packageId); // 기본 안전팩 템플릿 폴더로 복제 금지
+    const src = d.library.defs[defId];
+    if (!src) throw new Error(`정의가 없습니다: ${defId}`);
+    const newId = `def::${crypto.randomUUID()}`;
+    const clone = {
+      ...structuredClone(src),
+      id: newId,
+      displayName: `${src.displayName} (복제)`,
+      source: "mine" as const,
+      sourceListingId: undefined,
+      sourceVersion: undefined,
+      updatedAtMs: Date.now(),
+    };
+    if (packageId !== undefined) {
+      if (packageId === UNCATEGORIZED_PKG) delete clone.defaults.packageId;
+      else clone.defaults = { ...clone.defaults, packageId };
+    }
+    d.library.defs[newId] = clone;
+    return newId;
+  });
+}
+
+export function putPackage(uid: string, pkg: PackageDef): Promise<void> {
+  return mutate(uid, (d) => {
+    assertSafeRecordKey(pkg.id, "package id");
+    assertNotBuiltinPackage(d, pkg.id); // 기존 builtin 덮어쓰기(=이름변경 등) 금지
+    d.library.packages[pkg.id] = pkg;
+  });
+}
+
+/** 패키지 삭제 — 멤버 바인딩은 미분류로 이동(정책 인스턴스는 살아남는다). */
+export function deletePackage(uid: string, pkgId: string): Promise<void> {
+  return mutate(uid, (d) => {
+    assertSafeRecordKey(pkgId, "package id");
+    if (pkgId === UNCATEGORIZED_PKG) throw new Error("미분류 패키지는 삭제할 수 없습니다");
+    assertNotBuiltinPackage(d, pkgId);
+    delete d.library.packages[pkgId];
+    // 라이브러리 폴더 소속도 미분류로 — 죽은 패키지를 가리키는 def는 디렉토리
+    // 뷰에서 통째로 사라져 보인다. 지갑 패키지는 별개 객체라 건드리지 않는다.
+    for (const def of Object.values(d.library.defs)) {
+      if (def.defaults.packageId === pkgId) delete def.defaults.packageId;
+    }
+  });
+}
+
+/** 지갑 패키지 생성/이름변경 — 지갑 안에서만 존재, 라이브러리 불변. */
+export function putWalletPackage(
+  uid: string,
+  opts: { address: string; pkg: { id: string; displayName: string; desc?: string } },
+): Promise<void> {
+  return mutate(uid, (d) => {
+    assertSafeRecordKey(opts.pkg.id, "wallet package id");
+    if (opts.pkg.id === UNCATEGORIZED_PKG) throw new Error("미분류는 이름을 바꿀 수 없습니다");
+    const w = walletAt(d, opts.address, { provisionDefaults: true });
+    w.packages[opts.pkg.id] = { ...opts.pkg, updatedAtMs: Date.now() };
+  });
+}
+
+/** 지갑 차원 제거: 이 지갑에서 패키지의 바인딩들과 게이트만 걷어낸다 —
+ *  계정 패키지 객체와 라이브러리는 건드리지 않는다(지갑 페이지의 휴지통 의미). */
+export function removePackageFromWallet(
+  uid: string,
+  opts: { address: string; packageId: string },
+): Promise<void> {
+  return mutate(uid, (d) => {
+    assertSafeRecordKey(opts.packageId, "package id");
+    // 기본 안전팩은 모든 지갑에 상주해야 한다 — 지갑에서 빼기 금지.
+    assertNotBuiltinPackage(d, opts.packageId);
+    const w = d.wallets.byAddress[normalizeWalletAddress(opts.address)];
+    if (!w) return;
+    for (const b of Object.values(w.bindings)) {
+      if (b.packageId === opts.packageId) delete w.bindings[b.id];
+    }
+    delete w.packages[opts.packageId];
+    delete w.packageEnabled[opts.packageId];
+    pruneHiddenDefs(d);
+  });
+}
+
+/** 지갑 전용 폴더 생성/이름변경 — 템플릿(def) 정리 축. 패키지(인스턴스 묶음)
+ *  와 별개. */
+export function putWalletFolder(
+  uid: string,
+  opts: { address: string; folder: { id: string; displayName: string } },
+): Promise<void> {
+  return mutate(uid, (d) => {
+    assertSafeRecordKey(opts.folder.id, "wallet folder id");
+    const w = walletAt(d, opts.address, { provisionDefaults: true });
+    (w.folders ??= {})[opts.folder.id] = {
+      id: opts.folder.id,
+      displayName: opts.folder.displayName,
+      updatedAtMs: Date.now(),
+    };
+  });
+}
+
+/** 지갑 전용 폴더 삭제 — 멤버 def는 그 지갑의 미분류로(템플릿은 안 지워진다). */
+export function removeWalletFolder(
+  uid: string,
+  opts: { address: string; folderId: string },
+): Promise<void> {
+  return mutate(uid, (d) => {
+    assertSafeRecordKey(opts.folderId, "wallet folder id");
+    const addr = normalizeWalletAddress(opts.address);
+    const w = d.wallets.byAddress[addr];
+    if (w?.folders) delete w.folders[opts.folderId];
+    for (const def of Object.values(d.library.defs)) {
+      if (def.hidden === true && def.homeWallet === addr && def.walletFolderId === opts.folderId) {
+        def.walletFolderId = undefined;
+        def.updatedAtMs = Date.now();
+      }
+    }
+  });
+}
+
+export function bind(
+  uid: string,
+  opts: {
+    defId: string;
+    packageId: string;
+    addresses: string[];
+    params?: Record<string, HoleValue>;
+    enabled?: boolean;
+    alias?: string;
+    severity?: "deny" | "warn";
+  },
+): Promise<void> {
+  return mutate(uid, (d) => {
+    assertSafeRecordKey(opts.defId, "def id");
+    assertSafeRecordKey(opts.packageId, "package id");
+    assertBuiltinPackageReadonly(opts.packageId); // 기본 안전팩에 바인딩(추가) 금지
+    assertHolesFilled(d.library.defs[opts.defId], opts.params);
+    for (const address of opts.addresses) {
+      const w = walletAt(d, address);
+      ensureWalletPackage(d, w, opts.packageId);
+      const b: Binding = {
+        id: newBindingId(),
+        defId: opts.defId,
+        packageId: opts.packageId,
+        enabled: opts.enabled ?? true,
+        alias: opts.alias,
+        params: opts.params,
+        severity: opts.severity,
+        updatedAtMs: Date.now(),
+      };
+      w.bindings[b.id] = b;
+    }
+  });
+}
+
+export function updateBinding(
+  uid: string,
+  opts: { address: string; bindingId: string; patch: Partial<Pick<Binding, "enabled" | "params" | "packageId" | "alias" | "severity">> },
+): Promise<void> {
+  return mutate(uid, (d) => {
+    assertSafeRecordKey(opts.bindingId, "binding id");
+    if (opts.patch.packageId !== undefined) assertSafeRecordKey(opts.patch.packageId, "package id");
+    assertBuiltinPackageReadonly(opts.patch.packageId); // 기본 안전팩으로 이동(추가) 금지
+    const w = d.wallets.byAddress[normalizeWalletAddress(opts.address)];
+    const b = w?.bindings[opts.bindingId];
+    if (!b) throw new Error(`바인딩이 없습니다: ${opts.bindingId}`);
+    // params를 갈아끼우는 패치는 required hole을 다시 비울 수 있다.
+    if ("params" in opts.patch) {
+      assertHolesFilled(d.library.defs[b.defId], opts.patch.params);
+    }
+    Object.assign(b, opts.patch, { updatedAtMs: Date.now() });
+  });
+}
+
+/** 모델 A: 지갑 전용(hidden) def는 homeWallet 폴더에 **앵커**된다 — 인스턴스
+ *  (바인딩) 삭제는 템플릿에 영향이 없다. 이 안전망은 앵커 지갑 자체가 사라진
+ *  (지갑 삭제 등) def만 라이브러리(미분류)로 승격해 데이터 손실을 막는다. */
+function pruneHiddenDefs(d: StoreSnapshot): void {
+  for (const def of Object.values(d.library.defs)) {
+    if (def.hidden !== true) continue;
+    if (def.homeWallet && d.wallets.byAddress[def.homeWallet]) continue;
+    def.hidden = false;
+    def.homeWallet = undefined;
+    def.walletFolderId = undefined;
+    def.updatedAtMs = Date.now();
+  }
+}
+
+export function removeBinding(uid: string, opts: { address: string; bindingId: string }): Promise<void> {
+  return mutate(uid, (d) => {
+    assertSafeRecordKey(opts.bindingId, "binding id");
+    const w = d.wallets.byAddress[normalizeWalletAddress(opts.address)];
+    if (w) delete w.bindings[opts.bindingId];
+    pruneHiddenDefs(d);
+  });
+}
+
+/** 바인딩 인스턴스를 다른 지갑으로 복사(새 id, params/패키지/토글 유지). */
+export function copyBindings(
+  uid: string,
+  opts: { fromAddress: string; toAddress: string; bindingIds: string[] },
+): Promise<void> {
+  return mutate(uid, (d) => {
+    const from = d.wallets.byAddress[normalizeWalletAddress(opts.fromAddress, "source wallet address")];
+    if (!from) throw new Error(`지갑이 없습니다: ${opts.fromAddress}`);
+    const to = walletAt(d, opts.toAddress);
+    for (const bid of opts.bindingIds) {
+      assertSafeRecordKey(bid, "binding id");
+      const src = from.bindings[bid];
+      if (!src) continue;
+      if (src.packageId !== UNCATEGORIZED_PKG && !to.packages[src.packageId]) {
+        to.packages[src.packageId] = {
+          ...(from.packages[src.packageId] ?? {
+            id: src.packageId,
+            displayName: src.packageId,
+          }),
+          updatedAtMs: Date.now(),
+        };
+      }
+      const copy: Binding = { ...structuredClone(src), id: newBindingId(), updatedAtMs: Date.now() };
+      to.bindings[copy.id] = copy;
+    }
+  });
+}
+
+export function setPackageEnabled(
+  uid: string,
+  opts: { address: string; packageId: string; enabled: boolean },
+): Promise<void> {
+  return mutate(uid, (d) => {
+    assertSafeRecordKey(opts.packageId, "package id");
+    const w = walletAt(d, opts.address, { provisionDefaults: true });
+    w.packageEnabled[opts.packageId] = opts.enabled;
+  });
+}
+
+export type MarketInstallScope =
+  | { kind: "wallets"; addresses: string[] }
+  | { kind: "all" }
+  | { kind: "library-only" };
+
+/** 마켓 설치/업데이트 — 정의(+패키지) 등록 후 scope에 따라 바인딩.
+ *  같은 id의 재설치는 정의 업데이트: 기존 바인딩의 params는 보존하되,
+ *  새 정의의 holes에서 사라진 키는 제거한다(렌더 실패 방지). */
+export function installMarket(
+  uid: string,
+  opts: {
+    defs: PolicyDef[];
+    pkg?: PackageDef | undefined;
+    scope: MarketInstallScope;
+    /** defId별 설치 시점 hole 파라미터(설치 모달 입력). */
+    params?: Record<string, Record<string, HoleValue>> | undefined;
+  },
+): Promise<void> {
+  return mutate(uid, (d) => {
+    if (opts.pkg) {
+      assertSafeRecordKey(opts.pkg.id, "package id");
+      assertMarketPackageCanWrite(d, opts.pkg.id);
+    }
+    const seenDefIds = new Set<string>();
+    for (const def of opts.defs) {
+      assertSafeRecordKey(def.id, "def id");
+      assertMarketDefCanWrite(d, def.id);
+      if (seenDefIds.has(def.id)) throw new Error(`market install contains duplicate def id: ${def.id}`);
+      seenDefIds.add(def.id);
+    }
+    if (opts.pkg) d.library.packages[opts.pkg.id] = { ...opts.pkg, source: "market" };
+    const defaultPkg = opts.pkg?.id ?? UNCATEGORIZED_PKG;
+
+    for (const def of opts.defs) {
+      const isUpdate = !!d.library.defs[def.id];
+      d.library.defs[def.id] = { ...def, source: "market" };
+      if (isUpdate) {
+        // 업데이트: 사라진 hole 키는 정리하고, 새 required hole 값이 설치
+        // payload에 있으면 기존 사용자 값을 덮지 않는 선에서 보강한다.
+        for (const w of Object.values(d.wallets.byAddress)) {
+          for (const b of Object.values(w.bindings)) {
+            if (b.defId !== def.id) continue;
+            refreshBindingParamsForUpdatedDef(def, b, opts.params?.[def.id]);
+          }
+        }
+      }
+    }
+
+    if (opts.scope.kind === "library-only") return;
+    // 바인딩이 생기는 설치는 required hole(비식별 블랭킹 칸)이 채워져 있어야
+    // 한다 — 채움값은 defaults.params(클라이언트가 병합) 또는 opts.params.
+    for (const def of opts.defs) assertHolesFilled(def, opts.params?.[def.id]);
+    const addresses =
+      opts.scope.kind === "all" ? Object.keys(d.wallets.byAddress) : opts.scope.addresses.map((a) => normalizeWalletAddress(a));
+    for (const address of addresses) {
+      const w = walletAt(d, address);
+      for (const def of opts.defs) {
+        const params = opts.params?.[def.id];
+        const packageId = def.defaults.packageId ?? defaultPkg;
+        if (Object.values(w.bindings).some((b) => b.defId === def.id && b.packageId === packageId)) {
+          continue;
+        }
+        const b: Binding = {
+          id: newBindingId(),
+          defId: def.id,
+          packageId,
+          enabled: true,
+          params: params && Object.keys(params).length ? { ...params } : undefined,
+          updatedAtMs: Date.now(),
+        };
+        ensureWalletPackage(d, w, b.packageId);
+        w.bindings[b.id] = b;
+      }
+    }
+  });
+}
+
+/** 새 지갑 프로비저닝 — defaults.enabled 정의를 기본 파라미터/패키지로 바인딩.
+ *  멱등 단위는 지갑: byAddress에 이미 있는 주소는 건드리지 않는다. */
+export function provisionWallets(uid: string, addresses: string[]): Promise<void> {
+  return mutate(uid, (d) => {
+    for (const address of addresses) {
+      const addr = normalizeWalletAddress(address);
+      if (d.wallets.byAddress[addr]) continue;
+      walletAt(d, addr, { provisionDefaults: true });
+    }
+  });
+}
+
+/** 지갑 1개를 스토어에서 제거 — 홈/팝업에서 지갑을 삭제할 때 정책 스토어(ps2)도
+ *  같이 비워, 에디터(정책 관리)에 삭제된 지갑이 남지 않게 한다. 지갑 상태는 전부
+ *  byAddress[addr]에 들어있어 그 항목만 지우면 바인딩·패키지까지 함께 사라진다. */
+export function removeWallet(uid: string, address: string): Promise<void> {
+  return mutate(uid, (d) => {
+    delete d.wallets.byAddress[normalizeWalletAddress(address)];
+  });
+}
+
+/** 서버 지갑 "전체 목록"과 스토어를 동기화 — 목록에 새로 생긴 주소는 defaults로
+ *  프로비저닝하고, 목록에 없는(=다른 화면에서 삭제된) 주소는 제거한다. 반드시
+ *  전체 목록 sync 경로에서만 호출할 것: 단일 주소(지갑 추가) 경로에서 부르면
+ *  나머지 지갑이 전부 삭제된다. */
+export function reconcileWallets(uid: string, addresses: string[]): Promise<void> {
+  return mutate(uid, (d) => {
+    const keep = new Set(addresses.map((a) => normalizeWalletAddress(a)));
+    for (const addr of Object.keys(d.wallets.byAddress)) {
+      if (!keep.has(addr)) delete d.wallets.byAddress[addr];
+    }
+    for (const addr of keep) {
+      if (d.wallets.byAddress[addr]) continue;
+      walletAt(d, addr, { provisionDefaults: true });
+    }
+  });
+}

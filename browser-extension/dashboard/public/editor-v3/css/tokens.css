@@ -1,0 +1,95 @@
+/**
+ * Cloudy Pond design tokens — ported from front/dambi-v3/Home.html.
+ * One source of truth; pages import this and consume the CSS vars.
+ */
+:root {
+  /* DEEP 마이그레이션: sage→navy · slate/cyan→neutral · warn→lemon · fail→red (pass·fog 보존) */
+  --sage-50:#F1F3F6; --sage-100:#DCE2EA; --sage-200:#B6C5D8; --sage-300:#6F91B8;
+  --sage-400:#294970; --sage-500:#06203F; --sage-600:#05182E; --sage-700:#041222;
+  --sage-800:#030C17; --sage-900:#03080F;
+  --slate-50:#F4F6F8; --slate-100:#E9EBED; --slate-200:#D7D9DC; --slate-300:#BABCC0;
+  --slate-400:#96999D; --slate-500:#797C81; --slate-600:#606369; --slate-700:#4A4D53;
+  --slate-800:#363940; --slate-900:#24282E;
+  --cyan-50:#F4F6F8; --cyan-100:#E9EBED; --cyan-200:#D7D9DC; --cyan-300:#BABCC0;
+  --cyan-400:#A7AEB8; --cyan-500:#8F959F; --cyan-600:#7F8C9E; --cyan-700:#606369;
+  --cyan-800:#363940; --cyan-900:#24282E;
+  --fog-50:#FEFEFE; --fog-100:#FCFCFC; --fog-200:#FAFAF9; --fog-300:#F7F7F6;
+  --fog-400:#F4F5F3; --fog-500:#F1F2F0; --fog-600:#C5C6C4; --fog-700:#9B9C9A;
+  --fog-800:#6E6E6D; --fog-900:#434343;
+  --pass-50:#F4F9F3; --pass-100:#E4EFE1; --pass-200:#CDE1C5; --pass-300:#B2D1A8;
+  --pass-400:#96C087; --pass-500:#7CB069; --pass-600:#648F55; --pass-700:#4E7041;
+  --pass-800:#354E2C; --pass-900:#1E2E18;
+  --warn-50:#FAF8F2; --warn-100:#F8F4E2; --warn-200:#F5EBBC; --warn-300:#F0DB7F;
+  --warn-400:#E7C637; --warn-500:#E7C636; --warn-600:#C5AA30; --warn-700:#A28C2A;
+  --warn-800:#7E6E24; --warn-900:#5A501E;
+  --fail-50:#F9F4F3; --fail-100:#F6E6E4; --fail-200:#EFC7C2; --fail-300:#E4948B;
+  --fail-400:#D55649; --fail-500:#C73D2E; --fail-600:#AA352A; --fail-700:#8B2D25;
+  --fail-800:#6D2520; --fail-900:#4E1D1B;
+
+  --page: #E9EBED;            /* DEEP: 대시보드 body --bg(neutral-100)와 동일 — 회색 페이지 위 흰 카드 */
+  --surface: #FFFFFF;
+  --hairline: #D7D9DC;        /* neutral-200 */
+  --hairline-soft: #E9EBED;   /* neutral-100 */
+
+  --r-lg: 20px; --r-md: 14px; --r-sm: 10px; --r-input: 12px; --r-pill: 999px;
+  --ff-sans: "IBM Plex Sans KR", "IBM Plex Sans", system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --ff-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body, #root { margin: 0; padding: 0; min-height: 100vh; }
+body {
+  background: var(--page);
+  color: var(--slate-500);
+  font-family: var(--ff-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+#root { display: flex; flex-direction: column; }
+::selection { background: var(--sage-200); color: var(--slate-900); }
+button, a, input, select, textarea { font-family: inherit; }
+a { color: inherit; text-decoration: none; }
+button { cursor: pointer; border: none; background: none; padding: 0; color: inherit; }
+
+/* shared dot indicators */
+.dot { display:inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.dot.pass { background: var(--pass-500); box-shadow: 0 0 0 3px rgba(124,176,105,0.18); }
+.dot.warn { background: var(--warn-500); box-shadow: 0 0 0 3px rgba(214,146,56,0.18); }
+.dot.fail { background: var(--fail-500); box-shadow: 0 0 0 3px rgba(199,114,104,0.18); }
+.pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--pass-500); box-shadow: 0 0 0 3px rgba(124,176,105,0.18); }
+
+/* shared severity pill */
+.sev-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--ff-mono); font-size: 11px; font-weight: 600;
+  padding: 3px 8px; border-radius: var(--r-pill);
+  letter-spacing: 0.02em;
+}
+.sev-pill .pd { width: 7px; height: 7px; border-radius: 50%; }
+.sev-pill.pass { background: var(--pass-100); color: var(--pass-800); }
+.sev-pill.pass .pd { background: var(--pass-500); }
+.sev-pill.warn { background: var(--warn-100); color: var(--warn-800); }
+.sev-pill.warn .pd { background: var(--warn-500); }
+.sev-pill.fail { background: var(--fail-100); color: var(--fail-800); }
+.sev-pill.fail .pd { background: var(--fail-500); }
+.sev-pill.info { background: var(--cyan-100); color: var(--cyan-800); }
+.sev-pill.info .pd { background: var(--cyan-600); }
+
+/* shared count chip (topbar pass/warn/fail) */
+.dot-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--surface); border: 1px solid var(--hairline);
+  border-radius: var(--r-pill);
+  padding: 8px 14px 8px 12px;
+  font-size: 13px; font-weight: 500; color: var(--slate-700);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+
+/* shared card surface */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: 18px;
+}

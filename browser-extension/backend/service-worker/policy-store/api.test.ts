@@ -1,0 +1,285 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => {
+  const localStore = new Map<string, unknown>();
+  return {
+    localStore,
+    browser: {
+      storage: {
+        local: {
+          get: vi.fn(async (key?: string | string[] | null) => {
+            if (key == null) return Object.fromEntries(localStore);
+            const keys = Array.isArray(key) ? key : [key];
+            return Object.fromEntries(keys.filter((k) => localStore.has(k)).map((k) => [k, localStore.get(k)]));
+          }),
+          set: vi.fn(async (obj: Record<string, unknown>) => {
+            for (const [k, v] of Object.entries(obj)) localStore.set(k, v);
+          }),
+          remove: vi.fn(async (key: string | string[]) => {
+            for (const k of Array.isArray(key) ? key : [key]) localStore.delete(k);
+          }),
+        },
+      },
+    },
+  };
+});
+vi.mock("webextension-polyfill", () => ({ default: mocks.browser }));
+vi.mock("./seed", () => ({ ensureSeeded: vi.fn(async () => undefined) }));
+vi.mock("../dashboard/current-user", () => ({ getCurrentUserId: vi.fn(async () => "u") }));
+
+import { handlePs2Request, isPs2Request, provisionFromWalletSync } from "./api";
+import { provisionWallets, putDef } from "./ops";
+import { readStore } from "./store";
+import { UNCATEGORIZED_PKG, type Binding, type PolicyDef } from "./types";
+
+const def = (id: string, holes: string[] = []): PolicyDef => ({
+  id,
+  displayName: id,
+  skeleton: { ir: { kind: "policy" } },
+  holes: holes.map((name) => ({ name, type: "long", label: name })),
+  defaults: { enabled: true, params: {} },
+  source: "market",
+  updatedAtMs: 1,
+});
+
+beforeEach(() => mocks.localStore.clear());
+
+describe("ps2 message API", () => {
+  it("isPs2Request gates on the ps2: prefix", () => {
+    expect(isPs2Request({ type: "ps2:get-library" })).toBe(true);
+    expect(isPs2Request({ type: "dambi-list-wallets" })).toBe(false);
+    expect(isPs2Request({})).toBe(false);
+  });
+
+  it("get-wallet-state는 처음 보는 지갑을 자동 프로비저닝한다 (popup 첫 화면 보호)", async () => {
+    // 기본 켜짐 def가 있으면 첫 조회에서 기본 정책이 깔린 상태로 돌아온다 —
+    // 대시보드 훅 없이 popup이 먼저 열려도 "보호 꺼짐"이 아니게.
+    await handlePs2Request({ type: "ps2:put-def", def: def("def::auto") });
+    const out = (await handlePs2Request({
+      type: "ps2:get-wallet-state",
+      address: "0xffffffffffffffffffffffffffffffffffffffff",
+    })) as { bindings: Record<string, { defId: string }> };
+    expect(Object.values(out.bindings).some((b) => b.defId === "def::auto")).toBe(true);
+  });
+
+  it("put-def → bind → get-overview round-trip", async () => {
+    await handlePs2Request({ type: "ps2:put-def", def: def("def::a") });
+    await handlePs2Request({
+      type: "ps2:bind",
+      defId: "def::a",
+      packageId: UNCATEGORIZED_PKG,
+      addresses: ["0xA100000000000000000000000000000000000001"],
+    });
+    const overview = (await handlePs2Request({ type: "ps2:get-overview" })) as Awaited<ReturnType<typeof readStore>>;
+    expect(Object.keys(overview.wallets.byAddress)).toEqual(["0xa100000000000000000000000000000000000001"]);
+    expect(overview.rev).toBe(2);
+  });
+
+  it("install-market scope:all binds to every known wallet", async () => {
+    await putDef("u", def("def::seedlike"));
+    await provisionWallets("u", ["0xa100000000000000000000000000000000000001", "0xa200000000000000000000000000000000000002"]);
+    await handlePs2Request({
+      type: "ps2:install-market",
+      defs: [def("def::m", ["cap"])],
+      pkg: { id: "pkg::m", displayName: "마켓팩", source: "market", updatedAtMs: 1 },
+      scope: { kind: "all" },
+      params: { "def::m": { cap: 7 } },
+    });
+    const s = await readStore("u");
+    for (const addr of ["0xa100000000000000000000000000000000000001", "0xa200000000000000000000000000000000000002"]) {
+      const b = Object.values(s.wallets.byAddress[addr].bindings).find((x) => x.defId === "def::m");
+      expect(b, addr).toBeTruthy();
+      expect(b!.packageId).toBe("pkg::m");
+      expect(b!.params).toEqual({ cap: 7 });
+    }
+  });
+
+  it("install-market binds the HL CoreWriter no-short market def to the selected wallet", async () => {
+    const wallet = "0x676fa5b94067c2be14bc025df6c5c80dedf49a54";
+    const marketDef: PolicyDef = {
+      id: "def::market.hl-corewriter-no-short-perp",
+      displayName: "HL CoreWriter no short",
+      skeleton: {
+        ir: {
+          kind: "policy",
+          annotations: [
+            { name: "id", value: "hl-corewriter-no-short-perp" },
+            { name: "severity", value: "deny" },
+          ],
+        },
+        manifest: {
+          id: "hl-corewriter-no-short-perp",
+          schema_version: 2,
+          trigger: { where: { "action.tag": { eq: "hl_core_limit_order" } } },
+          policy_rpc: [],
+          custom_context: { fields: {} },
+        },
+      },
+      holes: [],
+      defaults: { enabled: false, params: {}, packageId: "pkg::market.hl" },
+      source: "market",
+      sourceListingId: "seed-hl-corewriter-no-short-perp",
+      sourceVersion: "1.0.0",
+      updatedAtMs: 1,
+    };
+
+    await handlePs2Request({
+      type: "ps2:install-market",
+      defs: [marketDef],
+      pkg: {
+        id: "pkg::market.hl",
+        displayName: "Hyperliquid safety",
+        source: "market",
+        updatedAtMs: 1,
+      },
+      scope: { kind: "wallets", addresses: [wallet] },
+    });
+
+    const s = await readStore("u");
+    const stored = s.library.defs[marketDef.id];
+    expect(stored.skeleton.manifest).toEqual(marketDef.skeleton.manifest);
+
+    const bindings = Object.values(s.wallets.byAddress[wallet].bindings);
+    expect(bindings).toHaveLength(1);
+    expect(bindings[0]).toMatchObject({
+      defId: marketDef.id,
+      packageId: "pkg::market.hl",
+      enabled: true,
+    });
+  });
+
+  it("install-market scope:library-only registers defs without bindings", async () => {
+    await handlePs2Request({
+      type: "ps2:install-market",
+      defs: [def("def::m")],
+      scope: { kind: "library-only" },
+    });
+    const s = await readStore("u");
+    expect(s.library.defs["def::m"].source).toBe("market");
+    expect(Object.keys(s.wallets.byAddress)).toEqual([]);
+  });
+
+  it("market update keeps binding params, drops vanished holes", async () => {
+    await handlePs2Request({
+      type: "ps2:install-market",
+      defs: [def("def::m", ["a", "b"])],
+      scope: { kind: "wallets", addresses: ["0xa100000000000000000000000000000000000001"] },
+      params: { "def::m": { a: 1, b: 2 } },
+    });
+    await handlePs2Request({
+      type: "ps2:install-market",
+      defs: [def("def::m", ["a"])], // v2: hole b 삭제
+      scope: { kind: "library-only" },
+    });
+    const s = await readStore("u");
+    const b = Object.values(s.wallets.byAddress["0xa100000000000000000000000000000000000001"].bindings).find((x) => x.defId === "def::m") as Binding;
+    expect(b.params).toEqual({ a: 1 });
+    expect(s.library.defs["def::m"].holes.map((h) => h.name)).toEqual(["a"]);
+  });
+
+  it("provisionFromWalletSync is a no-op when signed out", async () => {
+    const { getCurrentUserId } = await import("../dashboard/current-user");
+    vi.mocked(getCurrentUserId).mockResolvedValueOnce(null);
+    await provisionFromWalletSync(["0xa100000000000000000000000000000000000001"]);
+    expect(mocks.localStore.size).toBe(0);
+  });
+
+  it("logged-out get-wallet-state does not create an anonymous wallet namespace", async () => {
+    const { getCurrentUserId } = await import("../dashboard/current-user");
+    vi.mocked(getCurrentUserId).mockResolvedValueOnce(null);
+    const out = await handlePs2Request({
+      type: "ps2:get-wallet-state",
+      address: "0xa100000000000000000000000000000000000001",
+    });
+    expect(out).toEqual({ bindings: {}, packages: {}, packageEnabled: {} });
+    expect(mocks.localStore.has("ps2:anonymous:wallets")).toBe(false);
+  });
+
+  it("logged-out writes are rejected instead of mutating the anonymous namespace", async () => {
+    const { getCurrentUserId } = await import("../dashboard/current-user");
+    vi.mocked(getCurrentUserId).mockResolvedValueOnce(null);
+    await expect(
+      handlePs2Request({ type: "ps2:put-def", def: def("def::anon") }),
+    ).rejects.toThrow("no_user");
+    expect(mocks.localStore.has("ps2:anonymous:library")).toBe(false);
+  });
+
+  it("rejects malformed runtime ps2 toggle/severity payloads before storage commit", async () => {
+    await handlePs2Request({ type: "ps2:put-def", def: def("def::a") });
+
+    await expect(
+      handlePs2Request({
+        type: "ps2:bind",
+        defId: "def::a",
+        packageId: UNCATEGORIZED_PKG,
+        addresses: ["0xa100000000000000000000000000000000000001"],
+        enabled: "false",
+      } as never),
+    ).rejects.toThrow(/binding enabled/);
+    await expect(
+      handlePs2Request({
+        type: "ps2:bind",
+        defId: "def::a",
+        packageId: UNCATEGORIZED_PKG,
+        addresses: ["0xa100000000000000000000000000000000000001"],
+        severity: "block",
+      } as never),
+    ).rejects.toThrow(/binding severity/);
+    await expect(
+      handlePs2Request({
+        type: "ps2:set-package-enabled",
+        address: "0xa100000000000000000000000000000000000001",
+        packageId: "pkg::x",
+        enabled: "false",
+      } as never),
+    ).rejects.toThrow(/wallet package gate/);
+
+    const s = await readStore("u");
+    expect(Object.keys(s.wallets.byAddress)).toEqual([]);
+  });
+
+  it("provisionFromWalletSync provisions for the signed-in account", async () => {
+    await putDef("u", def("def::a"));
+    await provisionFromWalletSync(["0xA100000000000000000000000000000000000001"]);
+    const s = await readStore("u");
+    expect(Object.values(s.wallets.byAddress["0xa100000000000000000000000000000000000001"].bindings).map((b) => b.defId)).toEqual(["def::a"]);
+  });
+});
+
+describe("wallet package messages", () => {
+  it("put-wallet-package creates a wallet-owned package (library untouched)", async () => {
+    await handlePs2Request({
+      type: "ps2:put-wallet-package",
+      address: "0xA100000000000000000000000000000000000001",
+      pkg: { id: "pkg::w1", displayName: "콜드 전용" },
+    });
+    const s = await readStore("u");
+    expect(s.wallets.byAddress["0xa100000000000000000000000000000000000001"].packages["pkg::w1"].displayName).toBe("콜드 전용");
+    expect(s.library.packages["pkg::w1"]).toBeUndefined();
+  });
+
+  it("remove-wallet-package strips bindings+gate+entry for that wallet only", async () => {
+    await putDef("u", def("def::a"));
+    await handlePs2Request({
+      type: "ps2:put-wallet-package",
+      address: "0xA100000000000000000000000000000000000001",
+      pkg: { id: "pkg::w1", displayName: "X" },
+    });
+    await handlePs2Request({
+      type: "ps2:bind",
+      defId: "def::a",
+      packageId: "pkg::w1",
+      addresses: ["0xa100000000000000000000000000000000000001"],
+    });
+    await handlePs2Request({ type: "ps2:remove-wallet-package", address: "0xA100000000000000000000000000000000000001", packageId: "pkg::w1" });
+    const s = await readStore("u");
+    const w = s.wallets.byAddress["0xa100000000000000000000000000000000000001"];
+    expect(Object.values(w.bindings).some((b) => b.packageId === "pkg::w1")).toBe(false);
+    expect(Object.values(w.bindings).some((b) => b.defId === "def::a")).toBe(true);
+    expect(w.packages["pkg::w1"]).toBeUndefined();
+  });
+
+  it("unknown ps2 message throws loudly (no silent no-op)", async () => {
+    await expect(handlePs2Request({ type: "ps2:nope" } as never)).rejects.toThrow("알 수 없는");
+  });
+});

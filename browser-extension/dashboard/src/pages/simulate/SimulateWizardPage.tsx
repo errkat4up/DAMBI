@@ -1,0 +1,70 @@
+/**
+ * /simulation — the 4-step simulation wizard: 지갑·상태 → 정책 → 트랜잭션 → 결과.
+ *
+ * Data comes from the {@link realProvider} (server + ps2 store + sim-bridge):
+ * step 1 wallets/holdings/positions/approvals, step 2 the per-wallet policy set,
+ * and the result step runs decode → evaluate → step for real verdicts + diffs.
+ */
+import { useTranslation } from "react-i18next";
+
+import { Topbar } from "../../shell/Topbar";
+
+import { realProvider } from "./real-provider";
+import { StepNav } from "./StepNav";
+import { Step1Wallets } from "./Step1Wallets";
+import { Step2Policies } from "./Step2Policies";
+import { Step3TxQueue } from "./Step3TxQueue";
+import { Step4Results } from "./Step4Results";
+import { useSimController } from "./useSimController";
+import "./simulate.css";
+
+export function SimulateWizardPage() {
+  const { t } = useTranslation("simulation");
+  const c = useSimController(realProvider);
+
+  return (
+    <div className="sw-page">
+      <Topbar here={t("wizard.title")} subtitle={t("wizard.subtitle")} />
+
+      <div className="sw-head">
+        <StepNav step={c.step} goTo={c.goTo} />
+      </div>
+
+      <div className="sw-body">
+        {c.step === 1 && <Step1Wallets c={c} />}
+        {c.step === 2 && <Step2Policies c={c} />}
+        {c.step === 3 && <Step3TxQueue c={c} />}
+        {c.step === 4 && <Step4Results c={c} />}
+      </div>
+
+      <footer className="sw-foot">
+        <button type="button" className="sw-btn ghost" disabled={c.step === 1} onClick={c.back}>
+          {t("wizard.back")}
+        </button>
+        {c.step < 3 && (
+          <button type="button" className="sw-btn primary" disabled={!c.canAdvance} onClick={c.next}>
+            {t("wizard.next")}
+          </button>
+        )}
+        {c.step === 3 && (
+          <button
+            type="button"
+            className="sw-btn primary"
+            disabled={!c.canAdvance || c.running}
+            onClick={() => {
+              c.run();
+              c.next();
+            }}
+          >
+            {c.running ? t("wizard.running") : t("wizard.run")}
+          </button>
+        )}
+        {c.step === 4 && (
+          <button type="button" className="sw-btn primary" onClick={() => c.run()} disabled={c.running}>
+            {c.running ? t("wizard.running") : t("wizard.runAgain")}
+          </button>
+        )}
+      </footer>
+    </div>
+  );
+}

@@ -1,0 +1,22 @@
+[package]
+name = "mappers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = { workspace = true }
+anyhow = "1"
+alloy-primitives = { workspace = true }
+alloy-dyn-abi = { workspace = true }
+abi-resolver = { workspace = true }
+# M1 — declarative_action_builder consumes v3 ActionBody types directly.
+policy-transition = { workspace = true }
+policy-state = { workspace = true }
+hex = "0.4"
+
+[dev-dependencies]
+alloy-json-abi = "0.8"

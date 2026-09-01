@@ -1,0 +1,70 @@
+# gitleaks config for dambi.
+# Extends the built-in rules; allowlists known non-secret high-entropy data so
+# the scan flags REAL secrets only. (A full-history scan of the default ruleset
+# produced ~3.3k findings, all `generic-api-key` entropy hits on blockchain data
+# — addresses, tx hashes, EIP-712 signatures, calldata — the Chrome extension
+# PUBLIC key, and the vendored yarn binary. None were real secrets.)
+title = "dambi gitleaks"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Non-secret high-entropy data: vendored deps, blockchain fixtures/ABIs/signatures, the Chrome extension public key, env templates, EVM addresses, and the labelled test secret."
+paths = [
+  # vendored / generated / lockfiles
+  '''\.yarn/releases/''',
+  '''(^|/)node_modules/''',
+  '''(^|/)(yarn\.lock|package-lock\.json|Cargo\.lock)$''',
+  '''\.cjs$''',
+  '''\.min\.js$''',
+  '''\.map$''',
+  # test data / fixtures / golden corpora / ABI dumps / signature vectors
+  '''(^|/)__tests__/''',
+  '''(^|/)integration-tests/tests/''',
+  # Rust crate integration tests carry hex token/typed-data vectors (e.g. a
+  # 32-byte route token id) that trip the generic-api-key entropy rule — fixtures, not secrets.
+  '''(^|/)crates/.*/tests/.*\.rs$''',
+  '''/fixtures/''',
+  '''/golden/''',
+  '''/data/golden/''',
+  '''/data/signatures/''',
+  '''corpus''',
+  '''\.abi\.json$''',
+  '''/surface/''',
+  '''(^|/)swap_samples/''',
+  '''/onboarding/''',
+  # curated on-chain data blobs (addresses/pools — high-entropy hex, not secrets)
+  '''(^|/)registry/.*\.json$''',
+  # registry v2 manifests = typed-data / route sample fixtures (token strings,
+  # not secrets); long literal blobs trip the generic-api-key entropy rule
+  '''(^|/)registryV2/.*\.json$''',
+  '''example-transactions\.json$''',
+  '''address-universe.*\.json$''',
+  '''.*inventory-summary\.json$''',
+  '''curve-pools.*\.json$''',
+  # Chrome extension manifest carries the PUBLIC __chrome__key by design
+  '''(^|/)browser-extension/backend/manifest\.json$''',
+  # env templates ship placeholders only (real values come from env / k8s secrets)
+  '''\.env(\..*)?\.(example|sample)$''',
+  '''(^|/)\.?example\.env$''',
+  # retired pre-port trees kept only in history
+  '''(^|/)crates/simulation/''',
+  '''(^|/)crates/adapter/''',
+  '''(^|/)schema/schema/''',
+  # dashboard codegen output (action lists / token-address tables / enrichment
+  # bindings derived from the schema + seeds — structured low-value data whose
+  # long literal arrays trip the generic-api-key entropy rule; never secrets)
+  '''(^|/)browser-extension/dashboard/src/.*\.generated\.ts$''',
+  # Doc-import output: policy-id → label/category/token-tag catalog + market
+  # seed. Long literal maps of short labels ("Token", "TOKEN-005") trip the
+  # generic-api-key entropy rule; structured catalog data, never secrets.
+  '''(^|/)browser-extension/dashboard/src/server-api/dambi-catalog\.ts$''',
+  '''(^|/)browser-extension/dashboard/src/server-api/market-seed-dambi\.ts$''',
+]
+regexes = [
+  '''0x[a-fA-F0-9]{40}\b''',                          # EVM addresses are never secrets
+  '''permit2-max-signature-warn''',                    # market policy id, not a secret
+  '''permit2-sign-allowance-far-expiry-warn''',        # market policy id, not a secret
+  '''test-secret-only-do-not-use-in-production''',    # explicit throwaway test JWT secret
+]

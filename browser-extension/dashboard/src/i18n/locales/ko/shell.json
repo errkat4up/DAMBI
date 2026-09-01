@@ -1,0 +1,27 @@
+{
+  "nav": {
+    "home": "홈",
+    "editor": "정책 관리",
+    "editor2": "정책 관리 2",
+    "simulation": "시뮬레이션",
+    "assets": "자산",
+    "market": "정책허브",
+    "history": "기록",
+    "docs": "사용 가이드",
+    "profile": "프로필",
+    "signOut": "로그아웃",
+    "account": "계정",
+    "comingSoon": "준비 중"
+  },
+  "search": {
+    "placeholder": "지갑 / 정책 / dApp / 함수 검색",
+    "noMatches": "매칭되는 항목이 없습니다",
+    "groupWallets": "지갑",
+    "groupPolicies": "정책",
+    "groupVerdicts": "최근 verdict"
+  },
+  "notifications": {
+    "unresolved": "{{count}}건 미해결 finding",
+    "none": "알림 없음"
+  }
+}

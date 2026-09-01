@@ -1,0 +1,39 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "policy-server.fullname" . }}
+  labels:
+    {{- include "policy-server.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.ingress.gce.enabled }}
+    kubernetes.io/ingress.class: "gce"
+    kubernetes.io/ingress.global-static-ip-name: {{ .Values.ingress.gce.staticIpName | quote }}
+    networking.gke.io/managed-certificates: {{ printf "%s-cert" (include "policy-server.fullname" .) | quote }}
+    kubernetes.io/ingress.allow-http: {{ .Values.ingress.gce.allowHttp | quote }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "policy-server.fullname" . }}-api
+                port:
+                  name: http
+{{- end }}

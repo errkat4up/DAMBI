@@ -1,0 +1,184 @@
+/** Hole parameter value — subset of sdk/block-ir ParamFillValue (no entity refs). */
+export type HoleValue =
+  | string
+  | number
+  | boolean
+  | (string | number)[]
+  /** 필드 참조 — 비교 대상 필드 자체를 지갑별로 바꾼다. */
+  | { field: string };
+
+export interface HoleSpec {
+  name: string;
+  type: "addressSet" | "address" | "long" | "decimal" | "string" | "bool" | "field";
+  label: string;
+  desc?: string;
+  /** 마켓 게시 때 비식별로 블랭킹된 칸 — 사용자가 값을 채우기 전에는
+   *  바인딩(패키지 적용)할 수 없다. defaults.params/binding.params 가
+   *  이 이름을 덮어야 충전된 것으로 본다. */
+  required?: boolean | undefined;
+}
+
+/** Human-authored policy documentation (정의/범위/대상/데이터). Single-language
+ *  free text; surfaced in the editor and shipped to Policy Hub on publish. */
+export interface PolicyDoc {
+  /** 정책 정의 — what the policy does and why. */
+  definition?: string;
+  /** 적용 범위 — when it triggers (and when it doesn't). */
+  scope?: string;
+  /** 대상 사용자 — who this protects. */
+  audience?: string;
+  /** 판정에 사용될 데이터 — the data the decision reads. */
+  usedData?: string;
+}
+
+export interface PolicyDef {
+  id: string; // "def::<slug>"
+  /** 지갑 전용 정책 — 라이브러리 카탈로그에 노출하지 않는다. homeWallet
+   *  지갑의 "지갑 전용 폴더" 트리에서만 보인다(바인딩 유무와 무관). */
+  hidden?: boolean | undefined;
+  /** hidden def의 앵커 지갑(소문자 주소). hidden이면 항상 있어야 한다 —
+   *  normalize가 바인딩에서 추론하거나, 추론 불가면 hidden을 해제한다. */
+  homeWallet?: string | undefined;
+  /** homeWallet 지갑의 전용 폴더 id ("fold::<uuid>"). undefined = 그 지갑의
+   *  미분류(가상 폴더). 라이브러리 폴더(defaults.packageId)와 별개 축. */
+  walletFolderId?: string | undefined;
+  displayName: string;
+  cat?: string;
+  memo?: string;
+  /** Authoring docs shown on the policy and carried to Policy Hub on publish.
+   *  Plain single-language text; every field optional. */
+  doc?: PolicyDoc;
+  // `model` 은 폼 모델(FormModel) 캐시 — 정적 에디터(editor-v3)의 적용·미리보기
+  // 화면이 ir 대신 이 모델을 읽는다(거기엔 irToForm 이 없다). 마켓 import 도 이걸
+  // 채워야 트리거·조건이 보인다. 없을 수도 있어 optional.
+  skeleton: { ir: unknown; model?: unknown; manifest?: unknown };
+  holes: HoleSpec[];
+  defaults: { enabled: boolean; params: Record<string, HoleValue>; packageId?: string };
+  source: "builtin" | "mine" | "market";
+  sourceListingId?: string | undefined;
+  sourceVersion?: string | undefined;
+  updatedAtMs: number;
+}
+
+export interface PackageDef {
+  id: string; // "pkg::<slug>"
+  displayName: string;
+  desc?: string;
+  source: "builtin" | "mine" | "market";
+  sourceListingId?: string | undefined;
+  sourceVersion?: string | undefined;
+  updatedAtMs: number;
+}
+
+export interface Binding {
+  id: string; // "bind::<uuid>"
+  defId: string;
+  packageId: string;
+  enabled: boolean;
+  /** 지갑별 별칭 — 없으면 def displayName으로 표시. */
+  alias?: string | undefined;
+  params?: Record<string, HoleValue> | undefined;
+  /** 지갑별 심각도 override — 없으면 def 의 선언 `@severity` 를 따른다. 평가 시
+   *  렌더 단계에서 cedar `@severity` 를 이 값으로 재스탬프한다. */
+  severity?: "deny" | "warn" | undefined;
+  updatedAtMs: number;
+}
+
+/** 지갑 소속 패키지 — 라이브러리 폴더와 별개의 객체. 지갑 화면의 생성/이름변경/
+ *  제거는 이것만 만지고, 라이브러리에는 비치지 않는다. */
+export interface WalletPackage {
+  id: string;
+  displayName: string;
+  /** 사용자가 자유롭게 적는 패키지 설명(이 지갑에서 무엇을 막는지). 카드 앞면에 보인다. */
+  desc?: string;
+  updatedAtMs: number;
+}
+
+/** 지갑 전용 폴더 — 이 지갑에서만 보이는 **템플릿(def)** 묶음. 인스턴스를
+ *  묶는 패키지와 별개 축: 폴더=정리, 패키지=적용. */
+export interface WalletFolder {
+  id: string; // "fold::<uuid>"
+  displayName: string;
+  updatedAtMs: number;
+}
+
+export interface WalletPolicyState {
+  bindings: Record<string, Binding>;
+  /** 이 지갑의 패키지들. binding.packageId는 여기(또는 미분류)를 가리킨다. */
+  packages: Record<string, WalletPackage>;
+  /** 패키지 토글. 키가 없으면 true(켜짐) 취급. */
+  packageEnabled: Record<string, boolean>;
+  /** 이 지갑의 전용 폴더들. hidden def의 walletFolderId가 여기를 가리킨다. */
+  folders?: Record<string, WalletFolder>;
+}
+
+export interface LibraryDoc {
+  schemaVersion: 1;
+  defs: Record<string, PolicyDef>;
+  packages: Record<string, PackageDef>;
+}
+
+export interface WalletsDoc {
+  schemaVersion: 1;
+  /** 주소는 항상 소문자 키. */
+  byAddress: Record<string, WalletPolicyState>;
+}
+
+export interface StoreSnapshot {
+  library: LibraryDoc;
+  wallets: WalletsDoc;
+  rev: number;
+}
+
+const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+const CEDAR_DECIMAL_RE = /^-?\d+\.\d{1,4}$/;
+
+function isValidRequiredHoleValue(type: HoleSpec["type"], value: unknown): boolean {
+  switch (type) {
+    case "address":
+      return typeof value === "string" && EVM_ADDRESS_RE.test(value);
+    case "addressSet":
+      return (
+        Array.isArray(value) &&
+        value.length > 0 &&
+        value.every((item) => typeof item === "string" && EVM_ADDRESS_RE.test(item))
+      );
+    case "long":
+      return typeof value === "number" && Number.isSafeInteger(value);
+    case "decimal":
+      return typeof value === "string" && CEDAR_DECIMAL_RE.test(value);
+    case "string":
+      return typeof value === "string" && value.trim().length > 0;
+    case "bool":
+      return typeof value === "boolean";
+    case "field":
+      return (
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value) &&
+        typeof (value as { field?: unknown }).field === "string" &&
+        (value as { field: string }).field.trim().length > 0
+      );
+  }
+}
+
+/** 패키지에서 빠진 바인딩이 떨어지는 예약 패키지. 삭제 불가. */
+export const UNCATEGORIZED_PKG = "pkg::uncategorized";
+
+/** effective-on = 패키지 토글 ∧ 바인딩 토글 (패키지 미기록 = on). */
+export function isEffectiveOn(w: WalletPolicyState, b: Binding): boolean {
+  return (w.packageEnabled[b.packageId] ?? true) === true && b.enabled === true;
+}
+
+/** required hole(마켓 비식별 블랭킹) 중 merged params(def 기본값 ⊕ 바인딩
+ *  오버라이드)가 타입까지 유효하게 못 덮는 칸의 라벨 목록. 비어 있지 않으면
+ *  그 def는 아직 "빈칸" 상태 — 바인딩(패키지 적용)이 거부돼야 한다. */
+export function missingRequiredHoles(
+  def: Pick<PolicyDef, "holes" | "defaults">,
+  params?: Record<string, HoleValue> | undefined,
+): string[] {
+  const merged = { ...def.defaults.params, ...(params ?? {}) };
+  return def.holes
+    .filter((h) => h.required && !isValidRequiredHoleValue(h.type, merged[h.name]))
+    .map((h) => h.label || h.name);
+}

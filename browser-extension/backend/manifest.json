@@ -1,0 +1,131 @@
+{
+  "manifest_version": 3,
+  "__firefox__manifest_version": 2,
+  "name": "Dambi",
+  "description": "서명 직전 모든 Web3 트랜잭션을 정책으로 검사하는 보안 가드",
+  "version": "0.2.3",
+  "icons": {
+    "48": "picture/icon-48.png",
+    "128": "picture/icon-128.png"
+  },
+  "__chrome__action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "48": "picture/icon-48.png",
+      "128": "picture/icon-128.png"
+    }
+  },
+  "__firefox__browser_action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "48": "picture/icon-48.png",
+      "128": "picture/icon-128.png"
+    }
+  },
+  "__firefox__browser_specific_settings": {
+    "gecko": {
+      "id": "extension@dambi.dev",
+      "strict_min_version": "115.0"
+    }
+  },
+  "__chrome__options_page": "options.html",
+  "__firefox__options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["js/injected/proxy-injected-providers.js"],
+      "__chrome__world": "MAIN",
+      "all_frames": true,
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://app.hyperliquid.xyz/*",
+        "https://hyperliquid.xyz/*",
+        "https://*.hyperliquid.xyz/*",
+        "https://*.hyperliquid-testnet.xyz/*"
+      ],
+      "js": ["js/injected/fetch-hook.js"],
+      "__chrome__world": "MAIN",
+      "all_frames": true,
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": [
+        "js/content-scripts/inject-scripts.js",
+        "js/content-scripts/window-ethereum-messages.js",
+        "js/content-scripts/fetch-bridge.js",
+        "js/content-scripts/bypass-check.js"
+      ],
+      "all_frames": true,
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "http://localhost:5173/*",
+        "http://127.0.0.1:5173/*"
+      ],
+      "js": ["js/content-scripts/dashboard-bridge.js"],
+      "all_frames": false,
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["js/content-scripts/dambi-advisory.js"],
+      "all_frames": false,
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "matches": ["<all_urls>"],
+      "resources": [
+        "js/injected/proxy-injected-providers.js",
+        "js/injected/fetch-hook.js",
+        "advisory.css",
+        "picture/*"
+      ]
+    }
+  ],
+  "__firefox__web_accessible_resources": [
+    "js/injected/proxy-injected-providers.js",
+    "js/injected/fetch-hook.js",
+    "advisory.css",
+    "picture/*"
+  ],
+  "background": {
+    "__chrome__service_worker": "js/background.js",
+    "__firefox__scripts": ["js/background.js"]
+  },
+  "__chrome__permissions": [
+    "storage",
+    "identity",
+    "notifications",
+    "alarms",
+    "scripting"
+  ],
+  "__firefox__permissions": [
+    "<all_urls>",
+    "http://localhost:8000/*",
+    "http://127.0.0.1:8000/*",
+    "http://127.0.0.1:8788/*",
+    "storage",
+    "identity",
+    "notifications",
+    "alarms",
+    "scripting"
+  ],
+  "__chrome__host_permissions": [
+    "<all_urls>",
+    "http://localhost:8000/*",
+    "http://127.0.0.1:8000/*",
+    "http://127.0.0.1:8788/*"
+  ],
+  "__chrome__content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
+}

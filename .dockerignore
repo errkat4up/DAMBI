@@ -1,0 +1,22 @@
+.git/
+target/
+# Claude Code agent worktrees (tens of GB of full repo checkouts + their own
+# target/ dirs) — never part of the server image; without this the build
+# context balloons past 40GB.
+.claude/
+
+browser-extension/node_modules/
+browser-extension/dist/
+browser-extension/dashboard/dist/
+browser-extension/backend/wasm/
+browser-extension/public/wasm/
+browser-extension/public/default-policies/
+browser-extension/public/default-manifests/
+
+crates/policy-engine-wasm/pkg/
+
+**/*.log
+**/*.tsbuildinfo
+**/node_modules/
+docs/
+deploy-local/

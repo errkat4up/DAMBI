@@ -1,0 +1,114 @@
+{
+  "type": "adapter_action",
+  "id": "layerzero/claim-contract/donateAndClaim@1.0.0",
+  "publisher": "layerzero",
+  "schema_version": "3",
+  "match": {
+    "selector": "0xac6ae3ee",
+    "chain_to_addresses": {
+      "42161": ["0xb09F16F625B363875e39ADa56C03682088471523"]
+    }
+  },
+  "_note_addresses": "CORRECTED 2026-06-11: donateAndClaim does NOT exist on the ClaimLocal hub 0xd6b6…94DB (hub bytecode lacks the 0xac6ae3ee dispatch; Dune carries no hub donateAndClaim call table because the verified hub ABI has no such function) — the original hub binding could never match a real tx. The function lives on the separate DonateAndClaim wrapper 0xb09F…1523, designated on-chain by the (1차-verified) hub via its DonateAndClaimSet event (tx 0x31d30834fbe7d6d0bd39d7d07339445d8d14c50c90f817719925164e0842f06e, block 223776739, 2024-06-20). This wrapper is the dominant real user flow: 846,659 top-level txs (selector 0xac6ae3ee), producing 99.95% of all hub claim() executions as internal calls (831,474/831,849, Dune layerzero_arbitrum.claimlocal_call_claim). Wrapper donateAndClaim(uint8,uint256,uint256,bytes32[],address,bytes) is byte-identical in selector/param shape to this manifest's ABI fragment; recipient stays $args.to. Per-satellite ClaimRemote addresses NOT 1차-verified → limited-cover, hub chain only.",
+  "_note_mapping": "donateAndClaim performs a real Merkle claim (carries `proof` + `to`) bundled with a donation. Mapped to Airdrop(Claim). The donation leg IS surfaced via the `donation` field: amount = $args.amountToDonate, claim_amount = $args.zroAmount, and token is resolved from the $args.currency selector. zroAmount is proof-bound; Claim's `actual_amount` remains a live field (not bound from calldata).",
+  "abi_fragment": {
+    "function_name": "donateAndClaim",
+    "abi": {
+      "name": "donateAndClaim",
+      "type": "function",
+      "stateMutability": "payable",
+      "inputs": [
+        { "name": "currency",       "type": "uint8"     },
+        { "name": "amountToDonate", "type": "uint256"   },
+        { "name": "zroAmount",      "type": "uint256"   },
+        { "name": "proof",          "type": "bytes32[]" },
+        { "name": "to",             "type": "address"   },
+        { "name": "extraOptions",   "type": "bytes"     }
+      ],
+      "outputs": []
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "airdrop",
+      "airdrop": {
+        "action": "claim",
+        "claim": {
+          "source": { "name": "layerzero" },
+          "claim_target": {
+            "kind":     "merkle_distributor",
+            "chain":    "$chain",
+            "contract": "$to",
+            "index":    0
+          },
+          "recipient": "$args.to",
+          "proof": {
+            "leaf_index": 0,
+            "siblings":   "$args.proof"
+          },
+          "sig": null,
+          "donation": {
+            "amount":       "$args.amountToDonate",
+            "claim_amount": "$args.zroAmount",
+            "token": {
+              "key": {
+                "$match": "$args.currency",
+                "$cases": {
+                  "0": { "standard": "erc20",  "chain": "$chain", "address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831" },
+                  "1": { "standard": "erc20",  "chain": "$chain", "address": "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9" },
+                  "2": { "standard": "native", "chain": "$chain" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "live_inputs": {
+      "is_still_claimable": {
+        "source": {
+          "kind":       "onchain_view",
+          "chain":      "$chain",
+          "contract":   "$to",
+          "function":   "claimed(address)",
+          "decoder_id": "layerzero_claim_claimed"
+        },
+        "ttl_s": 30
+      },
+      "actual_amount": {
+        "source": {
+          "kind":      "venue_api",
+          "endpoint":  "https://www.layerzero.foundation/api/claim",
+          "parser_id": "layerzero_claim_amount"
+        },
+        "ttl_s": 60,
+        "_note": "Proof-generation API absent from 1차 sources → limited cover, no fetcher."
+      },
+      "claim_token": {
+        "source": {
+          "kind":    "derived_from",
+          "inputs":  [],
+          "calc_id": "layerzero_zro_token"
+        },
+        "ttl_s": 3600
+      },
+      "claim_window": {
+        "source": {
+          "kind":       "onchain_view",
+          "chain":      "$chain",
+          "contract":   "$to",
+          "function":   "claimDeadline()",
+          "decoder_id": "layerzero_claim_deadline"
+        },
+        "ttl_s": 300
+      }
+    }
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": ["token_metadata"],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}

@@ -1,0 +1,105 @@
+/** ps2:* SW 메시지의 typed 클라이언트 — P2 대시보드의 유일한 정책 스토어 경로.
+ *  응답 봉투 해제/에러 throw는 sendToExtension이 수행한다. */
+import { sendToExtension } from "./extension-bridge";
+import type {
+  Binding,
+  HoleValue,
+  LibraryDoc,
+  PackageDef,
+  PolicyDef,
+  StoreSnapshot,
+  WalletPolicyState,
+} from "../../../sdk/policy-store-types";
+
+export type {
+  Binding,
+  HoleSpec,
+  HoleValue,
+  LibraryDoc,
+  PackageDef,
+  PolicyDef,
+  PolicyDoc,
+  StoreSnapshot,
+  WalletFolder,
+  WalletPolicyState,
+} from "../../../sdk/policy-store-types";
+export { isEffectiveOn, missingRequiredHoles, UNCATEGORIZED_PKG } from "../../../sdk/policy-store-types";
+
+export const getLibrary = () =>
+  sendToExtension<{ library: LibraryDoc; rev: number }>({ type: "ps2:get-library" });
+export const getWalletState = (address: string) =>
+  sendToExtension<WalletPolicyState>({ type: "ps2:get-wallet-state", address });
+export const getOverview = () => sendToExtension<StoreSnapshot>({ type: "ps2:get-overview" });
+
+export const putDef = (def: PolicyDef) => sendToExtension<null>({ type: "ps2:put-def", def });
+export const deleteDef = (defId: string) => sendToExtension<null>({ type: "ps2:delete-def", defId });
+export const duplicateDef = (defId: string, packageId?: string) =>
+  sendToExtension<string>({
+    type: "ps2:duplicate-def",
+    defId,
+    ...(packageId !== undefined ? { packageId } : {}),
+  });
+
+export const putPackage = (pkg: PackageDef) => sendToExtension<null>({ type: "ps2:put-package", pkg });
+export const deletePackage = (packageId: string) =>
+  sendToExtension<null>({ type: "ps2:delete-package", packageId });
+
+export const bindDef = (opts: {
+  defId: string;
+  packageId: string;
+  addresses: string[];
+  params?: Record<string, HoleValue>;
+  enabled?: boolean;
+  alias?: string;
+  severity?: "deny" | "warn";
+}) => sendToExtension<null>({ type: "ps2:bind", ...opts });
+
+export const updateBinding = (opts: {
+  address: string;
+  bindingId: string;
+  patch: Partial<Pick<Binding, "enabled" | "params" | "packageId" | "alias" | "severity">>;
+}) => sendToExtension<null>({ type: "ps2:update-binding", ...opts });
+
+export const removeBinding = (opts: { address: string; bindingId: string }) =>
+  sendToExtension<null>({ type: "ps2:remove-binding", ...opts });
+
+/** 이 지갑에서만 패키지 제거(바인딩+게이트) — 계정 패키지/라이브러리는 불변. */
+export const removeWalletPackage = (opts: { address: string; packageId: string }) =>
+  sendToExtension<null>({ type: "ps2:remove-wallet-package", ...opts });
+
+/** 지갑 패키지 생성/이름변경 — 지갑 안에서만 존재, 라이브러리 불변. */
+export const putWalletPackage = (opts: {
+  address: string;
+  pkg: { id: string; displayName: string; desc?: string };
+}) => sendToExtension<null>({ type: "ps2:put-wallet-package", ...opts });
+
+/** 지갑 전용 폴더(템플릿 정리 축) 생성/이름변경 — 패키지(인스턴스 묶음)와 별개. */
+export const putWalletFolder = (opts: {
+  address: string;
+  folder: { id: string; displayName: string };
+}) => sendToExtension<null>({ type: "ps2:put-wallet-folder", ...opts });
+
+/** 지갑 전용 폴더 삭제 — 멤버 템플릿은 그 지갑의 미분류로. */
+export const removeWalletFolder = (opts: { address: string; folderId: string }) =>
+  sendToExtension<null>({ type: "ps2:remove-wallet-folder", ...opts });
+
+export const copyBindings = (opts: { fromAddress: string; toAddress: string; bindingIds: string[] }) =>
+  sendToExtension<null>({ type: "ps2:copy-bindings", ...opts });
+
+export const setPackageEnabled = (opts: { address: string; packageId: string; enabled: boolean }) =>
+  sendToExtension<null>({ type: "ps2:set-package-enabled", ...opts });
+
+export const provisionWallets = (addresses: string[]) =>
+  sendToExtension<null>({ type: "ps2:provision-wallets", addresses });
+
+export type MarketInstallScope =
+  | { kind: "wallets"; addresses: string[] }
+  | { kind: "all" }
+  | { kind: "library-only" };
+
+export const installMarket = (opts: {
+  defs: PolicyDef[];
+  pkg?: PackageDef;
+  scope: MarketInstallScope;
+  params?: Record<string, Record<string, HoleValue>>;
+}) => sendToExtension<null>({ type: "ps2:install-market", ...opts });

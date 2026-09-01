@@ -1,0 +1,144 @@
+import { defineConfig, loadEnv } from "vite";
+import react from "@vitejs/plugin-react";
+import { minify } from "terser";
+import fs from "node:fs";
+import path from "node:path";
+
+export function resolveServerUrlEnv(mode: string, dashboardDir: string = __dirname): string {
+  const extensionRoot = path.resolve(dashboardDir, "..");
+  const dashboardEnv = loadEnv(mode, dashboardDir, "");
+  const rootEnv = mode === "production" ? loadEnv(mode, extensionRoot, "") : {};
+  return (
+    process.env.DAMBI_SERVER_URL ||
+    process.env.VITE_DAMBI_SERVER_URL ||
+    dashboardEnv.DAMBI_SERVER_URL ||
+    dashboardEnv.VITE_DAMBI_SERVER_URL ||
+    rootEnv.DAMBI_SERVER_URL ||
+    rootEnv.VITE_DAMBI_SERVER_URL ||
+    ""
+  );
+}
+
+function stripExtensionTestFixtures(outDir: string) {
+  return {
+    name: "dambi-strip-extension-test-fixtures",
+    apply: "build" as const,
+    closeBundle() {
+      fs.rmSync(path.join(outDir, "editor-v3", "tests"), {
+        recursive: true,
+        force: true,
+      });
+    },
+  };
+}
+
+function stripConsoleFromBuiltJs(outDir: string, enabled: boolean) {
+  return {
+    name: "dambi-strip-console-from-built-js",
+    apply: "build" as const,
+    async closeBundle() {
+      if (!enabled) return;
+      const files: string[] = [];
+      const walk = (dir: string) => {
+        if (!fs.existsSync(dir)) return;
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const abs = path.join(dir, entry.name);
+          if (entry.isDirectory()) walk(abs);
+          else if (entry.isFile() && abs.endsWith(".js")) files.push(abs);
+        }
+      };
+      walk(outDir);
+      await Promise.all(
+        files.map(async (file) => {
+          const source = fs.readFileSync(file, "utf8");
+          const result = await minify(source, {
+            compress: { drop_console: true },
+            format: { comments: false },
+          });
+          if (result.code) fs.writeFileSync(file, result.code);
+        }),
+      );
+    },
+  };
+}
+
+// Two output modes share this single config:
+//
+//   dev (`vite` / `yarn dev`): standalone SPA at http://127.0.0.1:5173.
+//     5173 is Vite's documented default — keep it so every "how do I
+//     hit the dashboard?" reference in the repo lines up.
+//     The extension's `dashboard-bridge` content script is pinned to
+//     the same port so the SDK in-page proxy works.
+//
+//   extension build (`vite build` / `vite build --watch`): emits
+//     `options.html` + hashed assets straight into `../dist/chrome/`,
+//     side-by-side with the webpack-built popup / SW / content-scripts.
+//     `base: "./"` is required so the bundled <script src=…> resolves
+//     under `chrome-extension://<id>/assets/…` instead of `/assets/…`.
+//     `emptyOutDir: false` preserves the webpack output that ran first.
+//
+// IMPORTANT: when wiring scripts, run webpack BEFORE vite. The pages
+// webpack config has `clean: true`, which would wipe the vite output.
+export default defineConfig(({ mode }) => {
+  // Server base URL is UNIFIED with the webpack (service-worker) build:
+  // both read `DAMBI_SERVER_URL`, so a single env var switches the whole
+  // extension (dashboard + service worker) between local/test and prod —
+  //   DAMBI_SERVER_URL=https://errkat4up-dambi.duckdns.org yarn build:ext
+  // `loadEnv(mode, dir, "")` reads .env files + process.env with no prefix
+  // filter; legacy `VITE_DAMBI_SERVER_URL` is still honored as a fallback.
+  const serverUrl = resolveServerUrlEnv(mode);
+  const targetBrowser = process.env.TARGET_BROWSER || "chrome";
+  const distTarget = process.env.DAMBI_EXTENSION_DIST_TARGET || targetBrowser;
+  const outDir = path.resolve(__dirname, "..", "dist", distTarget);
+  const stripConsole = process.env.DAMBI_STRIP_CONSOLE === "1";
+
+  return {
+    plugins: [
+      react(),
+      stripExtensionTestFixtures(outDir),
+      stripConsoleFromBuiltJs(outDir, stripConsole),
+    ],
+    base: "./",
+    esbuild: stripConsole ? { drop: ["console"] } : undefined,
+    // Feed the unified server URL to the dashboard client (client.ts reads
+    // `import.meta.env.VITE_DAMBI_SERVER_URL`).
+    define: {
+      "import.meta.env.VITE_DAMBI_SERVER_URL": JSON.stringify(serverUrl),
+    },
+    build: {
+      // Target-aware so `build:firefox` lands options.html in dist/firefox, and
+      // the Web Store channel can land in dist/chrome-webstore while still using
+      // Chrome manifest transforms.
+      outDir,
+      emptyOutDir: false,
+      rollupOptions: {
+        input: {
+          // Entry name becomes the html filename, so this produces
+          // dist/chrome/options.html — referenced from manifest.json
+          // as `options_page`.
+          options: path.resolve(__dirname, "options.html"),
+        },
+      },
+    },
+    server: {
+      port: 5173,
+      strictPort: true,
+      // Node 17+ resolves "localhost" to ::1 first, so Vite's default
+      // host ("localhost") ends up bound to IPv6 only. The policy-rpc
+      // server's OAuth callback redirects to a hard-coded
+      // `http://127.0.0.1:5173` (IPv4), which an IPv6-only listener
+      // refuses. Pinning host to the IPv4 loopback keeps both
+      // `127.0.0.1` and `localhost` reachable.
+      host: "127.0.0.1",
+      fs: {
+        // Allow importing from the sibling sdk/ folder (one level up).
+        allow: [".."],
+      },
+    },
+    resolve: {
+      alias: {
+        "@dambi/sdk": path.resolve(__dirname, "../sdk/extension-client.ts"),
+      },
+    },
+  };
+});

@@ -1,0 +1,58 @@
+/**
+ * (Phase 2-A) 중복 토큰 :root 선언 제거됨 — 토큰의 단일 소스는 src/tokens.css.
+ * (원래 셀렉터가 `.ev3 :root`로 결합돼 어떤 요소에도 매칭 안 되는 dead 룰이었음.)
+ * 아래 .ev3 스코프 reset/body/유틸은 유지하며, CSS 변수는 전역 :root에서 상속받는다.
+ */
+.ev3 *, .ev3 *::before, .ev3 *::after { box-sizing: border-box; }
+.ev3 html, .ev3 body, .ev3 #root { margin: 0; padding: 0; min-height: 100vh; }
+.ev3 body {
+  background: var(--page);
+  color: var(--slate-500);
+  font-family: var(--ff-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.ev3 #root { display: flex; flex-direction: column; }
+.ev3 ::selection { background: var(--sage-200); color: var(--slate-900); }
+.ev3 button, .ev3 a, .ev3 input, .ev3 select, .ev3 textarea { font-family: inherit; }
+.ev3 a { color: inherit; text-decoration: none; }
+.ev3 button { cursor: pointer; border: none; background: none; padding: 0; color: inherit; }
+.ev3 /* shared dot indicators */
+.dot { display:inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.ev3 .dot.pass { background: var(--pass-500); box-shadow: 0 0 0 3px rgba(124,176,105,0.18); }
+.ev3 .dot.warn { background: var(--warn-500); box-shadow: 0 0 0 3px rgba(214,146,56,0.18); }
+.ev3 .dot.fail { background: var(--fail-500); box-shadow: 0 0 0 3px rgba(199,114,104,0.18); }
+.ev3 .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--pass-500); box-shadow: 0 0 0 3px rgba(124,176,105,0.18); }
+.ev3 /* shared severity pill */
+.sev-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--ff-mono); font-size: 11px; font-weight: 600;
+  padding: 3px 8px; border-radius: var(--r-pill);
+  letter-spacing: 0.02em;
+}
+.ev3 .sev-pill .pd { width: 7px; height: 7px; border-radius: 50%; }
+.ev3 .sev-pill.pass { background: var(--pass-100); color: var(--pass-800); }
+.ev3 .sev-pill.pass .pd { background: var(--pass-500); }
+.ev3 .sev-pill.warn { background: var(--warn-100); color: var(--warn-800); }
+.ev3 .sev-pill.warn .pd { background: var(--warn-500); }
+.ev3 .sev-pill.fail { background: var(--fail-100); color: var(--fail-800); }
+.ev3 .sev-pill.fail .pd { background: var(--fail-500); }
+.ev3 .sev-pill.info { background: var(--cyan-100); color: var(--cyan-800); }
+.ev3 .sev-pill.info .pd { background: var(--cyan-600); }
+.ev3 /* shared count chip (topbar pass/warn/fail) */
+.dot-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--surface); border: 1px solid var(--hairline);
+  border-radius: var(--r-pill);
+  padding: 8px 14px 8px 12px;
+  font-size: 13px; font-weight: 500; color: var(--slate-700);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.ev3 /* shared card surface */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: 18px;
+}

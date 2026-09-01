@@ -1,0 +1,108 @@
+{
+  "type": "adapter_action",
+  "id": "eigenlayer/delegation-manager/completeQueuedWithdrawals@1.0.0",
+  "publisher": "eigenlayer.eth",
+  "schema_version": "3",
+  "match": {
+    "selector": "0x9435bb43",
+    "chain_to_addresses": {
+      "1": [
+        "0x39053d51b77dc0d36036fc1fcc8cb819df8ef37a"
+      ]
+    }
+  },
+  "note": "Batch variant: array_emit over withdrawals[]. The parallel receiveAsTokens bool[] is index-aligned with withdrawals[] and IS decoded per-element via emit.parallel_sources: the synthetic `receiveAsTokens` parallel binds receiveAsTokens[i] to $inputs.receiveAsTokens, while the Withdrawal tuple binds via $inputs.element[..]. So receive_as_tokens is populated for every batch leg, identical to the single completeQueuedWithdrawal — the receive-as-shares trap is caught on batch too. (parallel_sources is the same mechanism Permit2 permitTransferFromBatch uses for its index-aligned TokenPermissions[]/SignatureTransferDetails[].) Separately, each Withdrawal's scaledShares (idx 6) — the amount completed — remains in protocol-internal scaled-share units (§4d illegible) and is intentionally NOT decoded (raw scaled-share is user-illegible; underlying conversion needs a per-strategy rate + slashing scaling factor, array-shaped, not manifest-only); per §4d a justified defer (documented so the omission is a decision, not a silent drop, §8.6-5).",
+  "abi_fragment": {
+    "function_name": "completeQueuedWithdrawals",
+    "abi": {
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "address",
+              "name": "staker",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "delegatedTo",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "withdrawer",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "nonce",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint32",
+              "name": "startBlock",
+              "type": "uint32"
+            },
+            {
+              "internalType": "contract IStrategy[]",
+              "name": "strategies",
+              "type": "address[]"
+            },
+            {
+              "internalType": "uint256[]",
+              "name": "scaledShares",
+              "type": "uint256[]"
+            }
+          ],
+          "internalType": "struct IDelegationManagerTypes.Withdrawal[]",
+          "name": "withdrawals",
+          "type": "tuple[]"
+        },
+        {
+          "internalType": "contract IERC20[][]",
+          "name": "tokens",
+          "type": "address[][]"
+        },
+        {
+          "internalType": "bool[]",
+          "name": "receiveAsTokens",
+          "type": "bool[]"
+        }
+      ],
+      "name": "completeQueuedWithdrawals",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
+  },
+  "emit": {
+    "strategy": "array_emit",
+    "array_source": "$args.withdrawals",
+    "parallel_sources": {
+      "receiveAsTokens": "$args.receiveAsTokens"
+    },
+    "body": {
+      "domain": "restaking",
+      "restaking": {
+        "action": "complete_withdrawal",
+        "complete_withdrawal": {
+          "venue": {
+            "name": "eigenlayer",
+            "chain": "$chain"
+          },
+          "staker": "$inputs.element[0]",
+          "withdrawer": "$inputs.element[2]",
+          "strategies": "$inputs.element[5]",
+          "receive_as_tokens": "$inputs.receiveAsTokens"
+        }
+      }
+    },
+    "live_inputs": {}
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": [],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}

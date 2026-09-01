@@ -1,0 +1,511 @@
+//! Runtime sync configuration loaded from `dambi-sync.toml`.
+//!
+//! The file configures RPC failover, oracle catalogs, and venue API endpoints.
+//! Environment variable references in the form `${VAR}` are expanded before
+//! TOML parsing, which keeps secrets out of checked-in config.
+//!
+//! ```toml
+//! [rpc.failover]
+//! strategy = "priority"
+//! [rpc.chains."eip155:1"]
+//! multicall_addr = "0xcA11bde05977b3631167028862bE2a173976CA11"
+//! [[rpc.chains."eip155:1".providers]]
+//! name = "publicnode"
+//! kind = "public"
+//! url  = "https://ethereum-rpc.publicnode.com"
+//! priority = 1
+//! [oracles.chainlink.chains."eip155:1".feeds]
+//! "USDC/USD" = { address = "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6", decimals = 8 }
+//! [oracles.pyth]
+//! endpoint = "https://hermes.pyth.network"
+//! [oracles.pyth.feeds]
+//! "ETH/USD" = { price_id = "0xff61491a..." }
+//! [venues.hyperliquid]
+//! endpoint = "https://api.hyperliquid.xyz"
+//! ```
+use std::collections::BTreeMap;
+use std::path::Path;
+
+use alloy_primitives::Address;
+use serde::{Deserialize, Serialize};
+
+use policy_state::ChainId;
+
+use crate::error::SyncError;
+use crate::fetchers::rpc::RpcConfig;
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SyncConfig {
+    /// RPC providers + failover.
+    #[serde(default)]
+    pub rpc: RpcConfig,
+
+    /// Oracle feed catalogs.
+    #[serde(default)]
+    pub oracles: OraclesConfig,
+
+    /// Venue API endpoints.
+    #[serde(default)]
+    pub venues: VenuesConfig,
+}
+
+impl SyncConfig {
+    pub fn load_file(path: impl AsRef<Path>) -> Result<Self, SyncError> {
+        let text = std::fs::read_to_string(&path).map_err(|e| SyncError::FetchFailed {
+            source_id: "config_file".into(),
+            reason: format!("{}: {}", path.as_ref().display(), e),
+        })?;
+        Self::load_str(&text)
+    }
+
+    pub fn load_str(text: &str) -> Result<Self, SyncError> {
+        let expanded = expand_env_vars(text);
+        toml::from_str(&expanded).map_err(|e| SyncError::FetchFailed {
+            source_id: "config_toml".into(),
+            reason: e.to_string(),
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Oracles
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct OraclesConfig {
+    /// Chainlink `AggregatorV3` feed catalog.
+    #[serde(default)]
+    pub chainlink: ChainlinkConfig,
+
+    /// Optional Pyth Hermes REST configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pyth: Option<PythConfig>,
+
+    /// Generic REST JSON oracle providers keyed by canonical provider name.
+    #[serde(default)]
+    pub rest: BTreeMap<String, RestOracleConfig>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ChainlinkConfig {
+    /// Per-chain feed catalogs.
+    #[serde(default)]
+    pub chains: BTreeMap<ChainId, ChainlinkChainConfig>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ChainlinkChainConfig {
+    /// Feed metadata keyed by feed id, for example `USDC/USD`.
+    #[serde(default)]
+    pub feeds: BTreeMap<String, ChainlinkFeedConfig>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChainlinkFeedConfig {
+    /// `AggregatorV3` contract address.
+    pub address: Address,
+    /// Aggregator decimals; Chainlink USD feeds usually use 8.
+    #[serde(default = "default_chainlink_decimals")]
+    pub decimals: u8,
+}
+
+const fn default_chainlink_decimals() -> u8 {
+    8
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PythConfig {
+    /// Hermes base URL.
+    pub endpoint: String,
+    #[serde(default)]
+    pub feeds: BTreeMap<String, PythFeedConfig>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PythFeedConfig {
+    /// Pyth price feed id, "0x" + 64 hex.
+    pub price_id: String,
+}
+
+// ---------------------------------------------------------------------------
+// Generic REST JSON oracle
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RestOracleConfig {
+    pub base_url: String,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<RestAuthConfig>,
+
+    #[serde(default = "default_rest_timeout_sec")]
+    pub timeout_sec: u64,
+
+    #[serde(default)]
+    pub feeds: BTreeMap<String, RestFeedConfig>,
+}
+
+const fn default_rest_timeout_sec() -> u64 {
+    10
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RestAuthConfig {
+    pub header_name: String,
+    pub env_var: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RestFeedConfig {
+    pub path: String,
+
+    pub json_pointer: String,
+}
+
+// ---------------------------------------------------------------------------
+// Venues
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct VenuesConfig {
+    /// Hyperliquid REST API.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hyperliquid: Option<HyperliquidConfig>,
+    /// Uniswap Trade API (`UniswapX` order status).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uniswap: Option<UniswapConfig>,
+    /// `CoW` Protocol Orderbook API (`CowSwap` order status).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cowswap: Option<CowSwapConfig>,
+    /// 1inch Fusion API (same-chain Fusion order status).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub one_inch_fusion: Option<OneInchFusionConfig>,
+    /// 1inch Fusion+ API (cross-chain swap order status).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub one_inch_fusion_plus: Option<OneInchFusionPlusConfig>,
+    /// 1inch Limit Order Protocol v4 Orderbook (limit order status).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub one_inch_lop: Option<OneInchLopConfig>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HyperliquidConfig {
+    pub endpoint: String,
+    /// TTL (seconds) for cached static data (`meta`, `perpDexs`). Default 600.
+    #[serde(default = "default_meta_ttl")]
+    pub meta_ttl_secs: u64,
+    /// Whether to fan account fetches out across builder-deployed perp DEXes.
+    /// Default `None` (native dex only); `All` fan-out is wired in Plan 2.
+    #[serde(default)]
+    pub builder_dex_policy: BuilderDexPolicy,
+}
+
+fn default_meta_ttl() -> u64 {
+    600
+}
+
+/// How `HyperliquidFetcher` treats builder-deployed perp DEXes when syncing.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BuilderDexPolicy {
+    /// Query only the native (index-0) perp dex.
+    #[default]
+    None,
+    /// Query the native dex plus every builder dex from `perpDexs`.
+    All,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UniswapConfig {
+    /// Base URL for the Trade API, e.g. `https://trade-api.gateway.uniswap.org/v1`.
+    pub orders_endpoint: String,
+    /// `x-api-key` value. `${VAR}` is expanded from the environment by
+    /// `SyncConfig::load_*` before this struct is built.
+    pub api_key: String,
+    /// Chains to poll (CAIP-2). The numeric `chainId` query param is derived
+    /// from each entry's `eip155:<n>` suffix.
+    #[serde(default)]
+    pub chains: Vec<ChainId>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CowSwapConfig {
+    /// Base URL for the public Orderbook API, e.g. `https://api.cow.fi`. The
+    /// per-network host segment (`mainnet` / `xdai` / …) is appended per chain.
+    /// No api-key — the `CoW` Orderbook API is fully public.
+    pub base_url: String,
+    /// Chains to poll (CAIP-2). Each maps to a `CoW` network URL segment; chains
+    /// `CoW` does not serve are skipped.
+    #[serde(default)]
+    pub chains: Vec<ChainId>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OneInchFusionConfig {
+    /// Base URL for the Dev Portal Fusion API, e.g. `https://api.1inch.dev/fusion`.
+    pub base_url: String,
+    /// `Authorization: Bearer <key>` value. `${VAR}` is expanded from the
+    /// environment by `SyncConfig::load_*` before this struct is built.
+    pub api_key: String,
+    /// Chains to poll (CAIP-2). The numeric `chainId` path segment is derived
+    /// from each entry's `eip155:<n>` suffix.
+    #[serde(default)]
+    pub chains: Vec<ChainId>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OneInchFusionPlusConfig {
+    /// Base URL for the Dev Portal Fusion+ API, e.g. `https://api.1inch.dev/fusion-plus`.
+    pub base_url: String,
+    /// `Authorization: Bearer <key>` value. `${VAR}` is expanded from the
+    /// environment by `SyncConfig::load_*` before this struct is built.
+    pub api_key: String,
+    // No `chains`: the by-maker Fusion+ endpoint is queried globally (one call,
+    // no chainId in the path); each returned order carries its own src/dst
+    // chain ids. Non-eip155 chains (e.g. Solana) on an order are skipped.
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OneInchLopConfig {
+    /// Base URL for the Dev Portal Orderbook (LOP v4) API, e.g. `https://api.1inch.dev/orderbook`.
+    pub base_url: String,
+    /// `Authorization: Bearer <key>` value. `${VAR}` is expanded from the
+    /// environment by `SyncConfig::load_*` before this struct is built.
+    pub api_key: String,
+    /// Chains to poll (CAIP-2). The numeric `chainId` path segment is derived
+    /// from each entry's `eip155:<n>` suffix.
+    #[serde(default)]
+    pub chains: Vec<ChainId>,
+}
+
+// ---------------------------------------------------------------------------
+// helpers
+// ---------------------------------------------------------------------------
+
+pub(crate) fn expand_env_vars(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '$' && chars.peek() == Some(&'{') {
+            chars.next(); // consume '{'
+            let mut name = String::new();
+            for c2 in chars.by_ref() {
+                if c2 == '}' {
+                    break;
+                }
+                name.push(c2);
+            }
+            let val = std::env::var(&name).unwrap_or_default();
+            out.push_str(&val);
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn parses_full_config() {
+        let toml_text = r#"
+[rpc.chains."eip155:1"]
+multicall_addr = "0xcA11bde05977b3631167028862bE2a173976CA11"
+
+[[rpc.chains."eip155:1".providers]]
+name = "publicnode"
+kind = "public"
+url = "https://ethereum-rpc.publicnode.com"
+priority = 1
+ws = false
+
+[oracles.chainlink.chains."eip155:1".feeds]
+"USDC/USD" = { address = "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6", decimals = 8 }
+"ETH/USD"  = { address = "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419" }
+
+[oracles.pyth]
+endpoint = "https://hermes.pyth.network"
+
+[oracles.pyth.feeds]
+"ETH/USD" = { price_id = "0xff61491a93114263cabb1d5ca0e6d6e5d8e8a4f0e6c8a4f0e6c8a4f0e6c8a4f0" }
+
+[venues.hyperliquid]
+endpoint = "https://api.hyperliquid.xyz"
+"#;
+        let cfg = SyncConfig::load_str(toml_text).unwrap();
+
+        // RPC
+        let chain = cfg.rpc.chain(&ChainId::ethereum_mainnet()).unwrap();
+        assert_eq!(chain.providers.len(), 1);
+        assert_eq!(chain.providers[0].name, "publicnode");
+
+        // Chainlink
+        let mainnet = cfg
+            .oracles
+            .chainlink
+            .chains
+            .get(&ChainId::ethereum_mainnet())
+            .unwrap();
+        assert_eq!(mainnet.feeds.len(), 2);
+        assert_eq!(
+            mainnet.feeds["USDC/USD"].address,
+            Address::from_str("0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6").unwrap()
+        );
+        assert_eq!(mainnet.feeds["USDC/USD"].decimals, 8);
+        // default value when omitted
+        assert_eq!(mainnet.feeds["ETH/USD"].decimals, 8);
+
+        // Pyth
+        let pyth = cfg.oracles.pyth.as_ref().unwrap();
+        assert_eq!(pyth.endpoint, "https://hermes.pyth.network");
+        assert!(pyth.feeds.contains_key("ETH/USD"));
+
+        // Venues
+        let hl = cfg.venues.hyperliquid.as_ref().unwrap();
+        assert_eq!(hl.endpoint, "https://api.hyperliquid.xyz");
+    }
+
+    #[test]
+    fn empty_sections_default() {
+        let cfg = SyncConfig::load_str("").unwrap();
+        assert!(cfg.rpc.chains.is_empty());
+        assert!(cfg.oracles.chainlink.chains.is_empty());
+        assert!(cfg.oracles.pyth.is_none());
+        assert!(cfg.venues.hyperliquid.is_none());
+    }
+
+    #[test]
+    fn parses_uniswap_venue_with_env_key() {
+        std::env::set_var("TEST_UNISWAP_KEY", "uni_secret_7");
+        let toml_text = r#"
+[venues.uniswap]
+orders_endpoint = "https://trade-api.gateway.uniswap.org/v1"
+api_key = "${TEST_UNISWAP_KEY}"
+chains = ["eip155:1"]
+"#;
+        let cfg = SyncConfig::load_str(toml_text).unwrap();
+        let uni = cfg.venues.uniswap.as_ref().unwrap();
+        assert_eq!(
+            uni.orders_endpoint,
+            "https://trade-api.gateway.uniswap.org/v1"
+        );
+        assert_eq!(uni.api_key, "uni_secret_7");
+        assert_eq!(uni.chains, vec![ChainId::ethereum_mainnet()]);
+    }
+
+    #[test]
+    fn parses_cowswap_and_one_inch_fusion_venues() {
+        std::env::set_var("TEST_ONEINCH_KEY", "oneinch_secret_9");
+        let toml_text = r#"
+[venues.cowswap]
+base_url = "https://api.cow.fi"
+chains = ["eip155:1", "eip155:8453"]
+
+[venues.one_inch_fusion]
+base_url = "https://api.1inch.dev/fusion"
+api_key = "${TEST_ONEINCH_KEY}"
+chains = ["eip155:1"]
+"#;
+        let cfg = SyncConfig::load_str(toml_text).unwrap();
+
+        let cow = cfg.venues.cowswap.as_ref().unwrap();
+        assert_eq!(cow.base_url, "https://api.cow.fi");
+        assert_eq!(
+            cow.chains,
+            vec![ChainId::ethereum_mainnet(), ChainId::base()]
+        );
+
+        let fusion = cfg.venues.one_inch_fusion.as_ref().unwrap();
+        assert_eq!(fusion.base_url, "https://api.1inch.dev/fusion");
+        assert_eq!(fusion.api_key, "oneinch_secret_9");
+        assert_eq!(fusion.chains, vec![ChainId::ethereum_mainnet()]);
+    }
+
+    #[test]
+    fn parses_one_inch_fusion_plus_and_lop_venues() {
+        std::env::set_var("TEST_ONEINCH_KEY_P2", "oneinch_secret_p2");
+        let toml_text = r#"
+[venues.one_inch_fusion_plus]
+base_url = "https://api.1inch.dev/fusion-plus"
+api_key = "${TEST_ONEINCH_KEY_P2}"
+
+[venues.one_inch_lop]
+base_url = "https://api.1inch.dev/orderbook"
+api_key = "${TEST_ONEINCH_KEY_P2}"
+chains = ["eip155:1", "eip155:42161"]
+"#;
+        let cfg = SyncConfig::load_str(toml_text).unwrap();
+
+        let fp = cfg.venues.one_inch_fusion_plus.as_ref().unwrap();
+        assert_eq!(fp.base_url, "https://api.1inch.dev/fusion-plus");
+        assert_eq!(fp.api_key, "oneinch_secret_p2");
+
+        let lop = cfg.venues.one_inch_lop.as_ref().unwrap();
+        assert_eq!(lop.base_url, "https://api.1inch.dev/orderbook");
+        assert_eq!(lop.api_key, "oneinch_secret_p2");
+        assert_eq!(
+            lop.chains,
+            vec![ChainId::ethereum_mainnet(), ChainId::arbitrum()]
+        );
+    }
+
+    #[test]
+    fn cowswap_chains_default_to_empty() {
+        let cfg =
+            SyncConfig::load_str("[venues.cowswap]\nbase_url = \"https://api.cow.fi\"\n").unwrap();
+        assert!(cfg.venues.cowswap.as_ref().unwrap().chains.is_empty());
+    }
+
+    #[test]
+    fn hyperliquid_config_defaults_meta_ttl_and_native_only() {
+        let cfg = SyncConfig::load_str(
+            "[venues.hyperliquid]\nendpoint = \"https://api.hyperliquid.xyz\"\n",
+        )
+        .unwrap();
+        let hl = cfg.venues.hyperliquid.as_ref().unwrap();
+        assert_eq!(hl.meta_ttl_secs, 600);
+        assert_eq!(hl.builder_dex_policy, BuilderDexPolicy::None);
+    }
+
+    #[test]
+    fn env_var_expansion_in_sync_config() {
+        std::env::set_var("TEST_HL_KEY", "hl_secret_42");
+        let toml_text = r#"
+[venues.hyperliquid]
+endpoint = "https://api.hyperliquid.xyz/info?key=${TEST_HL_KEY}"
+"#;
+        let cfg = SyncConfig::load_str(toml_text).unwrap();
+        assert_eq!(
+            cfg.venues.hyperliquid.unwrap().endpoint,
+            "https://api.hyperliquid.xyz/info?key=hl_secret_42"
+        );
+    }
+
+    #[test]
+    fn parses_multichain_chainlink() {
+        let toml_text = r#"
+[oracles.chainlink.chains."eip155:1".feeds]
+"USDC/USD" = { address = "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6" }
+
+[oracles.chainlink.chains."eip155:42161".feeds]
+"USDC/USD" = { address = "0x50834F3163758fcC1Df9973b6e91f0F0F0434aD3" }
+"#;
+        let cfg = SyncConfig::load_str(toml_text).unwrap();
+        let eth = cfg
+            .oracles
+            .chainlink
+            .chains
+            .get(&ChainId::ethereum_mainnet())
+            .unwrap();
+        let arb = cfg
+            .oracles
+            .chainlink
+            .chains
+            .get(&ChainId::new("eip155:42161"))
+            .unwrap();
+        assert_ne!(eth.feeds["USDC/USD"].address, arb.feeds["USDC/USD"].address);
+    }
+}

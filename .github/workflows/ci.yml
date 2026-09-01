@@ -1,0 +1,266 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch: {} # allow manual re-runs from the Actions tab / `gh workflow run`
+
+permissions:
+  contents: read
+
+env:
+  WASM_PACK_VERSION: "0.14.0"
+
+# 같은 브랜치에 새 푸시가 오면 돌고 있던 런을 취소한다 — 반복 푸시 워크플로에서
+# 가장 큰 CI 시간 절약. main 푸시 런은 끝까지 돌린다(릴리스 아티팩트 보존).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "ws"
+
+      # The v3 decode harness (crates/integration-tests) reads `registryV2/index/`
+      # at test runtime. That index is a build artifact (no longer tracked);
+      # regenerate it from registryV2/{manifests,tokens} before the test steps so
+      # `cargo test` can find the by-callkey / by-typed-data entries.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build registry index
+        working-directory: registryV2
+        run: |
+          npm ci
+          # --strict-callkeys: a (chain,to,selector) collision must FAIL CI, not
+          # resolve last-wins (which could silently route a call to the wrong
+          # adapter and skip a dangerous action's policy).
+          npm run build -- --summary-only --representative-source-refs --strict-callkeys
+
+      # Surface-completeness + token-graph gates: a missed/dropped state-changing
+      # selector or a dangling token reference is a pre-sign decode gap, so these
+      # designed-machine-checked invariants run in CI rather than trust-only.
+      - name: Registry gates (surface + tokens)
+        working-directory: registryV2
+        run: |
+          npm run check:surface
+          npm run check:tokens
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      # `cargo clippy --all-targets --all-features` already type-checks/builds
+      # everything, so a preceding `cargo check` is redundant.
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      # `cargo test`는 doctest를 포함하므로 별도 `cargo test --doc`은 두지 않는다.
+      - name: Test
+        env:
+          DAMBI_V3_HARNESS_REPRESENTATIVE_SOURCE_REFS: '1'
+        run: cargo test --all-features
+
+      - name: Docs
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --all-features
+
+  # rust 잡과 의존이 없으므로 병렬로 돈다 — extension은 이 잡의 wasm pkg만 기다린다.
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "wasm"
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version "${WASM_PACK_VERSION}" --locked
+
+      # Build the wasm pkg ONCE here with the same out-dir/out-name that
+      # scripts/wasm-build.sh produces, so the extension job can download and
+      # reuse it instead of rebuilding (fat-LTO) twice more.
+      - name: Build wasm
+        run: |
+          wasm-pack build crates/policy-engine-wasm \
+            --target web \
+            --release \
+            --out-dir pkg \
+            --out-name policy_engine_wasm
+
+      - name: Upload wasm pkg (reused by the extension build)
+        uses: actions/upload-artifact@v4
+        with:
+          name: policy-engine-wasm-pkg-${{ github.sha }}
+          path: crates/policy-engine-wasm/pkg
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: wasm-bindgen-tests (headless Chrome)
+        run: wasm-pack test --headless --chrome crates/policy-engine-wasm
+
+  extension:
+    runs-on: ubuntu-latest
+    needs: wasm
+    # The wasm pkg is downloaded from the `wasm` job (built once); reuse it for
+    # both build:chrome and build:firefox (and `yarn typecheck`) instead of
+    # rebuilding via wasm-pack each time. scripts/wasm-build.sh skips its own
+    # wasm-pack build when SKIP_WASM_BUILD=1 and a prebuilt pkg/ is present.
+    env:
+      SKIP_WASM_BUILD: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Enable corepack + Yarn 4
+        run: |
+          corepack enable
+          corepack prepare yarn@4.14.1 --activate
+
+      - working-directory: browser-extension
+        run: yarn install --immutable --mode=skip-build
+
+      # SKIP_WASM_BUILD=1 + 아래 prebuilt pkg 다운로드로 wasm-build.sh가 빌드를
+      # 건너뛰므로 이 잡에는 rust 툴체인/wasm-pack이 필요 없다.
+      - name: Download prebuilt wasm pkg
+        uses: actions/download-artifact@v4
+        with:
+          name: policy-engine-wasm-pkg-${{ github.sha }}
+          path: crates/policy-engine-wasm/pkg
+
+      - working-directory: browser-extension
+        run: yarn typecheck
+
+      - working-directory: browser-extension
+        name: Run vitest
+        run: yarn test --run
+
+      - working-directory: browser-extension
+        run: yarn build:chrome
+        env:
+          DAMBI_ALLOW_INSECURE_REGISTRY: '1'
+
+      - working-directory: browser-extension
+        if: github.ref == 'refs/heads/main'
+        run: yarn build:firefox
+        env:
+          DAMBI_ALLOW_INSECURE_REGISTRY: '1'
+
+      - working-directory: browser-extension/dashboard
+        name: Dashboard build (tsc --noEmit + vite build)
+        run: yarn build
+
+      - name: Upload dashboard dist (PR build artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dambi-dashboard-${{ github.sha }}
+          path: |
+            browser-extension/dist/chrome/options.html
+            browser-extension/dist/chrome/assets
+          if-no-files-found: error
+          retention-days: 14
+
+      - working-directory: browser-extension
+        name: Package Chrome zip
+        run: yarn zip:chrome
+
+      - name: Upload Chrome dist (PR build artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dambi-chrome-${{ github.sha }}
+          path: browser-extension/dist/chrome.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      # Firefox 패키징은 main에서만 — PR마다 만들 이유가 없는 릴리스 아티팩트.
+      - working-directory: browser-extension
+        if: github.ref == 'refs/heads/main'
+        name: Package Firefox zip
+        run: yarn zip:firefox
+
+      - name: Upload Firefox dist (main build artifact)
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dambi-firefox-${{ github.sha }}
+          path: browser-extension/dist/firefox.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  # Secret scanning over the full git history. Tuned via .gitleaks.toml, which
+  # allowlists known non-secret high-entropy data (blockchain fixtures/ABIs,
+  # the Chrome extension public key, vendored deps) so only real secrets fail.
+  secrets-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          VERSION=8.30.1
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" -o gitleaks.tgz
+          tar -xzf gitleaks.tgz gitleaks
+          sudo install gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Scan git history for secrets
+        run: gitleaks detect --source . --config .gitleaks.toml --log-opts="--all" --redact --no-banner
+
+  # Registry-api proxy + bundle-signature parity gate. Builds the index so the
+  # parity test has a corpus, then runs the proxy path-allowlist / serving tests
+  # (incl. the new signatures/ branch) and the Phase-0 parity invariant (every
+  # served bundle — concrete + materialized — hashes to its bundle_sha256, which
+  # is what the extension verifies the detached signature against).
+  registry-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build registry index (parity-gate corpus)
+        working-directory: registryV2
+        run: |
+          npm ci
+          npx tsx scripts/build-index.ts --strict-callkeys
+
+      - name: registry-api tests (validation + serving + parity gate)
+        working-directory: registry-api
+        run: |
+          npm ci
+          npm test
+
+      - name: registry-api typecheck
+        working-directory: registry-api
+        run: npm run typecheck
+
+      - name: registryV2 sign-bundles test
+        run: |
+          cd registry-api
+          npx vitest run --root ../registryV2 scripts/__tests__/sign-bundles.test.ts

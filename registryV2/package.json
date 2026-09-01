@@ -1,0 +1,29 @@
+{
+  "name": "dambi-registryV2",
+  "version": "0.3.0",
+  "description": "Dambi Adapter Loader registry v3 — PDF FSM spec (hierarchical emit.body + live_inputs.source)",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsx scripts/build-index.ts",
+    "check:universe": "tsx scripts/check-address-universe.ts",
+    "check:surface": "tsx scripts/check-surface-completeness.ts",
+    "check:tokens": "tsx scripts/check-tokens.ts",
+    "check:manifest": "tsx scripts/build-index.ts --summary-only --representative-source-refs --strict-callkeys && node scripts/run-local-v3-harness.mjs validate --representative-source-refs",
+    "check:manifest:full": "tsx scripts/build-index.ts --strict-callkeys && node scripts/run-local-v3-harness.mjs validate",
+    "sign": "tsx scripts/sign-bundles.ts",
+    "gen-signing-key": "tsx scripts/gen-signing-key.ts",
+    "typecheck": "tsc --noEmit",
+    "serve": "python3 -m http.server 8000"
+  },
+  "devDependencies": {
+    "@google-cloud/kms": "^5.5.1",
+    "@noble/curves": "^2.2.0",
+    "@types/node": "^20.0.0",
+    "canonicalize": "^3.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.3.0",
+    "viem": "^2.13.7"
+  }
+}

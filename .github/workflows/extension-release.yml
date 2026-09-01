@@ -1,0 +1,145 @@
+# Build + package the browser extension on a release tag and attach the zips to
+# a GitHub Release. Store uploads stay MANUAL, so a human still gates what
+# reaches users. Chrome emits two packages from separate builds:
+#   - chrome.zip: key-included dev/QA package for direct loading, with logs.
+#   - chrome-webstore.zip: key-stripped Chrome Web Store package, with console
+#     calls removed from bundled JS.
+#
+# Trigger: push a tag `ext-v*` (e.g. ext-v1.2.0), or run by hand from the
+# same ext-vX.Y.Z tag ref. Branch dispatches must not create release artifacts.
+#
+# The registry URL + pinned public key + REQUIRE flag are baked at build time.
+# In CI there is no gitignored .env, so they come from repo VARIABLES (not
+# secrets — they are public in the shipped bundle anyway; dotenv-webpack
+# systemvars:true lets env override). Set, one-time, in repo Settings → Variables:
+#   REGISTRY_BASE_URL              = https://<your-registry-proxy-host>
+#   PINNED_BUNDLE_PUBLIC_KEY       = <prod SPKI base64>
+#   DAMBI_REQUIRE_BUNDLE_SIGNATURE = true
+name: extension-release
+
+on:
+  push:
+    tags: ["ext-v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # create the GitHub Release + upload assets
+
+env:
+  WASM_PACK_VERSION: "0.14.0"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # A release artifact must be tied to an immutable extension tag. GitHub's
+      # workflow_dispatch can target a branch ref; without this guard the job can
+      # bake prod-pinned zips and create a GitHub Release named after a branch.
+      - name: Require extension release tag
+        run: |
+          test "${GITHUB_REF_TYPE}" = "tag" || {
+            echo "::error::extension-release must run from an ext-vX.Y.Z tag ref (got ${GITHUB_REF_TYPE}:${GITHUB_REF_NAME})"
+            exit 1
+          }
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^ext-v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+            echo "::error::release tag must be ext-vX.Y.Z (got ${GITHUB_REF_NAME})"
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version "${WASM_PACK_VERSION}" --locked
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Enable corepack + Yarn 4
+        run: |
+          corepack enable
+          corepack prepare yarn@4.14.1 --activate
+
+      - working-directory: browser-extension
+        run: yarn install --immutable --mode=skip-build
+
+      - working-directory: registryV2
+        run: npm ci --ignore-scripts
+
+      # Fail BEFORE building if the prod build config is missing — otherwise a
+      # release could bake an empty/wrong pin (advisory while REQUIRE=false, but
+      # it would silently ship un-validated until the REQUIRE flip).
+      - name: Require prod build config
+        env:
+          REGISTRY_BASE_URL: ${{ vars.REGISTRY_BASE_URL }}
+          PINNED_BUNDLE_PUBLIC_KEY: ${{ vars.PINNED_BUNDLE_PUBLIC_KEY }}
+          DAMBI_REQUIRE_BUNDLE_SIGNATURE: ${{ vars.DAMBI_REQUIRE_BUNDLE_SIGNATURE }}
+        run: |
+          : "${REGISTRY_BASE_URL:?set repo Variable REGISTRY_BASE_URL (https prod proxy URL)}"
+          : "${PINNED_BUNDLE_PUBLIC_KEY:?set repo Variable PINNED_BUNDLE_PUBLIC_KEY (prod SPKI base64)}"
+          test "${DAMBI_REQUIRE_BUNDLE_SIGNATURE}" = "true" || {
+            echo "DAMBI_REQUIRE_BUNDLE_SIGNATURE must be true for release artifacts"
+            exit 1
+          }
+          case "$REGISTRY_BASE_URL" in https://*) ;; *) echo "REGISTRY_BASE_URL must be https://"; exit 1 ;; esac
+          echo "prod build config present (URL=$REGISTRY_BASE_URL, pin len=${#PINNED_BUNDLE_PUBLIC_KEY})."
+
+      # Fail BEFORE building release zips if the live registry proxy is stale
+      # relative to this checkout. Signature enforcement only proves served
+      # bundles are signed by the pinned key; this gate also proves the release
+      # will fetch the same representative route-index bundles this tag was
+      # built against. Keep this as a bounded deterministic sample; full live
+      # coverage belongs to registry-publish's bucket-side parity gates.
+      - name: Verify live registry matches release checkout
+        working-directory: registryV2
+        env:
+          REGISTRY_BASE_URL: ${{ vars.REGISTRY_BASE_URL }}
+          PINNED_BUNDLE_PUBLIC_KEY: ${{ vars.PINNED_BUNDLE_PUBLIC_KEY }}
+        run: |
+          npx tsx scripts/build-index.ts --summary-only --representative-source-refs --strict-callkeys
+          npx tsx scripts/verify-prod-registry.ts --sample=200 --concurrency=1 --timeout-ms=8000
+
+      # Bake the release version from the tag (ext-vX.Y.Z) so a release needs
+      # only a tag — no manual package.json / backend/manifest.json bump or
+      # commit. Edits are ephemeral (runner only, never committed).
+      - name: Bake version from tag
+        working-directory: browser-extension
+        run: |
+          VERSION="${GITHUB_REF_NAME#ext-v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+            echo "::error::release tag must be ext-vX.Y.Z (got ${GITHUB_REF_NAME})"
+            exit 1
+          fi
+          VERSION="$VERSION" node -e "const fs=require('fs');for(const p of ['package.json','backend/manifest.json']){let s=fs.readFileSync(p,'utf8');s=s.replace(/\"version\": \"[0-9][^\"]*\"/,'\"version\": \"'+process.env.VERSION+'\"');fs.writeFileSync(p,s)}"
+          echo "baked extension version $VERSION from tag ${GITHUB_REF_NAME}"
+
+      - name: Build + zip Chrome dev/QA and Web Store packages (prod-pinned)
+        working-directory: browser-extension
+        env:
+          REGISTRY_BASE_URL: ${{ vars.REGISTRY_BASE_URL }}
+          PINNED_BUNDLE_PUBLIC_KEY: ${{ vars.PINNED_BUNDLE_PUBLIC_KEY }}
+          DAMBI_REQUIRE_BUNDLE_SIGNATURE: ${{ vars.DAMBI_REQUIRE_BUNDLE_SIGNATURE }}
+        run: |
+          # build:* run prepare:wasm (../scripts/wasm-build.sh) → needs the rust +
+          # wasm-pack toolchain installed above. A real fat-LTO build, not the
+          # SKIP_WASM CI shortcut — the release artifact must be the true bundle.
+          yarn build:chrome
+          yarn zip:chrome
+          yarn build:chrome:webstore
+          yarn zip:chrome:webstore
+
+      - name: Create GitHub Release with extension zips
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            browser-extension/dist/chrome.zip \
+            browser-extension/dist/chrome-webstore.zip \
+            --verify-tag \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "Reproducible extension build for ${GITHUB_REF_NAME}. Registry URL + pinned key baked at build time. Use chrome.zip for direct unpacked QA with verbose logs, and upload chrome-webstore.zip → Chrome Web Store. The Web Store package strips manifest.key and bundled console calls."

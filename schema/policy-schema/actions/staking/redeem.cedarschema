@@ -1,0 +1,38 @@
+// Staking::Redeem — redeem a safety-module stake for its underlying (Aave
+// StakedTokenV3 `redeem(to, amount)`, post-cooldown) or exit an ERC4626-style
+// staking/savings vault. Legacy safety-module assets are implied by venue;
+// Umbrella/sGHO surfaces can carry `asset`, `owner`, and whether `amount`
+// denotes shares or underlying assets.
+//
+// Rust source: crates/policy-server/asset-model/action/src/staking/redeem.rs
+// (`RedeemAction`). No LiveInputs. `StakeVenue` is in core.cedarschema (Staking).
+
+namespace Staking {
+  type RedeemContext = {
+    // Common envelope (submitter, submittedAt, nature).
+    meta: Core::ActionMeta,
+    // Staking venue (safety module, Umbrella stake token, savings vault, ...).
+    venue: StakeVenue,
+    // Redeemed underlying token when explicit. Absent for legacy safety modules.
+    asset?: Core::TokenRef,
+    // Amount redeemed, U256 hex.
+    amount: String,
+    // Unit represented by `amount`: "shares" or "assets".
+    amountDenomination?: String,
+    // Account whose shares are burned. Absent ⇒ submitter.
+    owner?: String,
+    // Recipient of the withdrawn underlying (`to`). Absent ⇒ submitter.
+    recipient?: String,
+    // Manifest-extensible slot.
+    custom?: RedeemCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields).
+  type RedeemCustomContext = {};
+
+  action "Redeem" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: RedeemContext,
+  };
+}

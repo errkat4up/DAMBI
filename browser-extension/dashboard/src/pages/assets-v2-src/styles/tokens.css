@@ -1,0 +1,63 @@
+/**
+ * (Phase 2-A) 중복 :root 토큰 선언 제거됨 — 토큰의 단일 소스는 src/tokens.css.
+ * 이 파일은 reset/body/유틸 클래스(.dot/.sev-pill/.card 등)만 유지하며,
+ * CSS 변수는 전역 :root(src/tokens.css)에서 상속받는다.
+ */
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body, #root { margin: 0; padding: 0; min-height: 100vh; }
+body {
+  background: var(--bg);  /* (③-1) 중복 body 리셋 — src/tokens.css와 동일하게 --bg(neutral-100)로 일치(override 방지) */
+  color: var(--slate-500);
+  font-family: var(--ff-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+#root { display: flex; flex-direction: column; }
+::selection { background: var(--sage-200); color: var(--slate-900); }
+button, a, input, select, textarea { font-family: inherit; }
+a { color: inherit; text-decoration: none; }
+button { cursor: pointer; border: none; background: none; padding: 0; color: inherit; }
+
+/* shared dot indicators */
+.dot { display:inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.dot.pass { background: var(--neutral-400); box-shadow: 0 0 0 3px rgba(150,153,157,0.18); }
+.dot.warn { background: var(--warn-500); box-shadow: 0 0 0 3px rgba(214,146,56,0.18); }
+.dot.fail { background: var(--fail-500); box-shadow: 0 0 0 3px rgba(199,114,104,0.18); }
+.pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--neutral-400); box-shadow: 0 0 0 3px rgba(150,153,157,0.18); }
+
+/* shared severity pill */
+/* ③-3 verdict 칩: soft-rect(5px)+border+아이콘(::before), 점 제거 */
+.sev-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--ff-mono); font-size: 11px; font-weight: 600;
+  padding: 3px 8px; border-radius: 5px; border: 1px solid transparent;
+  letter-spacing: 0.02em;
+}
+.sev-pill .pd { display: none; }
+.sev-pill.pass { background: var(--neutral-100); color: var(--neutral-700); border-color: var(--neutral-300); }
+.sev-pill.pass::before { content: "✓"; }
+.sev-pill.warn { background: var(--warn-100); color: var(--warn-800); border-color: var(--warn-300); }
+.sev-pill.warn::before { content: "⚠"; }
+.sev-pill.fail { background: var(--fail-100); color: var(--fail-800); border-color: var(--fail-300); }
+.sev-pill.fail::before { content: "✕"; }
+.sev-pill.info { background: var(--cyan-100); color: var(--cyan-800); border-color: var(--cyan-300); }
+
+/* shared count chip (topbar pass/warn/fail) */
+.dot-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--surface); border: 1px solid var(--hairline);
+  border-radius: var(--r-pill);
+  padding: 8px 14px 8px 12px;
+  font-size: 13px; font-weight: 500; color: var(--slate-700);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+
+/* shared card surface */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: 18px;
+}

@@ -1,0 +1,64 @@
+[package]
+name = "policy-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "HTTP backend service for wallet state, sync, and simulation. Policy catalogs, verdict logs, audit logs, and execution reports are extension-local; Cedar evaluation and wallet-result logging live in the browser extension."
+publish = false
+
+[dependencies]
+# The service operates on the pure simulation types + reducer. Cedar evaluation
+# still lives in the extension; the server only parses marketplace policy text
+# at publish time so direct API writes cannot store syntactically broken Cedar.
+policy-state.workspace = true
+policy-transition.workspace = true
+cedar-policy.workspace = true
+# Sync orchestrator hooks live RPC/oracle fetchers into `LiveField` refresh.
+policy-sync.workspace = true
+# PostgreSQL-backed wallet state persistence. Handlers stay db-agnostic where
+# possible by operating on `&dyn WalletStore`.
+policy-db.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# ABI helpers for the on-chain `lending.health_factor` reads: keccak256 (4-byte
+# selectors) + hex (calldata/returndata <-> JSON-RPC eth_call).
+alloy-primitives.workspace = true
+hex.workspace = true
+sha2.workspace = true
+
+# HTTP server stack — versions mirror `adapter-debug-dashboard`.
+axum = "0.7"
+tower-http = { version = "0.5", features = ["cors", "limit", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tokio = { workspace = true }
+async-trait.workspace = true
+thiserror.workspace = true
+
+# SSE: bridge tokio::broadcast → axum Sse via tokio_stream + futures helpers.
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures = "0.3"
+
+# Auth: app JWT signing/verification plus Google id_token verification.
+jsonwebtoken = "9"
+# OAuth callback fetches Google's token endpoint and JWKS for RS256 id_token verification.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# URL-encoding query params for the Google authorize redirect.
+urlencoding = "2"
+# Decoding Google JWT header/JWK coordinates.
+base64 = "0.22"
+# Time math for token expiry.
+time = { version = "0.3", default-features = false, features = ["std", "parsing"] }
+# Loads `.env` at startup so OAuth/JWT config doesn't need to be exported
+# manually in every dev shell.
+dotenvy = "0.15"
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+# Direct sqlx access from the seed-market binary. The runtime server stays
+# on policy-db's typed surface, but the seed tool writes raw SQL.
+sqlx-core = { version = "=0.8.6", default-features = false }
+sqlx-postgres = { version = "=0.8.6", default-features = false, features = ["chrono", "json", "uuid"] }
+
+[dev-dependencies]
+tempfile = "3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }

@@ -1,0 +1,631 @@
+/* Home — wallet-dial governance view.
+   Ported from the Home.html prototype. Consumes the same design tokens as the
+   rest of the dashboard (tokens.css: --slate-*, --cyan-*, --sage-*, --fog-*).
+   Load this from HomePage via:  import "./home-dial.css";
+   The .dial-section / .gov-* wrappers come from the existing home.css. */
+
+.dial-section { margin-top: 26px; }
+.dial-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+
+/* section title + scope pill */
+.gov-title { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.gov-title h2 { margin: 0; font-size: 16px; font-weight: 700; color: var(--slate-900); display: flex; align-items: center; gap: 10px; letter-spacing: -0.01em; }
+.gov-title .gov-sub { font-size: 12px; color: var(--slate-400); }
+.scope-pill { font-size: 10.5px; font-weight: 700; padding: 2px 9px; border-radius: var(--r-pill); letter-spacing: 0.02em; text-transform: uppercase; }
+.scope-pill.wallet { background: var(--cyan-100); color: var(--cyan-800); }
+
+/* switch (on/off toggle) */
+.sw { position: relative; width: 38px; height: 22px; flex-shrink: 0; display: inline-block; }
+.sw input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; z-index: 2; }
+.sw .track { position: absolute; inset: 0; background: var(--slate-200); border-radius: var(--r-pill); transition: background 150ms ease; }
+.sw .thumb { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(13,17,24,0.25); transition: transform 150ms cubic-bezier(0.32,0.04,0.2,1); }
+.sw input:checked ~ .track { background: var(--cyan-600); }
+.sw input:checked ~ .thumb { transform: translateX(16px); }
+.sw input:focus-visible ~ .track { outline: 2px solid var(--sage-400); outline-offset: 2px; }
+.sw.sw-sm { width: 30px; height: 17px; }
+.sw.sw-sm .thumb { top: 2.5px; left: 2.5px; width: 12px; height: 12px; }
+.sw.sw-sm input:checked ~ .thumb { transform: translateX(13px); }
+
+/* severity dot */
+.pr-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.pr-dot.pass { background: var(--neutral-400); box-shadow: 0 0 0 3px rgba(150,153,157,0.16); }
+.pr-dot.warn { background: var(--warn-500); box-shadow: 0 0 0 3px rgba(214,146,56,0.16); }
+.pr-dot.fail { background: var(--fail-500); box-shadow: 0 0 0 3px rgba(199,114,104,0.16); }
+
+.dial-split {
+  display: grid;
+  grid-template-columns: 344px 1fr;
+  gap: 20px;
+  align-items: stretch;
+  height: 496px;
+}
+@media (max-width: 900px) { .dial-split { grid-template-columns: 1fr; height: auto; } }
+
+/* ── LEFT: vertical wallet-card dial ─────────────────────────────── */
+.wd-col { position: relative; display: flex; flex-direction: column; }
+.wd-stage {
+  position: relative; flex: 1; min-height: 472px;
+  overflow: hidden; cursor: grab;
+  -webkit-user-select: none; user-select: none;
+  touch-action: pan-x;
+  -webkit-mask-image: linear-gradient(180deg, transparent, #000 17%, #000 83%, transparent);
+          mask-image: linear-gradient(180deg, transparent, #000 17%, #000 83%, transparent);
+}
+.wd-stage:focus-visible { outline: none; }
+.wd-stage.dragging { cursor: grabbing; }
+
+/* 지갑 색 — 담비 navy와 어울리는 뮤트(저채도) 3종. 딥 틴트 + 뮤트 아바타.
+   좌측 카드·우측 패널 아바타·패키지 폴더가 같은 값을 공유(불일치 방지). */
+:root {
+  --wallet-navy:   #06203F; --wallet-navy-tint:   #A6B7CB;
+  --wallet-blue:   #2B5088; --wallet-blue-tint:   #A7BAD2;
+  --wallet-violet: #4C4684; --wallet-violet-tint: #B7B0CC;
+  --wallet-slate:  #4F596B; --wallet-slate-tint:  #C1C8D2;  /* 쿨 그레이-블루 */
+  --wallet-teal:   #2D6B70; --wallet-teal-tint:   #A9CACC;  /* 쿨 틸 */
+}
+
+.wcard {
+  position: absolute; left: 50%; top: 50%;
+  width: 298px; height: 176px; margin-left: -149px; margin-top: -88px;
+  border-radius: 18px; padding: 17px 20px 16px;
+  color: var(--slate-900); overflow: hidden;
+  display: flex; flex-direction: column; justify-content: space-between;
+  /* 상단 거의 화이트 → 하단으로 톤 틴트가 또렷이. 풀-블리드 채도·광택 없음(AI 슬롭 금지). */
+  background:
+    linear-gradient(170deg,
+      rgba(255,255,255,0.97) 0%, rgba(255,255,255,0.93) 55%, rgba(255,255,255,0.84) 70%,
+      rgba(255,255,255,0.66) 81%, rgba(255,255,255,0.4) 90%, rgba(255,255,255,0.16) 97%,
+      rgba(255,255,255,0.02) 100%),
+    var(--wc-tint);
+  --wc-tint: var(--wallet-blue-tint); --wc-accent: var(--wallet-blue);
+  border: 1px solid var(--hairline-soft);
+  box-shadow: 0 1px 2px rgba(72,90,94,.05), 0 10px 24px -16px rgba(72,90,94,.4);
+  will-change: transform, opacity;
+  cursor: pointer;
+}
+/* 지갑 색 3종(주소 해시) — 좌측 카드·우측 패널·패키지 공통. data-hue 는 WalletGovernance 가 부여. */
+.wcard[data-hue="blue"]   { --wc-tint: var(--wallet-blue-tint);   --wc-accent: var(--wallet-blue); }
+.wcard[data-hue="violet"] { --wc-tint: var(--wallet-violet-tint); --wc-accent: var(--wallet-violet); }
+.wcard[data-hue="navy"]   { --wc-tint: var(--wallet-navy-tint);   --wc-accent: var(--wallet-navy); }
+.wcard[data-hue="slate"]  { --wc-tint: var(--wallet-slate-tint);  --wc-accent: var(--wallet-slate); }
+.wcard[data-hue="teal"]   { --wc-tint: var(--wallet-teal-tint);   --wc-accent: var(--wallet-teal); }
+/* 지갑 색은 정체성(hue)만 유지 — 상태(tone fail/warn)로 카드 색을 바꾸지 않음(사용자 요청). */
+/* 좌측 컬러 액센트 바(::before)·흰색 광택 오버레이(::after) 제거 — 금지된 AI 슬롭 트로프 */
+/* enable motion only after first instant layout; never mid-drag */
+.wd-stage.wd-ready .wcard { transition: transform 560ms cubic-bezier(0.22, 1, 0.36, 1), opacity 420ms ease, box-shadow 340ms ease; }
+.wd-stage.dragging .wcard { transition: none; }
+/* 선택: 두꺼운 이중 링 금지 — 보더만 톤 컬러 + 0 0 0 1px 얇은 링 하나. */
+.wcard.is-active {
+  border-color: var(--wc-accent);
+  box-shadow: 0 0 0 1px var(--wc-accent), 0 1px 2px rgba(72,90,94,.05), 0 10px 24px -16px rgba(72,90,94,.4);
+}
+
+/* card chrome */
+.wc-top { display: flex; align-items: center; justify-content: space-between; position: relative; z-index: 1; }
+.wc-mono {
+  width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+  display: grid; place-items: center;
+  font-family: var(--ff-mono); font-size: 15px; font-weight: 700; color: #fff;
+  background: var(--wc-accent); /* 진한 톤 컬러는 이 아바타 한 곳에만 */
+  box-shadow: 0 2px 6px rgba(72,90,94,.14); /* 중립 그림자 — 카드 배경에 색 번짐 없음 */
+}
+.wc-wifi { display: none; }
+.wc-sev {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 600; color: var(--slate-700);
+  padding: 4px 10px; border-radius: var(--r-pill);
+  background: rgba(13,17,24,0.05); white-space: nowrap;
+}
+.wc-sev .d { width: 7px; height: 7px; border-radius: 50%; background: var(--wc-accent); }
+
+.wc-mid { position: relative; z-index: 1; }
+.wc-name { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.2; }
+.wc-addr { font-family: var(--ff-mono); font-size: 12.5px; letter-spacing: 0.08em; color: var(--slate-500); margin-top: 3px; }
+
+.wc-bot { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; position: relative; z-index: 1; }
+.wc-bot .lbl { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--slate-400); }
+.wc-bal { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; margin-top: 2px; }
+.wc-chains { display: flex; align-items: center; }
+.wc-chains img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; border: 1.5px solid rgba(255,255,255,0.9); box-shadow: 0 0 0 1px rgba(13,17,24,0.06); margin-left: -7px; }
+.wc-chains img:first-child { margin-left: 0; }
+
+/* ── dial controls: up/down arrows + side dots ───────────────────── */
+.wd-arrow {
+  position: absolute; left: 50%; transform: translateX(-50%); z-index: 14;
+  width: 36px; height: 36px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--surface); border: 1px solid var(--hairline); color: var(--slate-500);
+  box-shadow: 0 2px 8px rgba(13,17,24,0.10);
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.wd-arrow:hover { background: var(--sage-50); border-color: var(--sage-300); color: var(--slate-900); }
+.wd-arrow svg { width: 18px; height: 18px; }
+.wd-arrow.up { top: 4px; }
+.wd-arrow.down { bottom: 4px; }
+
+.wd-dots {
+  position: absolute; right: 2px; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: 7px; z-index: 14;
+}
+.wd-dots button {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--slate-200); transition: background 160ms ease, transform 160ms ease;
+}
+.wd-dots button.on { background: var(--cyan-600); transform: scale(1.4); }
+.wd-add {
+  margin: 6px 12px 0; padding: 9px 12px;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  border: 1px dashed var(--hairline); border-radius: var(--r-sm);
+  background: transparent; color: var(--slate-400);
+  font-size: 12.5px; font-weight: 600;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+.wd-add:hover { border-color: var(--cyan-400); color: var(--cyan-600); background: var(--fog-50); }
+.wd-add-plus { font-size: 16px; line-height: 1; }
+
+/* ════════════════════════════════════════════════════════════════
+   RIGHT: selected wallet's policies
+   ════════════════════════════════════════════════════════════════ */
+.dial-panel {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  display: flex; flex-direction: column; height: 100%; min-height: 0;
+}
+.dp-fade { display: flex; flex-direction: column; flex: 1; min-height: 0; animation: dpIn 340ms cubic-bezier(0.22,0.61,0.36,1); }
+@keyframes dpIn { from { transform: translateX(10px); } to { transform: none; } }
+
+/* 우측 패널 지갑 헤더 — 좌측 카드와 동일하게 지갑 틴트 + 흰색 그라데이션(data-hue 는 WalletGovernance). */
+.dp-head {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--hairline-soft);
+  background: var(--surface);
+}
+.dp-coin {
+  width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0;
+  display: grid; place-items: center;
+  font-family: var(--ff-mono); font-size: 15px; font-weight: 700; color: #fff;
+  background: var(--cyan-600);
+}
+.dp-coin[data-hue="blue"]   { background: var(--wallet-blue); }   /* 선택 지갑 색(좌측 카드 아바타와 동일) */
+.dp-coin[data-hue="violet"] { background: var(--wallet-violet); }
+.dp-coin[data-hue="navy"]   { background: var(--wallet-navy); }
+.dp-coin[data-hue="slate"]  { background: var(--wallet-slate); }
+.dp-coin[data-hue="teal"]   { background: var(--wallet-teal); }
+/* 상태(tone)로 아바타 색 바꾸지 않음 — hue 유지. */
+
+.dp-id { min-width: 0; flex: 1; }
+.dp-id .nr { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.dp-id .name { font-size: 15px; font-weight: 700; color: var(--slate-900); letter-spacing: -0.01em; white-space: nowrap; }
+.dp-id .addr { font-family: var(--ff-mono); font-size: 11px; color: var(--slate-400); white-space: nowrap; }
+.dp-id .w-chains { margin-top: 6px; }
+.dp-bal { text-align: right; flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.dp-acts { display: flex; align-items: center; gap: 2px; flex-shrink: 0; margin-bottom: 2px; }
+.dp-ib {
+  width: 32px; height: 32px; display: grid; place-items: center;
+  border-radius: 8px; color: var(--slate-500);
+  border: 1px solid transparent;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.dp-ib:hover { background: var(--fog-300); color: var(--slate-900); }
+.dp-ib.danger:hover { background: var(--fail-50); color: var(--fail-600); border-color: var(--fail-200); }
+.dp-ib svg { width: 16px; height: 16px; }
+.dp-ib.spinning { color: var(--cyan-700); }
+.dp-ib.spinning svg { animation: dpSpin 0.85s linear infinite; }
+
+/* 지갑 색 선택 — 팔레트 버튼 + 스와치 팝오버 */
+.dp-color-wrap { position: relative; display: inline-flex; }
+.dp-color-backdrop { position: fixed; inset: 0; z-index: 30; }
+.dp-color-pop {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 31;
+  display: flex; gap: 7px; padding: 9px 10px;
+  background: var(--surface); border: 1px solid var(--hairline);
+  border-radius: 12px; box-shadow: 0 12px 28px -12px rgba(6,32,63,.3);
+}
+.dp-sw {
+  width: 22px; height: 22px; border-radius: 7px; cursor: pointer; padding: 0;
+  border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--hairline);
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.dp-sw:hover { transform: scale(1.08); }
+.dp-sw.on { box-shadow: 0 0 0 2px var(--navy-500); }
+.dp-sw[data-hue="navy"]   { background: var(--wallet-navy); }
+.dp-sw[data-hue="blue"]   { background: var(--wallet-blue); }
+.dp-sw[data-hue="violet"] { background: var(--wallet-violet); }
+.dp-sw[data-hue="slate"]  { background: var(--wallet-slate); }
+.dp-sw[data-hue="teal"]   { background: var(--wallet-teal); }
+@keyframes dpSpin { to { transform: rotate(360deg); } }
+.dp-bal b { font-family: var(--font-mono); /* STEP2 mono: 지갑 잔액 */ font-size: 16px; font-weight: 700; color: var(--slate-900); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.dp-bal .open { display: inline-flex; align-items: center; gap: 4px; margin-top: 3px; font-size: 11px; font-weight: 600; color: var(--slate-500); }
+.dp-bal .open svg { width: 12px; height: 12px; }
+.dp-bal .open:hover { color: var(--slate-900); }
+
+.dp-stack {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 18px; font-size: 11.5px; color: var(--slate-500);
+  background: var(--fog-100); border-bottom: 1px solid var(--hairline-soft);
+}
+.dp-stack .seg { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.dp-stack b { color: var(--slate-800); font-variant-numeric: tabular-nums; }
+.dp-stack .base-chip {
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  padding: 2px 8px 2px 6px; border-radius: var(--r-pill);
+  background: var(--slate-100); color: var(--slate-600); font-weight: 600;
+}
+.dp-stack .base-chip svg { width: 11px; height: 11px; }
+.dp-stack .arrow { color: var(--slate-300); }
+.dp-stack .mute { color: var(--slate-400); }
+
+.dp-policies { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+.dp-policies.scrollable { cursor: grab; }
+.dp-policies.grabbing { cursor: grabbing; }
+.dp-policies .pkg-group-meta { white-space: nowrap; }
+.dp-policies .policy-row:last-child { border-bottom: none; }
+
+.dp-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 28px 18px; color: var(--slate-400); font-size: 12.5px; text-align: center; }
+.dp-empty .et b { color: var(--slate-600); font-weight: 600; }
+
+.dp-actions {
+  display: flex; align-items: center; gap: 8px; margin-top: auto;
+  padding: 12px 18px; border-top: 1px solid var(--hairline-soft);
+}
+.dp-actions .sync-result { margin-left: auto; font-size: 11px; color: var(--slate-400); }
+.dp-actions .btn, .dp-empty .btn {
+  font-size: 12px; font-weight: 600; padding: 7px 13px;
+  border: 1px solid var(--hairline); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--slate-700);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.dp-actions .btn:hover, .dp-empty .btn:hover { background: var(--fog-200); }
+.dp-actions .btn.danger { color: var(--fail-600); }
+.dp-actions .btn.danger:hover { background: var(--fail-50); border-color: var(--fail-200); }
+.dp-empty .btn { background: var(--sage-50); border-color: var(--sage-300); color: var(--slate-900); }
+
+@media (max-width: 900px) {
+  .bs-label { min-width: 0; }
+  .dial-panel { height: auto; min-height: 0; }
+  .wd-col { min-height: 472px; }
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Panel v2 — package folders ▸ policies ▸ parameters
+   ════════════════════════════════════════════════════════════════ */
+.dp-folders { padding: 8px 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.dp-folders > .pk-folder { flex-shrink: 0; }
+
+/* ════════ 패키지 뒤집기 카드 그리드 (홈 메인) ════════ */
+.dp-cardgrid {
+  padding: 10px 12px 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
+  gap: 12px;
+  align-content: start;
+}
+.pkc { height: 180px; perspective: 1600px; }
+.pkc-in { position: relative; width: 100%; height: 100%; transition: transform 520ms cubic-bezier(.34,.9,.28,1); transform-style: preserve-3d; }
+.pkc.flip .pkc-in { transform: rotateY(180deg); }
+/* 보이는 면만 상호작용 가능하게 한다. pointer-events:none 만으로는 두 면이 3D
+   동일 평면(preserve-3d)에 겹쳐 있어, 보이는 뒷면을 눌러도 클릭이 안 보이는
+   앞면(pointer-events:none)으로 해석돼 빈 부모로 흘러버리는 경우가 있었다 — 그래서
+   화살표를 눌러도 안 돌아가던 버그. visibility 로 안 보이는 면을 hit-test 에서
+   완전히 제거하되, 회전(520ms)이 끝난 뒤에 적용되도록 지연해 애니메이션은 그대로
+   보이게 한다(시각적 가림은 backface-visibility 가 이미 처리). */
+.pkc:not(.flip) .pkc-back { pointer-events: none; visibility: hidden; transition: visibility 0s linear 520ms; }
+.pkc.flip .pkc-front { pointer-events: none; visibility: hidden; transition: visibility 0s linear 520ms; }
+.pkc-face {
+  position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  border: 1px solid var(--hairline); border-radius: var(--r-md); background: var(--surface);
+  box-shadow: 0 1px 2px rgba(72,90,94,0.05), 0 8px 22px -18px rgba(72,90,94,0.5);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.pkc.off { opacity: 0.62; }
+
+/* front */
+.pkc-front { padding: 21px 24px 15px; cursor: pointer; position: relative; transition: transform 150ms ease, box-shadow 170ms ease, border-color 150ms ease, visibility 0s; }
+.pkc:not(.flip) .pkc-front:hover { transform: translateY(-2px); border-color: var(--navy-200); box-shadow: 0 1px 2px rgba(6,32,63,0.05), 0 14px 30px -20px rgba(6,32,63,0.45); }
+
+/* 담비 실루엣 워터마크 — 앞면 전용·지갑 색 tint. 얼굴(머리·코)은 카드 안, 하단(목/가슴)만 블리드. */
+.pkc-ghost { position: absolute; right: 12px; bottom: -16px; width: 116px; height: 116px; opacity: 0.06; pointer-events: none; z-index: 0; }
+.pkc-ghost i { display: block; width: 100%; height: 100%; background: var(--wallet-navy, #06203F);
+  /* CSS url()은 CSS 파일(assets/) 기준이라 루트절대 /picture/ 사용(확장 루트 = 도장 png와 동일 위치). */
+  -webkit-mask: url('/picture/dambi-glyph-navy.png') center bottom/contain no-repeat;
+          mask: url('/picture/dambi-glyph-navy.png') center bottom/contain no-repeat; }
+.pkc-ghost[data-hue="blue"] i   { background: var(--wallet-blue); }
+.pkc-ghost[data-hue="violet"] i { background: var(--wallet-violet); }
+.pkc-ghost[data-hue="navy"] i   { background: var(--wallet-navy); }
+.pkc-ghost[data-hue="slate"] i  { background: var(--wallet-slate); }
+.pkc-ghost[data-hue="teal"] i   { background: var(--wallet-teal); }
+
+/* 헤더: 제목 + 태그칩 + 마스터 pill */
+.pkc-ftop { position: relative; z-index: 1; display: flex; align-items: center; gap: 8px; }
+.pkc-name { font-size: 20px; font-weight: 800; color: var(--navy-600); letter-spacing: -0.025em; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pkc-tag { flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--neutral-600, #606369); background: var(--neutral-100, #E9EBED); padding: 3px 8px; border-radius: 6px; white-space: nowrap; }
+.pkc-sw { flex-shrink: 0; margin-left: auto; }
+.pkc-sw input:checked ~ .track { background: var(--navy-500); }
+
+/* 중앙: 큰 숫자 + 설명 */
+.pkc-stat { position: relative; z-index: 1; margin-top: 16px; display: flex; align-items: baseline; gap: 8px; }
+.pkc-statnum { font-family: var(--ff-mono); font-size: 38px; font-weight: 700; line-height: 1; color: var(--navy-500); font-variant-numeric: tabular-nums; }
+.pkc.off .pkc-statnum { color: var(--slate-400); }
+.pkc-statlbl { font-size: 13.5px; color: var(--slate-500); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 도장 스트립(앞면 — 읽기 전용 미리보기). 정책 1개=도장 1개, MAX 6(초과 시 5 + +N). */
+.pkc-strip { position: relative; z-index: 1; margin-top: 13px; display: flex; align-items: center; gap: 5px; }
+.pkc-stamp { position: relative; width: 23px; height: 23px; border-radius: 50%; border: 1.5px dashed var(--navy-400); background: transparent; flex: none; transition: background .25s ease, border-color .25s ease; }
+.pkc-stamp.on { border-color: var(--navy-200); background: var(--navy-50); }
+.pkc-stamp-paw { position: absolute; top: 15%; left: 15%; width: 70%; height: 70%; object-fit: contain; transform: scale(0.2); opacity: 0; transform-origin: center 64%; transition: transform .44s cubic-bezier(.34,1.7,.5,1), opacity .2s ease; pointer-events: none; }
+.pkc-stamp.on .pkc-stamp-paw { transform: scale(1); opacity: 1; }
+.pkc-more { display: inline-grid; place-items: center; min-width: 23px; height: 23px; padding: 0 6px; border-radius: 999px; background: var(--neutral-100, #E9EBED); color: var(--neutral-600, #606369); font-family: var(--ff-mono); font-size: 11px; font-weight: 700; flex: none; }
+
+/* 푸터: {총} 정책 · 활성 {N}  /  뒤집기 */
+.pkc-ffoot { position: relative; z-index: 1; margin-top: auto; padding-top: 12px; display: flex; align-items: center; gap: 8px; }
+.pkc-fmeta { font-size: 12px; color: var(--slate-400); font-variant-numeric: tabular-nums; display: inline-flex; align-items: center; gap: 6px; }
+.pkc-fmeta b { color: var(--slate-700); font-weight: 700; }
+.pkc-dot { color: var(--slate-300); }
+.pkc-active { color: var(--navy-600); font-weight: 650; }
+.pkc.off .pkc-active { color: var(--slate-400); }
+.pkc-fliphint { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--slate-400); opacity: 0; transition: opacity 150ms ease, color 150ms ease; }
+.pkc-fliphint svg { width: 14px; height: 14px; }
+.pkc:not(.flip) .pkc-front:hover .pkc-fliphint { opacity: 1; }
+.pkc-fliphint:hover { color: var(--navy-500); }
+
+/* back */
+.pkc-back { transform: rotateY(180deg); transition: visibility 0s; }
+.pkc-bhead { display: flex; align-items: center; gap: 9px; padding: 13px 16px; border-bottom: 1px solid var(--neutral-100, #E9EBED); }
+.pkc-bback { display: grid; place-items: center; width: 24px; height: 24px; border: 0; background: none; cursor: pointer; padding: 0; color: var(--neutral-500, #797C81); flex-shrink: 0; }
+.pkc-bback:hover { color: var(--slate-700); }
+.pkc-bback svg { width: 16px; height: 16px; }
+.pkc-bname { font-size: 15px; font-weight: 800; color: var(--navy-600); letter-spacing: -0.02em; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pkc-bcount { flex-shrink: 0; font-size: 12.5px; color: var(--slate-500); font-variant-numeric: tabular-nums; }
+.pkc-bcount b { color: var(--navy-600); font-weight: 700; }
+.pkc-blist { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 10px; display: flex; flex-direction: column; }
+.pkc-empty { color: var(--slate-400); font-size: 12px; text-align: center; padding: 24px 8px; }
+.pkc-pol {
+  display: flex; align-items: center; gap: 9px; height: 35px; flex-shrink: 0;
+  transition: opacity 120ms ease;
+}
+.pkc-pol + .pkc-pol { border-top: 1px solid var(--neutral-100, #E9EBED); }
+.pkc-pol .pr-dot { width: 7px; height: 7px; }
+.pkc-pol.off .pr-dot { opacity: 0.45; }
+.pkc-pol-name { font-size: 13.5px; font-weight: 600; color: var(--slate-800); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pkc-pol.off .pkc-pol-name { color: var(--neutral-500, #797C81); font-weight: 500; }
+.pkc-pol-state {
+  flex-shrink: 0; font-size: 10px; font-weight: 700; letter-spacing: 0.02em;
+  padding: 3px 8px; border-radius: 999px; background: var(--neutral-100, #E9EBED); color: var(--neutral-500, #797C81);
+}
+.pkc-pol-state.on { background: var(--navy-50); color: var(--navy-600); }
+.pkc-ox {
+  flex-shrink: 0; width: 23px; height: 23px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--hairline); border-radius: 7px; background: var(--surface); color: var(--slate-400);
+  font-size: 12.5px; font-weight: 700; line-height: 1; cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+.pkc-ox.on { border-color: var(--navy-300); background: var(--navy-50); color: var(--navy-600); }
+.pkc-ox:hover { border-color: var(--slate-400); }
+.pkc-pol.off .pkc-ox { opacity: 1; }
+
+/* 보호 도장 토글 — OFF=점선 빈 틀 · ON=발자국(paw-navy.png) 스프링으로 꾹 찍힘. */
+.paw-tog { background: none; border: none; cursor: pointer; padding: 0; display: inline-flex; align-items: center; flex: none; }
+.paw-glyph { position: relative; width: 24px; height: 24px; flex-shrink: 0; display: inline-flex; }
+.paw-ring { position: absolute; inset: 0; border-radius: 999px; border: 1.5px dashed var(--navy-400); background: transparent; transition: background .25s ease, border-color .25s ease; }
+.paw-tog[aria-checked="true"] .paw-ring { border-color: var(--navy-200); background: var(--navy-50); }
+/* 발자국은 틀의 ~72%를 %로 채워 비율 고정(틀 커져도 같이 커짐). 솔리드 navy, blur/filter 없음. */
+.paw-img { position: absolute; top: 14%; left: 14%; width: 72%; height: 72%; object-fit: contain; transform: scale(0.2); opacity: 0; transform-origin: center 64%; transition: transform .44s cubic-bezier(.34,1.7,.5,1), opacity .2s ease; }
+.paw-tog[aria-checked="true"] .paw-img { transform: scale(1); opacity: 1; }
+.paw-tog:focus-visible .paw-ring { outline: 2px solid var(--navy-400); outline-offset: 2px; }
+button.pkc-edit { border: 0; background: none; padding: 0; }
+.pkc-edit {
+  display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px;
+  color: var(--slate-300); flex-shrink: 0; cursor: pointer; opacity: 0; transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+.pkc-pol:hover .pkc-edit { opacity: 1; }
+.pkc-edit:hover { background: var(--fog-300); color: var(--slate-700); }
+.pkc-edit svg { width: 13px; height: 13px; }
+@media (prefers-reduced-motion: reduce) {
+  .pkc-in { transition: none; }
+  /* 회전이 즉시면 visibility 지연도 없앤다(안 보이는 면이 잠깐 클릭 먹는 것 방지). */
+  .pkc:not(.flip) .pkc-back,
+  .pkc.flip .pkc-front { transition-delay: 0s; }
+}
+
+.pk-folder {
+  border: 1px solid var(--hairline-soft);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  overflow: hidden;
+  transition: border-color 120ms ease, opacity 120ms ease;
+}
+.pk-folder.off { opacity: 0.55; }
+.pk-folder-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 12px; cursor: pointer;
+  background: var(--fog-200);
+  transition: background 120ms ease;
+}
+.pk-folder-head:hover { background: var(--fog-300); }
+.pk-chev { display: grid; place-items: center; width: 16px; height: 16px; color: var(--slate-400); flex-shrink: 0; transition: transform 180ms ease; }
+.pk-chev svg { width: 15px; height: 15px; }
+.pk-folder:not(.collapsed) .pk-chev { transform: rotate(180deg); }
+.pk-folder-ic { display: grid; place-items: center; color: var(--slate-500); flex-shrink: 0; }
+.pk-folder-ic svg { width: 16px; height: 16px; }
+.pk-folder-name { font-size: 13px; font-weight: 700; color: var(--slate-800); letter-spacing: -0.01em; flex: 1; min-width: 0; }
+.pk-folder-count {
+  font-size: 11px; font-variant-numeric: tabular-nums; color: var(--slate-400);
+  background: var(--surface); border: 1px solid var(--hairline-soft);
+  padding: 2px 8px; border-radius: var(--r-pill); flex-shrink: 0; white-space: nowrap;
+}
+.pk-folder-count b { color: var(--slate-700); font-weight: 700; }
+.pk-folder.off .pk-folder-count b { color: var(--slate-400); }
+.pk-sw { flex-shrink: 0; }
+.pk-pub {
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px;
+  border: 0; background: none; cursor: pointer; padding: 0;
+  color: var(--slate-400); flex-shrink: 0;
+  transition: background 120ms ease, color 120ms ease;
+}
+.pk-pub:hover { background: var(--surface); color: var(--slate-700); }
+.pk-pub svg { width: 15px; height: 15px; }
+/* pol2-edit is also used as a <button> (마켓 게시) — strip native chrome */
+button.pol2-edit { border: 0; background: none; cursor: pointer; padding: 0; }
+
+/* folder body collapse — JS-driven height animation (guaranteed end state) */
+.pk-folder-body { overflow: hidden; height: 0; }
+.pk-folder-inner { min-height: 0; }
+
+/* policy row inside a folder */
+.pol2 { border-top: 1px solid var(--hairline-soft); transition: opacity 120ms ease; }
+.pol2.off { opacity: 0.5; }
+.pol2-head {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 12px 9px 14px; cursor: pointer;
+}
+.pol2-head:hover { background: var(--fog-100); }
+.pol2-chev { display: grid; place-items: center; width: 14px; height: 14px; color: var(--slate-300); flex-shrink: 0; transition: transform 180ms ease; }
+.pol2-chev svg { width: 13px; height: 13px; }
+.pol2-chev.empty { visibility: hidden; }
+.pol2.expanded .pol2-chev { transform: rotate(180deg); }
+.pol2 .pr-dot { width: 7px; height: 7px; flex-shrink: 0; }
+.pol2-name { font-size: 12.5px; font-weight: 600; color: var(--slate-700); flex: 1; min-width: 0; }
+.pol2-edit {
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px;
+  color: var(--slate-300); flex-shrink: 0; opacity: 0; transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+.pol2-head:hover .pol2-edit { opacity: 1; }
+.pol2-edit:hover { background: var(--fog-300); color: var(--slate-700); }
+.pol2-edit svg { width: 14px; height: 14px; }
+.pol2-sw { flex-shrink: 0; }
+
+/* 실제 적용 상태 표시등 (effective = 패키지 on ∧ 정책 o) */
+.pol2-state {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--fog-200);
+  color: var(--slate-400);
+}
+.pol2-state.on {
+  background: var(--navy-50);
+  color: var(--navy-600);
+}
+
+/* 정책별 o/x 포함 토글 (binding.enabled) */
+.pol2-ox {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--slate-400);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+.pol2-ox.on {
+  border-color: var(--navy-300);
+  background: var(--navy-50);
+  color: var(--navy-600);
+}
+.pol2-ox:hover { border-color: var(--slate-400); }
+/* 제외(x)로 행이 dim 돼도 토글은 또렷하게 — 다시 켤 수 있게 */
+.pol2.off .pol2-ox { opacity: 1; }
+
+/* parameters (collapsible inside a policy) */
+.pol2-body { overflow: hidden; height: 0; background: var(--fog-100); }
+.pol2-inner { min-height: 0; }
+.param-head {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase;
+  color: var(--slate-400); padding: 9px 14px 5px 35px;
+}
+.param-head b { color: var(--slate-600); }
+.param-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 14px 6px 35px;
+}
+.param-row:last-child { padding-bottom: 11px; }
+.param-name { font-size: 12px; color: var(--slate-600); flex: 1; min-width: 0; }
+.param-sw { flex-shrink: 0; }
+
+/* ════════ all-wallets overview ════════ */
+.wv-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.wv-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 18px 12px;
+}
+.wv-title { font-size: 15px; font-weight: 700; color: var(--slate-900); }
+.wv-title b { color: var(--cyan-700); }
+.wv-add { font-size: 12px; font-weight: 600; padding: 7px 12px; border: 1px solid var(--hairline); border-radius: var(--r-sm); background: var(--slate-700); color: var(--fog-50); }
+.wv-add:hover { background: var(--slate-900); }
+.wv-grid {
+  flex: 1; min-height: 0; overflow-y: auto;
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
+  padding: 0 18px 14px; align-content: start;
+}
+.wv-card {
+  display: flex; flex-direction: column; gap: 7px;
+  border: 1px solid var(--hairline); border-radius: var(--r-sm);
+  background: var(--surface); padding: 13px 14px; text-align: left;
+  transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+.wv-card:hover { border-color: var(--cyan-400); box-shadow: 0 4px 12px rgba(13,17,24,0.06); transform: translateY(-1px); }
+.wv-card.is-active { border-color: var(--cyan-600); box-shadow: 0 0 0 1px var(--cyan-600); }
+.wv-top { display: flex; align-items: center; justify-content: space-between; }
+.wv-coin {
+  width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+  font-family: var(--ff-mono); font-size: 13px; font-weight: 600; color: var(--slate-800);
+  background: linear-gradient(150deg, var(--navy-50), var(--navy-100)); /* cyan-soft → navy 틴트 */
+}
+/* 개요 그리드 아바타도 상태(tone) 대신 정체성(hue) — 지갑별 색 유지. */
+.wv-coin[data-hue="navy"]   { background: linear-gradient(150deg, #F1F3F6, var(--wallet-navy-tint)); }
+.wv-coin[data-hue="blue"]   { background: linear-gradient(150deg, #F1F3F6, var(--wallet-blue-tint)); }
+.wv-coin[data-hue="violet"] { background: linear-gradient(150deg, #F1F3F6, var(--wallet-violet-tint)); }
+.wv-coin[data-hue="slate"]  { background: linear-gradient(150deg, #F1F3F6, var(--wallet-slate-tint)); }
+.wv-coin[data-hue="teal"]   { background: linear-gradient(150deg, #F1F3F6, var(--wallet-teal-tint)); }
+.wv-chains { display: flex; }
+.wv-chains img { width: 17px; height: 17px; border-radius: 50%; margin-left: -5px; border: 1.5px solid var(--surface); }
+.wv-chains img:first-child { margin-left: 0; }
+.wv-name { font-size: 13px; font-weight: 700; color: var(--slate-900); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wv-addr { font-family: var(--ff-mono); font-size: 10.5px; color: var(--slate-400); }
+.wv-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-top: 2px; }
+.wv-bal { font-size: 13px; font-weight: 700; color: var(--slate-900); font-variant-numeric: tabular-nums; }
+.wv-meta { font-size: 10.5px; color: var(--slate-400); white-space: nowrap; }
+.wv-hint { padding: 0 18px 14px; font-size: 11px; color: var(--slate-400); text-align: center; }
+
+/* the coin in the panel header is now a button (overview trigger) */
+.dp-head .dp-coin { border: none; cursor: pointer; transition: box-shadow 120ms ease, transform 120ms ease; }
+.dp-head .dp-coin:hover { box-shadow: 0 0 0 3px var(--cyan-200); transform: translateY(-1px); }
+
+/* motion — morph clone + hover lift */
+.dial-panel { position: relative; }
+.wv-morph { pointer-events: none; box-shadow: 0 18px 40px rgba(13, 17, 24, 0.14); }
+.wv-card:hover { transform: translateY(-3px) scale(1.012); box-shadow: 0 10px 24px rgba(13, 17, 24, 0.10); }
+
+/* panel height resize grip */
+.split-resize {
+  display: grid; place-items: center;
+  height: 18px; margin-top: 8px;
+  cursor: ns-resize; touch-action: none;
+  border-radius: var(--r-pill);
+  transition: background 120ms ease;
+}
+.split-resize .grip {
+  width: 46px; height: 5px; border-radius: var(--r-pill);
+  background: var(--slate-200);
+  transition: background 120ms ease, width 160ms ease;
+}
+.split-resize:hover { background: var(--fog-300); }
+.split-resize:hover .grip, .split-resize.dragging .grip { background: var(--cyan-600); width: 64px; }
+
+
+/* ── STEP 4-B 타입스케일 매핑 (append-override) ── */
+.wc-name, .dp-id .name, .wv-title { font-size: var(--text-subhead-size); font-weight: var(--text-subhead-weight); line-height: var(--text-subhead-lh); letter-spacing: var(--text-subhead-ls); }

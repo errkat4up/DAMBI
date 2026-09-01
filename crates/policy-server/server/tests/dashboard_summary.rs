@@ -1,0 +1,327 @@
+use std::str::FromStr;
+use std::sync::Arc;
+
+use policy_db::{GlobalDb, MultiUserStore};
+use policy_server::app::{build_router, AppState};
+use policy_server::auth::jwt::{issue, TokenType};
+use policy_server::events::{EventBus, LocalEventPublisher};
+use policy_state::approval::{AllowanceSpec, ApprovalSet};
+use policy_state::position::{HlAccount, HlSpotBalance, HlVaultEquity, Position, PositionKind};
+use policy_state::primitives::{Address, ChainId, Decimal, Time, U256};
+use policy_state::token::{Balance, TokenHolding, TokenKey, TokenKind};
+use policy_state::{ProtocolRef, WalletId, WalletState, WalletStore};
+use policy_sync::{Orchestrator, SyncConfig};
+use uuid::Uuid;
+
+const TEST_SECRET: &str = "test-secret-only-do-not-use-in-production-2026-05-31";
+
+fn ensure_jwt_secret() {
+    std::env::set_var("JWT_SECRET", TEST_SECRET);
+}
+
+fn mint_token(user_id: &str) -> String {
+    ensure_jwt_secret();
+    issue(user_id, "test@example.com", TokenType::Access, None).unwrap()
+}
+
+async fn spawn_server() -> (
+    std::net::SocketAddr,
+    MultiUserStore,
+    tempfile::TempDir,
+    String,
+    String,
+) {
+    let tmp = tempfile::tempdir().unwrap();
+    let global_db = GlobalDb::open(tmp.path().join("global.db")).unwrap();
+    // Seed the user so wallet saves satisfy `wallets_user_id_fkey` (enforced by
+    // the Postgres integration backend). Each spawn gets a globally unique
+    // email so repeated runs against the shared integration DB cannot inherit
+    // wallet rows from an earlier process.
+    let suffix = Uuid::new_v4();
+    let user_id = global_db
+        .upsert_user(&format!("dashboard-test-{suffix}@example.com"), "test")
+        .await
+        .unwrap();
+    let multi_user = MultiUserStore::new(tmp.path().join("users"));
+    let event_bus = EventBus::new();
+    let state = AppState {
+        multi_user: multi_user.clone(),
+        global_db,
+        event_bus: event_bus.clone(),
+        publisher: Arc::new(LocalEventPublisher::new(event_bus)),
+        orchestrator: Arc::new(Orchestrator::from_sync_config(&SyncConfig::default()).unwrap()),
+        etherscan: None,
+        coingecko: policy_sync::CoinGeckoClient::new(),
+        coordinator: Arc::new(policy_server::coordination::NoopCoordinator),
+        sync_lock_ttl: std::time::Duration::from_secs(120),
+    };
+    let router = build_router(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    let token = mint_token(&user_id);
+    (addr, multi_user, tmp, token, user_id)
+}
+
+const WALLET_ADDR: &str = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045";
+
+fn usdc_holding_with_value(amount_units: u128, price: &str) -> TokenHolding {
+    use policy_state::live_field::{DataSource, LiveField, OracleProvider};
+    use policy_state::primitives::{Duration, Price};
+
+    let key = TokenKey::Erc20 {
+        chain: ChainId::ethereum_mainnet(),
+        address: Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
+    };
+    TokenHolding {
+        key: key.clone(),
+        kind: TokenKind::Unknown,
+        symbol: "USDC".into(),
+        decimals: 6,
+        balance: Balance::Fungible {
+            amount: U256::from(amount_units),
+        },
+        committed: Balance::zero_fungible(),
+        approved_to: None,
+        price_usd: Some(
+            LiveField::new(
+                Price::new(price),
+                DataSource::OracleFeed {
+                    provider: OracleProvider::Chainlink,
+                    feed_id: "USDC/USD".into(),
+                },
+                Time::from_unix(1_730_000_000),
+            )
+            .with_ttl(Duration::from_secs(60)),
+        ),
+        metadata: None,
+        value_usd: None,
+        last_synced_at: Time::from_unix(1_730_000_000),
+        primitives_source: DataSource::UserSupplied,
+    }
+}
+
+async fn seed_state_with_holding(multi_user: &MultiUserStore, user_id: &str) {
+    let store = multi_user.for_user(user_id).unwrap();
+    let id = WalletId::new(
+        Address::from_str(WALLET_ADDR).unwrap(),
+        [ChainId::ethereum_mainnet()],
+    );
+    let mut s = WalletState::new(id);
+    let h = usdc_holding_with_value(10_000_000_000, "1.0001"); // 10000 USDC × $1.0001
+    s.tokens.insert(h.key.clone(), h);
+    // Seed an unlimited ERC20 approval to Uniswap V3 router so the
+    // risk classifier has something to mark KNOWN_VENUE + UNLIMITED.
+    let router = Address::from_str("0xe592427a0aece92de3edee1f18e0157c05861564").unwrap();
+    let mut per_spender = std::collections::BTreeMap::new();
+    per_spender.insert(
+        router,
+        AllowanceSpec {
+            amount: U256::MAX,
+            is_unlimited: true,
+            last_set_at: Time::from_unix(1_730_000_000),
+        },
+    );
+    let mut approvals = ApprovalSet::default();
+    approvals.erc20.insert(
+        (
+            ChainId::ethereum_mainnet(),
+            Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
+        ),
+        per_spender,
+    );
+    s.approvals = approvals;
+    store.save(&s).await.unwrap();
+}
+
+async fn seed_state_with_holding_and_hyperliquid(multi_user: &MultiUserStore, user_id: &str) {
+    use policy_state::live_field::DataSource;
+
+    let store = multi_user.for_user(user_id).unwrap();
+    let id = WalletId::new(
+        Address::from_str(WALLET_ADDR).unwrap(),
+        [ChainId::ethereum_mainnet()],
+    );
+    let mut s = WalletState::new(id);
+    let h = usdc_holding_with_value(10_000_000_000, "1.0001"); // 10000 USDC × $1.0001
+    s.tokens.insert(h.key.clone(), h);
+    s.positions.push(Position {
+        id: "hyperliquid/account".into(),
+        protocol: ProtocolRef::new("hyperliquid"),
+        chain: None,
+        kind: PositionKind::HyperliquidAccount(HlAccount {
+            // Perp free margin; summary must prefer account value when present.
+            perp_usdc: Some(Decimal::new("10")),
+            perp_account_value_usd: Some(Decimal::new("123.45")),
+            pending_outflow: Decimal::zero(),
+            positions: Vec::new(),
+            open_orders: Vec::new(),
+            // USDC spot can be counted directly as USD; non-stable spot needs
+            // a price field before it can be included in the dashboard total.
+            spot_balances: vec![HlSpotBalance {
+                coin: "USDC".into(),
+                token: 0,
+                total: Decimal::new("50.25"),
+                hold: Decimal::zero(),
+                entry_ntl: Decimal::zero(),
+                available_after_maintenance: None,
+            }],
+            staking: None,
+            vault_equities: vec![HlVaultEquity {
+                vault_address: Address::from_str("0x1111111111111111111111111111111111111111")
+                    .unwrap(),
+                equity: Decimal::new("200.75"),
+                locked_until_timestamp: None,
+            }],
+            borrow_lend: None,
+            leverage_settings: Vec::new(),
+            agents: Vec::new(),
+            ..HlAccount::default()
+        }),
+        primitives_synced_at: Time::from_unix(1_730_000_000),
+        primitives_source: DataSource::VenueApi {
+            endpoint: "https://api.hyperliquid.xyz/info".into(),
+            parser_id: "hl_account".into(),
+            auth: None,
+        },
+    });
+    store.save(&s).await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
+async fn dashboard_summary_aggregates_portfolio() {
+    let (addr, mu, _tmp, token, user_id) = spawn_server().await;
+    seed_state_with_holding(&mu, &user_id).await;
+
+    let body: serde_json::Value = reqwest::Client::new()
+        .get(format!("http://{addr}/dashboard/summary"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(body["wallet_count"], 1);
+    let total: f64 = body["total_portfolio_usd"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(total > 9999.0 && total < 10002.0, "total {total}");
+    let chains = body["chain_breakdown"].as_array().unwrap();
+    assert_eq!(chains.len(), 1);
+    assert_eq!(chains[0]["chain"], "eip155:1");
+    let pct = chains[0]["pct"].as_f64().unwrap();
+    assert!(pct > 99.0);
+    let wallets = body["wallets"].as_array().unwrap();
+    assert_eq!(wallets.len(), 1);
+    assert_eq!(wallets[0]["address"], WALLET_ADDR);
+    assert_eq!(wallets[0]["unlimited_count"], 1);
+    assert_eq!(wallets[0]["pending_count"], 0);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
+async fn dashboard_summary_includes_hyperliquid_account_assets() {
+    let (addr, mu, _tmp, token, user_id) = spawn_server().await;
+    seed_state_with_holding_and_hyperliquid(&mu, &user_id).await;
+
+    let body: serde_json::Value = reqwest::Client::new()
+        .get(format!("http://{addr}/dashboard/summary"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    // Token total: 10000 USDC × $1.0001 = 10001.
+    // Hyperliquid total: perp USDC 123.45 + spot USDC 50.25 + vault equity 200.75.
+    assert_eq!(body["total_portfolio_usd"], "10375.450000");
+    let wallets = body["wallets"].as_array().unwrap();
+    assert_eq!(wallets[0]["total_usd"], "10375.450000");
+
+    let venues = body["venue_breakdown"].as_array().unwrap();
+    assert_eq!(venues.len(), 1);
+    assert_eq!(venues[0]["venue"], "hyperliquid");
+    assert_eq!(venues[0]["usd"], "374.450000");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
+async fn dashboard_summary_empty_when_no_wallets() {
+    let (addr, _mu, _tmp, token, _user_id) = spawn_server().await;
+    let body: serde_json::Value = reqwest::Client::new()
+        .get(format!("http://{addr}/dashboard/summary"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(body["wallet_count"], 0);
+    assert_eq!(body["total_portfolio_usd"], "0.000000");
+    assert!(body["chain_breakdown"].as_array().unwrap().is_empty());
+    assert!(body["venue_breakdown"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
+async fn approvals_with_risk_returns_classified_shape() {
+    let (addr, mu, _tmp, token, user_id) = spawn_server().await;
+    seed_state_with_holding(&mu, &user_id).await;
+
+    let body: serde_json::Value = reqwest::Client::new()
+        .get(format!(
+            "http://{addr}/wallets/{WALLET_ADDR}/approvals?with_risk=true"
+        ))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let erc20 = body["erc20"].as_array().unwrap();
+    assert_eq!(erc20.len(), 1);
+    let row = &erc20[0];
+    let risk: Vec<&str> = row["risk"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    // Spender catalog removed → only UNLIMITED remains (KNOWN_VENUE
+    // tag and spender_meta field no longer emitted).
+    assert!(risk.contains(&"UNLIMITED"));
+    assert!(row.get("spender_meta").is_none());
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
+async fn approvals_default_returns_raw_shape() {
+    let (addr, mu, _tmp, token, user_id) = spawn_server().await;
+    seed_state_with_holding(&mu, &user_id).await;
+
+    let body: serde_json::Value = reqwest::Client::new()
+        .get(format!("http://{addr}/wallets/{WALLET_ADDR}/approvals"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    // Raw ApprovalSet shape: erc20 is a map keyed by (chain, token).
+    // Not the classified array. Just check we don't see the `risk` field.
+    let serialized = serde_json::to_string(&body).unwrap();
+    assert!(!serialized.contains("\"risk\""));
+}

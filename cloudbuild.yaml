@@ -1,0 +1,47 @@
+# Cloud Build config for the policy-server container image.
+#
+# Why this file exists instead of `gcloud run deploy --source .`:
+# that flag only looks for a Dockerfile at the *source root*, but this repo's
+# server Dockerfile lives at crates/policy-server/server/Dockerfile while its
+# build context must be the repo root (it does `COPY . .` and builds the whole
+# cargo workspace). Only an explicit `docker build -f <path> .` satisfies both.
+#
+# Usage:
+#   gcloud builds submit --config cloudbuild.yaml
+#
+# The build context is ~44MB after .dockerignore (target/ and node_modules/
+# are excluded there).
+
+timeout: 3600s
+
+options:
+  # A full Rust workspace release build is slow on the default 2-vCPU machine.
+  # E2_HIGHCPU_8 cuts it to roughly a third for ~$0.3-0.5 per build. Note this
+  # machine type is NOT covered by the 2,500 free build-minutes/month.
+  machineType: E2_HIGHCPU_8
+  # Avoids needing a user-managed logs bucket.
+  logging: CLOUD_LOGGING_ONLY
+
+# _REGION is the Artifact Registry region for the built image. The Cloud Run
+# service itself runs in asia-northeast1; the two need not match.
+substitutions:
+  _REGION: asia-northeast3
+  _REPO: dambi
+  _IMAGE_NAME: policy-server
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    id: build
+    args:
+      - build
+      - -f
+      - crates/policy-server/server/Dockerfile
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE_NAME}:latest
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE_NAME}:$BUILD_ID
+      - .
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE_NAME}:latest
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE_NAME}:$BUILD_ID

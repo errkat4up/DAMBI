@@ -1,0 +1,375 @@
+//! Marketplace DTOs — JSON wire shapes for `/market/...` endpoints.
+//!
+//! The schema lives in `db/migrations/0002_market.sql`. Listings come in two
+//! kinds (`policy` / `set`); a set version stores its member policies inline
+//! as snapshots so receivers get a self-contained payload that can be copied
+//! into the local editor in one shot.
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use uuid::Uuid;
+
+/// `policy` or `set`. Drives which version body fields are populated.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ListingKind {
+    Policy,
+    Set,
+}
+
+/// Publisher trust tier. Affects ranking and badge rendering.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PublisherTier {
+    Official,
+    Verified,
+    Community,
+}
+
+/// Moderation status. Non-`Published` listings are hidden from browse.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ListingStatus {
+    Pending,
+    Published,
+    Archived,
+    Rejected,
+}
+
+/// Cedar policy severity. Policy listings carry this; sets do not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+    Deny,
+    Warn,
+}
+
+/// Two-locale display string. `en` is the canonical fallback when the
+/// requested locale is missing.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct I18nText {
+    pub en: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ko: Option<String>,
+}
+
+/// Sort modes accepted by `GET /market/listings`. `popular` is the default
+/// landing sort (the homepage is folded into the browse page).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[derive(Default)]
+pub enum ListingSort {
+    #[default]
+    Popular,
+    New,
+    Rating,
+}
+
+/// Query parameters for `GET /market/listings`. All filters are optional.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct ListListingsQuery {
+    pub kind: Option<ListingKind>,
+    pub domain: Option<String>,
+    /// Action-based taxonomy filter (approvals, swap, perps, …). See migration
+    /// 0003. Independent of `domain`.
+    pub category: Option<String>,
+    pub publisher_id: Option<String>,
+    pub publisher_tier: Option<PublisherTier>,
+    /// Substring match against `display_name.en` / `display_name.ko`.
+    pub q: Option<String>,
+    #[serde(default)]
+    pub sort: ListingSort,
+    /// Capped server-side regardless of caller value.
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+/// Listing card payload — everything the browse grid needs without the
+/// version body. Stats are computed on read; do not store them.
+#[derive(Clone, Debug, Serialize)]
+pub struct ListingSummary {
+    pub id: Uuid,
+    pub slug: String,
+    pub kind: ListingKind,
+    /// Internal stable user id. Used server-side for ownership/filtering, but
+    /// not serialized to public marketplace clients.
+    #[serde(skip_serializing)]
+    pub publisher_id: String,
+    /// Raw tier id (built-in `official`/`verified`/`community` *or* a custom
+    /// admin-created tier id). Kept as a free string — collapsing it into the
+    /// 3-variant `PublisherTier` enum would map every custom tier to
+    /// `community`, so custom-tier badges never rendered.
+    pub publisher_tier: String,
+    pub display_name: I18nText,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<I18nText>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// Authoring docs (정의/범위/대상/데이터) — opaque JSON object echoed verbatim.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub intents: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub severity: Option<Severity>,
+    pub status: ListingStatus,
+    pub current_version: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    /// Unique authenticated installers. The underlying install table is an
+    /// event log, but public popularity metrics are distinct-user counts.
+    pub install_count: i64,
+    pub rating_avg: Option<f64>,
+    pub rating_count: i64,
+    /// True when the currently-authenticated user has at least one row in
+    /// `market_installs` for this listing.
+    pub is_installed: bool,
+    /// Public publisher handle. This is intentionally not the raw OAuth/user id.
+    /// The legacy field name is kept for frontend compatibility.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publisher_email: Option<String>,
+}
+
+/// One member policy snapshot inside a set version. The publish-time copy
+/// of the member's editor body, so receivers get a self-contained payload.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SetMember {
+    pub slug: String,
+    pub display_name: String,
+    pub cedar_text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest: Option<Value>,
+}
+
+/// Immutable per-version body. For `policy` listings `cedar_text` is set;
+/// for `set` listings `members` is set. Server CHECK enforces exactly one.
+#[derive(Clone, Debug, Serialize)]
+pub struct ListingVersion {
+    pub listing_id: Uuid,
+    pub version: String,
+    pub major: i32,
+    pub minor: i32,
+    pub patch: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cedar_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manifest: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_tree: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub members: Option<Vec<SetMember>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changelog: Option<I18nText>,
+    pub published_at: i64,
+}
+
+/// Listing detail — summary + latest version body + recent reviews.
+/// Returned by `GET /market/listings/:slug`. The detail page renders
+/// from this one response.
+#[derive(Clone, Debug, Serialize)]
+pub struct ListingDetail {
+    #[serde(flatten)]
+    pub summary: ListingSummary,
+    pub latest_version: Option<ListingVersion>,
+    pub recent_reviews: Vec<Review>,
+}
+
+/// `GET /market/activity-summary` query — `days` is the look-back window (how
+/// far back install events count toward "recent"), `limit` caps the rows.
+#[derive(Clone, Debug, Deserialize)]
+pub struct ActivitySummaryQuery {
+    /// Look-back window in days. Defaults to 7 ("최근 7일").
+    #[serde(default)]
+    pub days: Option<i64>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// One listing's recent-install rollup. The dashboard buckets these by its own
+/// `categoryOf(slug)` taxonomy to drive the "최근 인기" recommendation hero.
+/// This is real install demand (unique installers in the window), never mocked.
+#[derive(Clone, Debug, Serialize)]
+pub struct InstallActivityEntry {
+    pub slug: String,
+    pub kind: ListingKind,
+    pub display_name: I18nText,
+    /// Server action-based category (may differ from the dashboard taxonomy).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// Unique authenticated installers for this listing within the look-back
+    /// window.
+    pub recent_installs: i64,
+}
+
+/// `GET /market/activity-summary` response. `since` echoes the unix-seconds
+/// cutoff actually used so the client can label the window precisely.
+#[derive(Clone, Debug, Serialize)]
+pub struct ActivitySummary {
+    pub days: i64,
+    pub since: i64,
+    pub entries: Vec<InstallActivityEntry>,
+}
+
+/// `POST /market/listings` body — publish a new listing along with its
+/// initial v1.0.0 version in one call. Tail fields are gated by `kind`.
+#[derive(Clone, Debug, Deserialize)]
+pub struct CreateListingReq {
+    pub slug: String,
+    pub kind: ListingKind,
+    pub display_name: I18nText,
+    #[serde(default)]
+    pub description: Option<I18nText>,
+
+    // Policy-only — required when kind = Policy
+    #[serde(default)]
+    pub domain: Option<String>,
+    #[serde(default)]
+    pub category: Option<String>,
+    /// Authoring docs (정의/범위/대상/데이터) — stored verbatim as JSONB.
+    #[serde(default)]
+    pub doc: Option<Value>,
+    #[serde(default)]
+    pub intents: Option<Vec<String>>,
+    #[serde(default)]
+    pub severity: Option<Severity>,
+
+    /// Initial `SemVer`. Defaults to "1.0.0" when omitted.
+    #[serde(default = "default_initial_version")]
+    pub version: String,
+
+    // Body — exactly one shape depending on kind
+    #[serde(default)]
+    pub cedar_text: Option<String>,
+    #[serde(default)]
+    pub manifest: Option<Value>,
+    #[serde(default)]
+    pub policy_tree: Option<String>,
+    #[serde(default)]
+    pub members: Option<Vec<SetMember>>,
+
+    #[serde(default)]
+    pub changelog: Option<I18nText>,
+    #[serde(default)]
+    pub forked_from: Option<Uuid>,
+}
+
+fn default_initial_version() -> String {
+    "1.0.0".to_string()
+}
+
+/// `POST /market/listings/:id/versions` body — publish a new `SemVer`
+/// version of an existing listing. The kind is locked at the listing
+/// level; the body fields here must match.
+#[derive(Clone, Debug, Deserialize)]
+pub struct CreateVersionReq {
+    pub version: String,
+    #[serde(default)]
+    pub cedar_text: Option<String>,
+    #[serde(default)]
+    pub manifest: Option<Value>,
+    #[serde(default)]
+    pub policy_tree: Option<String>,
+    #[serde(default)]
+    pub members: Option<Vec<SetMember>>,
+    #[serde(default)]
+    pub changelog: Option<I18nText>,
+}
+
+/// `POST /market/listings/:id/install` body. The version the client just
+/// downloaded — recorded so install counts attribute to the right release.
+#[derive(Clone, Debug, Deserialize)]
+pub struct CreateInstallReq {
+    pub version: String,
+}
+
+/// A review row. `helpful_count` is the cached denormalization; the
+/// authoritative votes live in `market_review_helpful`.
+#[derive(Clone, Debug, Serialize)]
+pub struct Review {
+    pub id: Uuid,
+    pub listing_id: Uuid,
+    /// Internal stable user id. Not serialized to public marketplace clients.
+    #[serde(skip_serializing)]
+    pub user_id: String,
+    pub reviewer_handle: String,
+    pub version: String,
+    pub rating: i16,
+    pub body: I18nText,
+    pub helpful_count: i32,
+    pub created_at: i64,
+}
+
+/// `POST /market/listings/:id/reviews` body.
+#[derive(Clone, Debug, Deserialize)]
+pub struct CreateReviewReq {
+    pub version: String,
+    pub rating: i16,
+    pub body: I18nText,
+}
+
+/// User-facing reason categories for marketplace reports.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReportReason {
+    UnsafePolicy,
+    Misleading,
+    Spam,
+    Abuse,
+    Other,
+}
+
+/// Moderation status for a marketplace report.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReportStatus {
+    Open,
+    Resolved,
+}
+
+/// A marketplace report submitted by an authenticated user. Exactly one of
+/// `listing_id` or `review_id` is set by the creation endpoint.
+#[derive(Clone, Debug, Serialize)]
+pub struct MarketReport {
+    pub id: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub listing_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review_id: Option<Uuid>,
+    #[serde(skip_serializing)]
+    pub reporter_id: String,
+    pub reporter_handle: String,
+    pub reason: ReportReason,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<String>,
+    pub status: ReportStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing)]
+    pub resolved_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_by_handle: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_at: Option<i64>,
+    pub created_at: i64,
+}
+
+/// `POST /market/listings/:id/report` and
+/// `POST /market/reviews/:id/report` body.
+#[derive(Clone, Debug, Deserialize)]
+pub struct CreateReportReq {
+    pub reason: ReportReason,
+    #[serde(default)]
+    pub details: Option<String>,
+}
+
+/// `PATCH /market/reports/:id` body.
+#[derive(Clone, Debug, Deserialize)]
+pub struct UpdateReportStatusReq {
+    pub status: ReportStatus,
+}
+
+/// Mirror of `market_listings` row used by the publisher's
+/// "My Publishes" view. Same shape as `ListingSummary` for now; kept
+/// distinct so future fields (draft state, analytics) can land here.
+pub type MyListing = ListingSummary;

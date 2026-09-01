@@ -1,0 +1,842 @@
+//! Compiled Cedar `PolicyEngine` and its evaluation entry points.
+
+use cedar_policy::{
+    Authorizer, Context, Decision as CedarDecision, Entities, EntityUid, Policy, PolicyId,
+    PolicySet, Request, Schema, ValidationMode, ValidationResult, Validator,
+};
+use serde_json::Value as JsonValue;
+use std::collections::{HashMap, HashSet};
+use std::str::FromStr;
+
+use super::error::PolicyError;
+use super::request::PolicyRequest;
+use super::verdict::{MatchedPolicy, PolicyRequestOrigin, Severity, Verdict};
+
+/// The auto-injected baseline `permit` so that absence of any matched `forbid`
+/// evaluates to allow. Prepended to every assembled policy set.
+pub(super) const BASELINE_PERMIT: &str =
+    "@id(\"engine/baseline-allow\")\npermit(principal, action, resource);\n";
+
+/// Synthetic matched-policy id used when the schema-less (per-policy) path
+/// fails closed on an evaluation error.
+const SCHEMALESS_EVAL_ERROR_ID: &str = "__schemaless_eval_error__";
+
+/// Compiled policy set + the auto-injected baseline permit.
+#[derive(Debug)]
+pub struct PolicyEngine {
+    policy_set: PolicySet,
+    /// The Cedar schema used to validate requests/context/entities at
+    /// evaluation time. `Some` for the unified single-schema path
+    /// ([`Self::build_from`]); `None` for the per-policy path
+    /// ([`Self::build_from_per_policy`]), where each policy was validated
+    /// against its OWN schema at install and evaluation runs schema-less.
+    schema: Option<Schema>,
+    /// Per-policy-id severity, lifted from the `@severity(...)` annotation at
+    /// parse time so we don't have to re-parse on every evaluation.
+    severities: HashMap<String, Severity>,
+    /// Per-policy-id @reason annotation.
+    reasons: HashMap<String, String>,
+}
+
+impl PolicyEngine {
+    /// Start a builder. Callers chain `.add_text(...)` and then `.build()`.
+    /// The baseline permit and the bundled Cedar schema are added
+    /// automatically.
+    #[must_use]
+    pub fn builder() -> super::builder::PolicyEngineBuilder {
+        super::builder::PolicyEngineBuilder::new()
+    }
+
+    /// Convenience: build an engine from one or more text Cedar sources only.
+    /// Equivalent to `PolicyEngine::builder().add_text(...).build()`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when Cedar parsing or schema validation fails.
+    pub fn from_sources<I, S>(sources: I) -> Result<Self, PolicyError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut b = Self::builder();
+        for s in sources {
+            b = b.add_text(s.as_ref());
+        }
+        b.build()
+    }
+
+    /// Build a `PolicyEngine` from already-collected policies.
+    /// `text_combined` is one big Cedar source string (with baseline
+    /// prepended). Used by [`super::builder::PolicyEngineBuilder::build`].
+    pub(super) fn build_from(text_combined: &str, schema: Schema) -> Result<Self, PolicyError> {
+        let mut policy_set = PolicySet::new();
+        let mut severities: HashMap<String, Severity> = HashMap::new();
+        let mut reasons: HashMap<String, String> = HashMap::new();
+
+        let initial_set =
+            PolicySet::from_str(text_combined).map_err(|e| PolicyError::Parse(e.to_string()))?;
+
+        for p in initial_set.policies() {
+            ingest_policy(p, &mut policy_set, &mut severities, &mut reasons)?;
+        }
+
+        validate_policy_set(&policy_set, &schema)?;
+
+        Ok(Self {
+            policy_set,
+            schema: Some(schema),
+            severities,
+            reasons,
+        })
+    }
+
+    /// Build a single-`PolicySet` engine from per-policy bundles.
+    ///
+    /// Each bundle is `(policy_cedar_text, per_policy_schema_text)`. Per the
+    /// Cedar separation of validation from authorization, every policy is
+    /// strict-validated against its OWN schema here at install; the resulting
+    /// combined set (baseline permit + all bundle policies) is then evaluated
+    /// SCHEMA-LESS (see [`Self::evaluate`] with `schema: None`). This gives
+    /// per-policy field isolation without one Cedar engine per policy.
+    ///
+    /// Policy ids come from each policy's `@id` annotation; bundles are
+    /// concatenated and parsed once so Cedar's fallback auto-ids never collide.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any bundle's schema or policy fails to parse, or a
+    /// policy fails strict validation against its own schema.
+    pub fn build_from_per_policy(bundles: &[(String, String)]) -> Result<Self, PolicyError> {
+        // 1. Validate each policy against ONLY its own schema.
+        for (index, (policy_text, schema_text)) in bundles.iter().enumerate() {
+            let (schema, _warnings) = Schema::from_cedarschema_str(schema_text)
+                .map_err(|e| PolicyError::Schema(format!("bundle #{index}: {e}")))?;
+            let pset = PolicySet::from_str(policy_text)
+                .map_err(|e| PolicyError::Parse(format!("bundle #{index}: {e}")))?;
+            validate_policy_set(&pset, &schema)?;
+        }
+
+        // 2. Assemble the combined set (baseline + every bundle policy) and
+        //    parse once so auto-ids are unique across the whole set.
+        let mut combined = String::from(BASELINE_PERMIT);
+        for (policy_text, _) in bundles {
+            combined.push_str(policy_text);
+            combined.push('\n');
+        }
+        let initial_set =
+            PolicySet::from_str(&combined).map_err(|e| PolicyError::Parse(e.to_string()))?;
+
+        let mut policy_set = PolicySet::new();
+        let mut severities: HashMap<String, Severity> = HashMap::new();
+        let mut reasons: HashMap<String, String> = HashMap::new();
+        for p in initial_set.policies() {
+            ingest_policy(p, &mut policy_set, &mut severities, &mut reasons)?;
+        }
+
+        Ok(Self {
+            policy_set,
+            schema: None,
+            severities,
+            reasons,
+        })
+    }
+
+    /// Evaluate a `PolicyRequest`. This is the preferred entry point.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when Cedar request construction or evaluation fails.
+    pub fn evaluate_request(&self, req: &PolicyRequest) -> Result<Verdict, PolicyError> {
+        self.evaluate_request_with_origin(req, PolicyRequestOrigin::Action)
+    }
+
+    /// Evaluate a `PolicyRequest` and annotate matches with the originating
+    /// request kind.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when Cedar request construction or evaluation fails.
+    pub fn evaluate_request_with_origin(
+        &self,
+        req: &PolicyRequest,
+        origin: PolicyRequestOrigin,
+    ) -> Result<Verdict, PolicyError> {
+        let mut verdict = self.evaluate(
+            &req.principal,
+            &req.action,
+            &req.resource,
+            &req.entities,
+            &req.context,
+        )?;
+
+        match &mut verdict {
+            Verdict::Pass => {}
+            Verdict::Warn(matches) | Verdict::Fail(matches) => {
+                for matched in matches {
+                    matched.origin = origin;
+                }
+            }
+        }
+        Ok(verdict)
+    }
+
+    /// Evaluate requests from one transaction while preserving request kind.
+    /// A request list with empty input is treated as pass.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any request fails to build or evaluate.
+    pub fn evaluate_requests<'a, I>(&self, reqs: I) -> Result<Verdict, PolicyError>
+    where
+        I: IntoIterator<Item = (&'a PolicyRequest, PolicyRequestOrigin)>,
+    {
+        let verdicts = reqs
+            .into_iter()
+            .map(|(req, origin)| self.evaluate_request_with_origin(req, origin))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Verdict::aggregate(verdicts))
+    }
+
+    /// Evaluate a single Cedar request against the policy set.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when entity ids, context, entities, or request
+    /// construction fail.
+    pub fn evaluate(
+        &self,
+        principal: &str,
+        action: &str,
+        resource: &str,
+        entities_json: &JsonValue,
+        context_json: &JsonValue,
+    ) -> Result<Verdict, PolicyError> {
+        let principal: EntityUid = principal
+            .parse()
+            .map_err(|e: cedar_policy::ParseErrors| PolicyError::EntityUid(e.to_string()))?;
+        let action: EntityUid = action
+            .parse()
+            .map_err(|e: cedar_policy::ParseErrors| PolicyError::EntityUid(e.to_string()))?;
+        let resource: EntityUid = resource
+            .parse()
+            .map_err(|e: cedar_policy::ParseErrors| PolicyError::EntityUid(e.to_string()))?;
+
+        // `schema: Some` → strict request/context validation (unified path).
+        // `schema: None` → schema-less (per-policy path: each policy already
+        // validated against its own schema at install).
+        let entities = Entities::from_json_value(entities_json.clone(), self.schema.as_ref())
+            .map_err(|e| PolicyError::Entities(e.to_string()))?;
+        let context = Context::from_json_value(
+            context_json.clone(),
+            self.schema.as_ref().map(|s| (s, &action)),
+        )
+        .map_err(|e| PolicyError::Context(e.to_string()))?;
+
+        let request = Request::new(principal, action, resource, context, self.schema.as_ref())
+            .map_err(|e| PolicyError::Request(e.to_string()))?;
+
+        let auth = Authorizer::new();
+        let response = auth.is_authorized(&request, &self.policy_set, &entities);
+
+        // Schema-less safety net (spike finding #3): in the per-policy path an
+        // unguarded reference to an absent custom field makes a `forbid`'s
+        // condition ERROR rather than fire — which, under the baseline permit,
+        // would silently fail OPEN. If any policy errored during evaluation we
+        // fail CLOSED instead of trusting the (possibly under-enforced) Allow.
+        // The unified path keeps strict validation, so this never trips there.
+        if self.schema.is_none() {
+            if let Some(err) = response.diagnostics().errors().next() {
+                return Ok(Verdict::Fail(vec![MatchedPolicy {
+                    policy_id: SCHEMALESS_EVAL_ERROR_ID.to_owned(),
+                    reason: Some(format!("schema-less evaluation error: {err}")),
+                    severity: Severity::Deny,
+                    origin: PolicyRequestOrigin::Action,
+                }]));
+            }
+        }
+
+        // Cedar gives us a final `Allow` / `Deny` plus the set of policy ids
+        // that contributed (`reason`). Each fired policy becomes a
+        // `MatchedPolicy` carrying its own severity; the final `Verdict`
+        // variant is then chosen by deny-overrides:
+        //  - Cedar Allow: nothing fired → `Pass`.
+        //  - Cedar Deny + ≥1 deny-severity match → `Fail(all_matches)` —
+        //    `all_matches` includes any *also*-fired warn entries
+        //    (warn-union).
+        //  - Cedar Deny + only warn-severity matches → `Warn(warn_matches)`.
+        //  - Cedar Deny + no severity-tagged matches: should never happen
+        //    given our default-allow shape; fail-closed → `Fail([])`.
+
+        let determining: HashSet<PolicyId> = response.diagnostics().reason().cloned().collect();
+        let mut matched: Vec<MatchedPolicy> = Vec::new();
+
+        for pid in &determining {
+            let pid_str = pid.to_string();
+            // Skip the baseline-allow permit; its presence as a "reason" just
+            // means it succeeded as a permit, which isn't user-facing.
+            if pid_str == "engine/baseline-allow" {
+                continue;
+            }
+            // Skip un-annotated forbids: a `forbid` without `@severity` is
+            // effectively a malformed policy in our convention.
+            let severity = match self.severities.get(&pid_str) {
+                Some(s) => *s,
+                None => continue,
+            };
+            matched.push(MatchedPolicy {
+                policy_id: pid_str.clone(),
+                reason: self.reasons.get(&pid_str).cloned(),
+                severity,
+                origin: PolicyRequestOrigin::Action,
+            });
+        }
+
+        let any_deny = matched.iter().any(|m| m.severity == Severity::Deny);
+        let cedar_decision = response.decision();
+
+        let verdict = match cedar_decision {
+            CedarDecision::Allow => Verdict::Pass,
+            CedarDecision::Deny => {
+                if any_deny {
+                    // Fail's vec carries BOTH severities — caller can split via .severity.
+                    Verdict::Fail(matched)
+                } else if !matched.is_empty() {
+                    // All matches are warn-severity by elimination.
+                    Verdict::Warn(matched)
+                } else {
+                    Verdict::Fail(Vec::new())
+                }
+            }
+        };
+
+        Ok(verdict)
+    }
+}
+
+fn validate_policy_set(policy_set: &PolicySet, schema: &Schema) -> Result<(), PolicyError> {
+    let result = Validator::new(schema.clone()).validate(policy_set, ValidationMode::Strict);
+    if result.validation_passed() {
+        Ok(())
+    } else {
+        Err(PolicyError::Validation(validation_errors_message(&result)))
+    }
+}
+
+fn validation_errors_message(result: &ValidationResult) -> String {
+    let messages: Vec<String> = result
+        .validation_errors()
+        .map(ToString::to_string)
+        .collect();
+    if messages.is_empty() {
+        "unknown validation error".into()
+    } else {
+        messages.join("; ")
+    }
+}
+
+fn annotation(p: &Policy, key: &str) -> Option<String> {
+    p.annotation(key).map(std::string::ToString::to_string)
+}
+
+/// Pull `@id`, `@severity`, `@reason` out of a policy and add it to the set
+/// under the user-facing id from `@id` (falling back to Cedar's auto-id).
+fn ingest_policy(
+    p: &Policy,
+    policy_set: &mut PolicySet,
+    severities: &mut HashMap<String, Severity>,
+    reasons: &mut HashMap<String, String>,
+) -> Result<(), PolicyError> {
+    let user_id_raw = annotation(p, "id").unwrap_or_else(|| p.id().to_string());
+    let user_id: PolicyId = match user_id_raw.parse() {
+        Ok(user_id) => user_id,
+        Err(never) => match never {},
+    };
+    let user_id_str = user_id.to_string();
+    let new_policy = p.clone().new_id(user_id);
+
+    if let Some(sev) = annotation(p, "severity") {
+        let parsed = match sev.as_str() {
+            "deny" => Severity::Deny,
+            "warn" => Severity::Warn,
+            other => {
+                return Err(PolicyError::Parse(format!(
+                    "policy {user_id_str}: unknown @severity({other:?}); expected \"deny\" or \"warn\""
+                )));
+            }
+        };
+        severities.insert(user_id_str.clone(), parsed);
+    }
+    if let Some(r) = annotation(p, "reason") {
+        reasons.insert(user_id_str, r);
+    }
+
+    policy_set
+        .add(new_policy)
+        .map_err(|e| PolicyError::Parse(e.to_string()))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{PolicyEngineBuilder, PolicyError, PolicyRequest};
+    use super::*;
+    use crate::policy_rpc::ManifestV2;
+    use crate::schema::compose_per_policy;
+    use serde_json::json;
+
+    fn entities() -> JsonValue {
+        json!([
+            {
+                "uid": { "type": "Wallet", "id": "0xUser" },
+                "attrs": {
+                    "address": "0x0000000000000000000000000000000000000001"
+                },
+                "parents": []
+            },
+            {
+                "uid": { "type": "Protocol", "id": "swap" },
+                "attrs": {},
+                "parents": []
+            }
+        ])
+    }
+
+    // ----- v2 custom-context model (post-5fb5bedb namespace migration) -----
+    //
+    // These mirror `tests/swap_input_usd_cap_eval.rs`: a v2 manifest declaring a
+    // scalar `inputUsd: decimal` custom-context field, composed via
+    // `compose_per_policy`, with the USD value carried under
+    // `context.custom.inputUsd` (a Cedar `decimal` extension value) rather than
+    // the deleted top-level `totalInputUsd: UsdValuation` record.
+
+    /// A v2 manifest whose single `oracle.usd_value` policy-RPC projects into a
+    /// scalar `context.custom.inputUsd : decimal`, declared in `custom_context`.
+    fn input_usd_manifest() -> ManifestV2 {
+        serde_json::from_value(json!({
+            "id": "test/input-usd",
+            "schema_version": 2,
+            "trigger": { "where": { "action.tag": { "eq": "swap" } } },
+            "policy_rpc": [{
+                "id": "in-usd",
+                "method": "oracle.usd_value",
+                "params": { "chain_id": "$.root.chain_id" },
+                "outputs": [{
+                    "kind": "context",
+                    "field": "inputUsd",
+                    "type": "Decimal",
+                    "from": "$.result.usd"
+                }]
+            }],
+            "custom_context": { "fields": { "inputUsd": "decimal" } }
+        }))
+        .unwrap()
+    }
+
+    /// The post-materialize swap context: `context.custom.inputUsd` holds the USD
+    /// value as a Cedar `decimal`. The base `Amm::SwapContext` calldata fields
+    /// are not needed here — the per-policy path evaluates schema-less, so only
+    /// the field the policy reads must be present.
+    fn context_swap(usd_value: &str) -> JsonValue {
+        json!({
+            "custom": {
+                "inputUsd": { "__extn": { "fn": "decimal", "arg": usd_value } }
+            }
+        })
+    }
+
+    /// Build an engine over the v2 custom-context schema (composed from
+    /// [`input_usd_manifest`]) via the per-policy path, with each source as its
+    /// own bundle sharing that schema.
+    fn engine_with_input_usd_schema<I, S>(sources: I) -> PolicyEngine
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let schema = compose_per_policy(&input_usd_manifest()).expect("compose v2 schema");
+        let bundles: Vec<(String, String)> = sources
+            .into_iter()
+            .map(|s| (s.into(), schema.clone()))
+            .collect();
+        PolicyEngine::build_from_per_policy(&bundles).expect("build per-policy engine")
+    }
+
+    #[test]
+    fn empty_policy_set_allows_everything() {
+        let engine = engine_with_input_usd_schema(Vec::<&str>::new());
+        let v = engine
+            .evaluate(
+                r#"Wallet::"0xUser""#,
+                r#"Amm::Action::"Swap""#,
+                r#"Protocol::"swap""#,
+                &entities(),
+                &context_swap("50.00"),
+            )
+            .unwrap();
+        assert_eq!(v, Verdict::Pass);
+    }
+
+    #[test]
+    fn deny_when_usd_exceeds_cap() {
+        let policy = r#"
+            @id("user/max-swap-usd-100")
+            @severity("deny")
+            @reason("USD value of swap exceeds 100")
+            forbid (principal, action == Amm::Action::"Swap", resource)
+            when {
+              context has custom &&
+              context.custom has inputUsd &&
+              context.custom.inputUsd.greaterThan(decimal("100.00"))
+            };
+        "#;
+        let engine = engine_with_input_usd_schema([policy]);
+        let v = engine
+            .evaluate(
+                r#"Wallet::"0xUser""#,
+                r#"Amm::Action::"Swap""#,
+                r#"Protocol::"swap""#,
+                &entities(),
+                &context_swap("200.00"),
+            )
+            .unwrap();
+        match v {
+            Verdict::Fail(matched) => {
+                assert_eq!(matched.len(), 1);
+                assert_eq!(matched[0].policy_id, "user/max-swap-usd-100");
+                assert_eq!(matched[0].severity, Severity::Deny);
+                assert_eq!(
+                    matched[0].reason.as_deref(),
+                    Some("USD value of swap exceeds 100")
+                );
+            }
+            _ => panic!("expected Verdict::Fail, got {v:?}"),
+        }
+    }
+
+    #[test]
+    fn allow_when_usd_under_cap() {
+        let policy = r#"
+            @id("user/max-swap-usd-100")
+            @severity("deny")
+            forbid (principal, action == Amm::Action::"Swap", resource)
+            when {
+              context has custom &&
+              context.custom has inputUsd &&
+              context.custom.inputUsd.greaterThan(decimal("100.00"))
+            };
+        "#;
+        let engine = engine_with_input_usd_schema([policy]);
+        let v = engine
+            .evaluate(
+                r#"Wallet::"0xUser""#,
+                r#"Amm::Action::"Swap""#,
+                r#"Protocol::"swap""#,
+                &entities(),
+                &context_swap("50.00"),
+            )
+            .unwrap();
+        assert_eq!(v, Verdict::Pass);
+    }
+
+    #[test]
+    fn warn_variant_when_only_warn_severity_fires() {
+        let policy = r#"
+            @id("user/large-swap-warning")
+            @severity("warn")
+            @reason("Large swap — please review")
+            forbid (principal, action == Amm::Action::"Swap", resource)
+            when {
+              context has custom &&
+              context.custom has inputUsd &&
+              context.custom.inputUsd.greaterThan(decimal("100.00"))
+            };
+        "#;
+        let engine = engine_with_input_usd_schema([policy]);
+        let v = engine
+            .evaluate(
+                r#"Wallet::"0xUser""#,
+                r#"Amm::Action::"Swap""#,
+                r#"Protocol::"swap""#,
+                &entities(),
+                &context_swap("200.00"),
+            )
+            .unwrap();
+        match v {
+            Verdict::Warn(matched) => {
+                assert_eq!(matched.len(), 1);
+                assert_eq!(matched[0].policy_id, "user/large-swap-warning");
+                assert_eq!(matched[0].severity, Severity::Warn);
+            }
+            _ => panic!("expected Verdict::Warn, got {v:?}"),
+        }
+    }
+
+    #[test]
+    fn fail_preserves_warn_entries_alongside_deny() {
+        let policy = r#"
+            @id("user/large-swap-warning")
+            @severity("warn")
+            forbid (principal, action == Amm::Action::"Swap", resource)
+            when {
+              context has custom &&
+              context.custom has inputUsd &&
+              context.custom.inputUsd.greaterThan(decimal("100.00"))
+            };
+
+            @id("user/huge-swap-deny")
+            @severity("deny")
+            forbid (principal, action == Amm::Action::"Swap", resource)
+            when {
+              context has custom &&
+              context.custom has inputUsd &&
+              context.custom.inputUsd.greaterThan(decimal("150.00"))
+            };
+        "#;
+        let engine = engine_with_input_usd_schema([policy]);
+        let v = engine
+            .evaluate(
+                r#"Wallet::"0xUser""#,
+                r#"Amm::Action::"Swap""#,
+                r#"Protocol::"swap""#,
+                &entities(),
+                &context_swap("200.00"),
+            )
+            .unwrap();
+        match v {
+            Verdict::Fail(matched) => {
+                assert_eq!(
+                    matched.len(),
+                    2,
+                    "Fail vec must include both warn + deny entries"
+                );
+                assert!(matched.iter().any(|m| {
+                    m.policy_id == "user/huge-swap-deny" && m.severity == Severity::Deny
+                }));
+                assert!(matched.iter().any(|m| {
+                    m.policy_id == "user/large-swap-warning" && m.severity == Severity::Warn
+                }));
+            }
+            _ => panic!("expected Verdict::Fail, got {v:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_severity() {
+        let policy = r#"
+            @id("bad")
+            @severity("idk")
+            forbid (principal, action, resource);
+        "#;
+        let err = PolicyEngine::from_sources([policy]).unwrap_err();
+        assert!(matches!(err, PolicyError::Parse(_)));
+    }
+
+    #[test]
+    fn default_builder_matches_new_builder_schema() {
+        // Regression guard against accidentally re-adding `#[derive(Default)]`
+        // to PolicyEngineBuilder. Both the explicit `new()` constructor and
+        // the `Default::default()` path must produce engines that strict-
+        // validate against the bundled schema.
+        let typo_policy = r#"
+            @id("smoke/typo")
+            @severity("deny")
+            forbid (principal, action == Action::"swap", resource)
+            when {
+              context.recipienT == "0x0000000000000000000000000000000000000001"
+            };
+        "#;
+
+        let via_default = PolicyEngineBuilder::default().add_text(typo_policy).build();
+        let via_new = PolicyEngineBuilder::new().add_text(typo_policy).build();
+
+        assert!(matches!(via_default, Err(PolicyError::Validation(_))));
+        assert!(matches!(via_new, Err(PolicyError::Validation(_))));
+    }
+
+    #[test]
+    fn from_sources_validates_policy_against_bundled_schema() {
+        let policy = r#"
+            @id("bad/from-sources-context-typo")
+            @severity("deny")
+            forbid (principal, action == Action::"swap", resource)
+            when { context.totalInputUSd.value.greaterThan(decimal("100.00")) };
+        "#;
+
+        let err = PolicyEngine::from_sources([policy]).unwrap_err();
+        assert!(
+            matches!(err, PolicyError::Validation(_)),
+            "expected PolicyError::Validation, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn schema_validation_rejects_policy_with_unknown_context_field() {
+        let policy = r#"
+            @id("bad/context-typo")
+            @severity("deny")
+            forbid (principal, action == Action::"swap", resource)
+            when { context.totalInputUSd.value.greaterThan(decimal("100.00")) };
+        "#;
+
+        let err = PolicyEngine::builder()
+            .add_text(policy)
+            .build()
+            .unwrap_err();
+
+        assert!(matches!(err, PolicyError::Validation(_)));
+    }
+
+    #[test]
+    fn schema_validation_rejects_request_with_invalid_context_shape() {
+        // This exercises the UNIFIED (schema-retaining) engine path: `builder()`
+        // installs the bundled v2 schema, so request/context validation runs at
+        // evaluation time. `Amm::SwapContext` declares many REQUIRED fields
+        // (`meta`, `venue`, `tokenIn`, `direction`, `recipient`, ...), so an empty
+        // `{}` context is an invalid shape. (The per-policy path used by the other
+        // migrated tests evaluates schema-less and would NOT surface this error,
+        // so it cannot stand in here.)
+        let policy = r#"
+            @id("user/max-swap-usd-100")
+            @severity("deny")
+            forbid (principal, action == Amm::Action::"Swap", resource)
+            when {
+              context has custom &&
+              context.custom has inputUsd &&
+              context.custom.inputUsd.greaterThan(decimal("100.00"))
+            };
+        "#;
+        let engine = PolicyEngine::builder().add_text(policy).build().unwrap();
+
+        let err = engine
+            .evaluate(
+                r#"Wallet::"0xUser""#,
+                r#"Amm::Action::"Swap""#,
+                r#"Protocol::"swap""#,
+                &entities(),
+                &json!({}),
+            )
+            .unwrap_err();
+
+        // Passing the schema to Context::from_json_value moves missing-required-attr
+        // detection into context construction (the layer below Request::new), so the
+        // error attribution is PolicyError::Context, not PolicyError::Request.
+        assert!(matches!(err, PolicyError::Context(_)));
+    }
+
+    #[test]
+    fn evaluate_request_marks_matches_as_single_action_origin() {
+        let policy = r#"
+            @id("user/action-deny")
+            @severity("deny")
+            forbid (principal, action == Amm::Action::"Swap", resource);
+        "#;
+        let engine = engine_with_input_usd_schema([policy]);
+        let request = PolicyRequest::new(
+            r#"Wallet::"0xUser""#,
+            r#"Amm::Action::"Swap""#,
+            r#"Protocol::"swap""#,
+            entities(),
+            context_swap("50.00"),
+        );
+
+        let verdict = engine.evaluate_request(&request).unwrap();
+
+        match verdict {
+            Verdict::Fail(matched) => {
+                assert_eq!(matched[0].origin, PolicyRequestOrigin::Action);
+            }
+            other => panic!("expected Verdict::Fail, got {other:?}"),
+        }
+    }
+
+    // ----- Task 8: per-policy single-engine + schema-less evaluation -----
+
+    /// Minimal per-policy schema: a top-level `Act` action with one `Long`
+    /// context field. Two such schemas with different field names emulate two
+    /// marketplace bundles whose `custom` slots are isolated. `optional`
+    /// controls `?:` vs `:` so tests can exercise both the has-guard path
+    /// (optional) and the unguarded-required path (required).
+    fn act_schema(field: &str, optional: bool) -> String {
+        let opt = if optional { "?" } else { "" };
+        format!(
+            "entity Wallet;\nentity Protocol;\n\
+             action \"Act\" appliesTo {{\n  principal: [Wallet],\n  \
+             resource: [Protocol],\n  context: {{ \"{field}\"{opt}: Long }}\n}};\n"
+        )
+    }
+
+    fn decide_act(engine: &PolicyEngine, context_json: JsonValue) -> Verdict {
+        engine
+            .evaluate(
+                "Wallet::\"w\"",
+                "Action::\"Act\"",
+                "Protocol::\"p\"",
+                &json!([]),
+                &context_json,
+            )
+            .expect("schema-less decide")
+    }
+
+    #[test]
+    fn per_policy_two_bundles_isolated_with_schemaless_eval() {
+        // Each bundle validates against ITS OWN schema (different field name),
+        // then both load into one schema-less PolicySet.
+        let bundle_a = (
+            "@id(\"bundleA\")\n@severity(\"deny\")\n\
+             forbid(principal, action == Action::\"Act\", resource)\n\
+             when { context has aField && context.aField > 10 };\n"
+                .to_owned(),
+            act_schema("aField", true),
+        );
+        let bundle_b = (
+            "@id(\"bundleB\")\n@severity(\"deny\")\n\
+             forbid(principal, action == Action::\"Act\", resource)\n\
+             when { context has bField && context.bField > 10 };\n"
+                .to_owned(),
+            act_schema("bField", true),
+        );
+
+        let engine = PolicyEngine::build_from_per_policy(&[bundle_a, bundle_b])
+            .expect("per-policy bundles validate against their own schemas");
+
+        // Context carries only aField → A fires; B's field is absent but
+        // `has`-guarded, so B is cleanly skipped with no evaluation error.
+        match decide_act(&engine, json!({ "aField": 50 })) {
+            Verdict::Fail(matched) => {
+                assert!(matched.iter().any(|m| m.policy_id == "bundleA"));
+                assert!(!matched.iter().any(|m| m.policy_id == "bundleB"));
+            }
+            other => panic!("expected Fail from bundleA, got {other:?}"),
+        }
+
+        // Neither forbid's threshold met → baseline permit → Pass.
+        assert!(matches!(
+            decide_act(&engine, json!({ "aField": 1 })),
+            Verdict::Pass
+        ));
+    }
+
+    #[test]
+    fn per_policy_unguarded_missing_field_fails_closed() {
+        // `aField` is REQUIRED in the policy's own schema (so the unguarded
+        // `context.aField` passes strict install validation) but ABSENT at
+        // schema-less eval time → the forbid's condition errors. Spike finding
+        // #3: that must fail CLOSED, not silently allow via the baseline permit.
+        let bundle = (
+            "@id(\"unguarded\")\n@severity(\"deny\")\n\
+             forbid(principal, action == Action::\"Act\", resource)\n\
+             when { context.aField > 10 };\n"
+                .to_owned(),
+            act_schema("aField", false),
+        );
+        let engine = PolicyEngine::build_from_per_policy(std::slice::from_ref(&bundle))
+            .expect("validates: aField is declared (required) in the bundle schema");
+
+        match decide_act(&engine, json!({})) {
+            Verdict::Fail(matched) => {
+                assert_eq!(matched.len(), 1);
+                assert_eq!(matched[0].policy_id, super::SCHEMALESS_EVAL_ERROR_ID);
+            }
+            other => panic!("expected fail-closed Fail, got {other:?}"),
+        }
+    }
+}

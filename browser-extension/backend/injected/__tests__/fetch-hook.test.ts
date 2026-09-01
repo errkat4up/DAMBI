@@ -1,0 +1,196 @@
+import { describe, it, expect } from "vitest";
+
+import {
+  decideVenueBody,
+  matchVenue,
+  parseHyperliquidExchangeOrders,
+} from "../hl-exchange-parse";
+import { RequestType } from "@lib/types";
+
+const ENDPOINT = "https://api.hyperliquid.xyz/exchange";
+const HOST = "app.hyperliquid.xyz";
+
+function parse(body: unknown) {
+  return parseHyperliquidExchangeOrders("hyperliquid", ENDPOINT, HOST, body);
+}
+
+describe("parseHyperliquidExchangeOrders", () => {
+  it("extracts a single order from a stringified /exchange body", () => {
+    const body = JSON.stringify({
+      action: {
+        type: "order",
+        orders: [
+          { a: 0, b: false, p: "60000", s: "0.1", r: false, t: { limit: { tif: "Gtc" } } },
+        ],
+        grouping: "na",
+      },
+      nonce: 1_738_000_000_000,
+      signature: { r: "0x", s: "0x", v: 28 },
+    });
+
+    const out = parse(body);
+    expect(out).not.toBeNull();
+    expect(out).toHaveLength(1);
+    expect(out![0]).toMatchObject({
+      type: RequestType.VENUE_ORDER,
+      venue: "hyperliquid",
+      endpoint: ENDPOINT,
+      hostname: HOST,
+      hlAction: { kind: "order", order: { a: 0, b: false, p: "60000", s: "0.1", r: false } },
+    });
+  });
+
+  it("extracts every leg of a multi-order (TP/SL) batch", () => {
+    const out = parse({
+      action: {
+        type: "order",
+        orders: [
+          { a: 0, b: false, p: "60000", s: "0.1", r: false, t: { limit: { tif: "Gtc" } } },
+          { a: 0, b: true, p: "55000", s: "0.1", r: true, t: { trigger: { isMarket: true } } },
+        ],
+        grouping: "normalTpsl",
+      },
+    });
+    expect(out).toHaveLength(2);
+    expect(out![1].hlAction).toMatchObject({ kind: "order", order: { r: true } });
+  });
+
+  it("parses the v1 fund-movement / leverage action subset (D4)", () => {
+    expect(
+      parse({ action: { type: "updateLeverage", asset: 0, isCross: true, leverage: 10 } })![0]
+        .hlAction,
+    ).toEqual({ kind: "update_leverage", assetIndex: 0, isCross: true, leverage: 10 });
+    expect(
+      parse({ action: { type: "withdraw3", destination: "0xabc", amount: "5" } })![0].hlAction,
+    ).toEqual({ kind: "withdraw", destination: "0xabc", amount: "5" });
+    expect(
+      parse({ action: { type: "usdSend", destination: "0xdef", amount: "9" } })![0].hlAction,
+    ).toEqual({ kind: "usd_send", destination: "0xdef", amount: "9" });
+    // approveAgent is no longer a modeled action — it falls through to the
+    // hl_unknown catch-all (deny-closed), like any other unmodeled /exchange type.
+    expect(
+      parse({ action: { type: "approveAgent", agentAddress: "0x123", agentName: "bot" } })![0]
+        .hlAction,
+    ).toEqual({ kind: "unknown", actionType: "approveAgent" });
+  });
+
+  it("returns null for benign/out-of-scope actions and unknown for malformed guarded actions", () => {
+    expect(parse({ action: { type: "cancel", cancels: [] } })).toBeNull();
+    expect(parse({ action: { type: "batchModify", modifies: [] } })![0].hlAction)
+      .toEqual({ kind: "unknown", actionType: "batchModify" });
+    // updateLeverage missing required isCross: guarded action, not pass-through.
+    expect(parse({ action: { type: "updateLeverage", asset: 0, leverage: 10 } })![0].hlAction)
+      .toEqual({ kind: "unknown", actionType: "updateLeverage" });
+    expect(parse({ type: "meta" })).toBeNull();
+    expect(parse("not json")).toBeNull();
+    expect(parse(undefined)).toBeNull();
+    expect(parse({})).toBeNull();
+  });
+
+  it("keeps valid order legs and adds unknown for malformed guarded legs", () => {
+    const out = parse({
+      action: {
+        type: "order",
+        orders: [
+          { notAnOrder: true },
+          { a: 3, b: true, p: "1", s: "1" },
+        ],
+      },
+    });
+    expect(out).toHaveLength(2);
+    expect(out![0].hlAction).toMatchObject({ kind: "order", order: { a: 3 } });
+    expect(out![1].hlAction).toEqual({ kind: "unknown", actionType: "order" });
+  });
+
+  it("routes all-malformed order legs to unknown rather than null", () => {
+    const out = parse({ action: { type: "order", orders: [{ x: 1 }, { y: 2 }] } });
+    expect(out).toHaveLength(1);
+    expect(out![0].hlAction).toEqual({ kind: "unknown", actionType: "order" });
+  });
+});
+
+describe("decideVenueBody", () => {
+  it("deny-closes malformed JSON venue bodies instead of treating them as passthrough", async () => {
+    const evaluate = async () => true;
+
+    await expect(
+      decideVenueBody("hyperliquid", ENDPOINT, HOST, "not json", evaluate),
+    ).resolves.toEqual({
+      kind: "deny",
+      reason: "unreadable_body",
+      payloads: null,
+    });
+  });
+
+  it("still passes through valid JSON that is not a guarded venue action", async () => {
+    const evaluate = async () => {
+      throw new Error("should not evaluate out-of-scope body");
+    };
+
+    await expect(
+      decideVenueBody(
+        "hyperliquid",
+        ENDPOINT,
+        HOST,
+        JSON.stringify({ type: "meta" }),
+        evaluate,
+      ),
+    ).resolves.toEqual({ kind: "passthrough" });
+  });
+});
+
+describe("matchVenue host coverage", () => {
+  it("matches the live `api-ui` gateway the web app actually uses", () => {
+    // Regression: the production app POSTs to api-ui.hyperliquid.xyz, NOT the
+    // bare api.hyperliquid.xyz documented for SDKs. Missing `-ui` let every
+    // real order slip past the hook.
+    expect(matchVenue("https://api-ui.hyperliquid.xyz/exchange")).toBe("hyperliquid");
+  });
+
+  it("matches the bare api host and testnet variants", () => {
+    expect(matchVenue("https://api.hyperliquid.xyz/exchange")).toBe("hyperliquid");
+    expect(matchVenue("https://api-ui.hyperliquid-testnet.xyz/exchange")).toBe("hyperliquid");
+    expect(matchVenue("https://api.hyperliquid-testnet.xyz/exchange")).toBe("hyperliquid");
+  });
+
+  it("does NOT match info endpoints or unrelated hosts", () => {
+    expect(matchVenue("https://api-ui.hyperliquid.xyz/info")).toBeUndefined();
+    expect(matchVenue("https://evil.xyz/exchange")).toBeUndefined();
+    expect(matchVenue("https://notapi.hyperliquid.xyz.evil.com/exchange")).toBeUndefined();
+  });
+});
+
+describe("matchVenue normalization (H1)", () => {
+  it("matches case-insensitive hostnames (DNS is case-insensitive)", () => {
+    // H1: a malicious/compromised HL frontend can POST to an upper/mixed-case
+    // host that reaches the same server but slipped past the case-sensitive regex.
+    expect(matchVenue("https://API.HYPERLIQUID.XYZ/exchange")).toBe("hyperliquid");
+    expect(matchVenue("https://Api-Ui.Hyperliquid.Xyz/exchange")).toBe("hyperliquid");
+    expect(matchVenue("https://API-UI.HYPERLIQUID-TESTNET.XYZ/exchange")).toBe(
+      "hyperliquid",
+    );
+  });
+
+  it("normalizes a trailing-dot FQDN and an explicit :443 port", () => {
+    expect(matchVenue("https://api.hyperliquid.xyz.:443/exchange")).toBe("hyperliquid");
+    expect(matchVenue("https://api-ui.hyperliquid.xyz:443/exchange")).toBe("hyperliquid");
+  });
+
+  it("resolves a relative URL against the page base before matching", () => {
+    expect(matchVenue("/exchange", "https://api-ui.hyperliquid.xyz/")).toBe(
+      "hyperliquid",
+    );
+    expect(matchVenue("/info", "https://api-ui.hyperliquid.xyz/")).toBeUndefined();
+  });
+
+  it("matches /exchange with a query string but not a sub-path or look-alike", () => {
+    expect(matchVenue("https://api.hyperliquid.xyz/exchange?x=1")).toBe("hyperliquid");
+    expect(matchVenue("https://api.hyperliquid.xyz/exchange/extra")).toBeUndefined();
+    // path-segment look-alike must not match via substring.
+    expect(matchVenue("https://evil.xyz/api.hyperliquid.xyz/exchange")).toBeUndefined();
+  });
+
+  it("returns undefined for an unparseable URL instead of throwing", () => {
+    expect(matchVenue("::::not a url::::")).toBeUndefined();
+  });
+});

@@ -1,0 +1,180 @@
+image:
+  repository: ghcr.io/errkat4up/dambi-policy-server
+  tag: ""
+  pullPolicy: IfNotPresent
+
+existingSecret: policy-server-secrets
+
+service:
+  type: ClusterIP
+
+api:
+  replicas: 1
+  port: 8788
+  # preStop sleep + grace period → zero-downtime rollouts on GKE L7 (NEG drain race)
+  preStopSleepSeconds: 15
+  terminationGracePeriodSeconds: 30
+  publicApiUrl: https://errkat4up-dambi.duckdns.org
+  dashboardUrl: https://errkat4up-dambi.duckdns.org
+  # Exact-match allowlist (comma-separated) of non-default OAuth redirect
+  # targets — e.g. a browser extension's https://<id>.chromiumapp.org/.
+  # Empty = only the default DASHBOARD_URL flow is allowed (fail-closed).
+  oauthAllowedRedirectUris: ""
+  # Comma-separated admin email allowlist for marketplace moderation.
+  # Empty is fail-closed: /market/reports admin routes return 403.
+  marketAdminEmails: ""
+  corsAllowPrivateNetwork: false
+  corsAllowedOrigins:
+    - https://errkat4up-dambi.duckdns.org
+    - chrome-extension://<published-extension-id>
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+worker:
+  replicas: 1
+  tickSeconds: 30
+  lockTtlSeconds: 120
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+runtime:
+  rustLog: info,policy_sync=info
+  requireSyncConfig: true
+  requireRedis: true
+  requireOAuthConfig: true
+  runMigrationsOnStartup: false
+  redisEventsChannel: policy-server:events
+
+# Evaluate-time on-chain oracle RPCs (eth_call). These are explicit host
+# dependencies, not hidden binary defaults. When a value is empty or omitted, the
+# corresponding OPTIONAL enrichment stays dormant instead of fabricating a value.
+oracleRpc:
+  sanctionsUrl: "https://ethereum-rpc.publicnode.com" # → POLICY_SANCTIONS_RPC_URL
+  lendingUrl: "https://ethereum-rpc.publicnode.com" # → POLICY_LENDING_RPC_URL
+  priceUsd:
+    ethereumUrl: "https://ethereum-rpc.publicnode.com" # → POLICY_PRICE_RPC_URL_1
+    arbitrumUrl: "https://arbitrum-one-rpc.publicnode.com" # → POLICY_PRICE_RPC_URL_42161
+    baseUrl: "https://base-rpc.publicnode.com" # → POLICY_PRICE_RPC_URL_8453
+
+ingress:
+  enabled: true
+  className: nginx
+  host: errkat4up-dambi.duckdns.org
+  tls:
+    enabled: true
+    secretName: policy-server-tls
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  gce:
+    enabled: false
+    staticIpName: ""
+    allowHttp: "false"
+
+serviceAccount:
+  create: true
+  name: ""
+  automountToken: false
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  capabilities:
+    drop:
+      - ALL
+
+migrationJob:
+  enabled: true
+
+hpa:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+pdb:
+  api:
+    enabled: true
+    minAvailable: 1
+  worker:
+    enabled: true
+    maxUnavailable: 1
+
+networkPolicy:
+  enabled: true
+
+syncConfig: |-
+  # Override this value with the production dambi-sync.toml.
+  [rpc.failover]
+  strategy = "priority"
+  retry_attempts = 3
+  retry_delay_ms = 200
+  mark_unhealthy_after = 5
+  unhealthy_cooldown_sec = 60
+
+  [venues.hyperliquid]
+  endpoint = "https://api.hyperliquid.xyz"
+
+  [venues.uniswap]
+  # UniswapX order-status via the public v2 service (swapper-based listing, no
+  # api-key required). Without this section the sync worker logs "uniswap_x
+  # fetcher is not configured" every tick and off-chain intent state is untracked.
+  orders_endpoint = "https://api.uniswap.org/v2"
+  api_key = "${UNISWAP_KEY}"
+  chains = ["eip155:1"]
+
+  [venues.cowswap]
+  # CoW Protocol Orderbook order-status — fully public (no api-key), safe in
+  # prod. The {network} host segment is derived per chain.
+  base_url = "https://api.cow.fi"
+  chains = ["eip155:1"]
+
+  # 1inch venues — all share the one Dev Portal Bearer key (ONEINCH_KEY, wired as
+  # an optional secretKeyRef on both API and worker). REQUIRES the ONEINCH_KEY
+  # secret value: a keyless ${ONEINCH_KEY} expands to "" and 401s every tick.
+  # NOTE: prod deploys the values-m3.yaml overlay, whose syncConfig OVERRIDES
+  # this one — enable there.
+  [venues.one_inch_fusion]
+  base_url = "https://api.1inch.dev/fusion"
+  api_key = "${ONEINCH_KEY}"
+  chains = ["eip155:1"]
+
+  [venues.one_inch_fusion_plus]   # cross-chain; queried globally by maker
+  base_url = "https://api.1inch.dev/fusion-plus"
+  api_key = "${ONEINCH_KEY}"
+
+  [venues.one_inch_lop]           # Limit Order Protocol v4 orderbook
+  base_url = "https://api.1inch.dev/orderbook"
+  api_key = "${ONEINCH_KEY}"
+  chains = ["eip155:1"]
+
+managedCertificate:
+  enabled: false
+
+backendConfig:
+  enabled: false
+  timeoutSec: 3600
+  # Optional GKE BackendConfig Cloud Armor policy name. Use this for
+  # deployment-level rate limits / edge rules; empty preserves current behavior.
+  securityPolicyName: ""

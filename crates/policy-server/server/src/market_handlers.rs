@@ -1,0 +1,1857 @@
+//! Marketplace HTTP handlers.
+//!
+//! All routes are mounted behind `require_auth`, so every handler receives an
+//! [`AuthUser`] via `Extension`. The user's `user_id` becomes `publisher_id`
+//! for writes and `installer` for install events.
+//!
+//! Stats (install count, average rating) are computed on read inside the
+//! store layer's `LATERAL` join, not denormalized on `market_listings`.
+
+use std::collections::HashSet;
+use std::str::FromStr;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::{Extension, Json};
+use cedar_policy::PolicySet;
+use serde::Deserialize;
+use serde_json::Value;
+use sha2::{Digest, Sha256};
+use uuid::Uuid;
+
+use policy_db::market::{
+    create_listing as db_create_listing, create_listing_report as db_create_listing_report,
+    create_review_report as db_create_review_report, create_tier as db_create_tier,
+    create_version as db_create_version, delete_listing as db_delete_listing,
+    delete_tier as db_delete_tier, get_latest_version as db_get_latest_version,
+    get_listing_by_id as db_get_listing_by_id, get_listing_by_slug as db_get_listing_by_slug,
+    get_version as db_get_version, install_activity_since as db_install_activity_since,
+    list_listings as db_list_listings, list_publishers as db_list_publishers,
+    list_reports as db_list_reports, list_reports_by_reporter as db_list_reports_by_reporter,
+    list_reviews as db_list_reviews, list_tiers as db_list_tiers, list_watches as db_list_watches,
+    record_install as db_record_install,
+    record_install_and_get_version as db_record_install_and_get_version,
+    search_users_by_email as db_search_users_by_email, set_publisher_tier as db_set_publisher_tier,
+    set_publisher_tier_by_email as db_set_publisher_tier_by_email, tier_exists as db_tier_exists,
+    unwatch as db_unwatch, update_report_status as db_update_report_status,
+    upsert_review as db_upsert_review, validate_semver, vote_helpful as db_vote_helpful,
+    watch as db_watch, ListingFilter, ListingRow, ListingSort as DbListingSort, NewListing,
+    PublisherRow, ReportRow, ReviewRow, TierRow, VersionBody, VersionRow, LIST_LIMIT_DEFAULT,
+    LIST_LIMIT_MAX,
+};
+use policy_db::DbError;
+
+use crate::app::AppState;
+use crate::auth::AuthUser;
+use crate::market_dto::{
+    ActivitySummary, ActivitySummaryQuery, CreateInstallReq, CreateListingReq, CreateReportReq,
+    CreateReviewReq, CreateVersionReq, I18nText, InstallActivityEntry, ListListingsQuery,
+    ListingDetail, ListingKind, ListingSort, ListingStatus, ListingSummary, ListingVersion,
+    MarketReport, PublisherTier, ReportReason, ReportStatus, Review, SetMember, Severity,
+    UpdateReportStatusReq,
+};
+
+const MARKET_SLUG_MAX_CHARS: usize = 120;
+const MARKET_SHORT_TEXT_MAX_CHARS: usize = 120;
+const MARKET_LONG_TEXT_MAX_CHARS: usize = 2_000;
+const MARKET_INTENTS_MAX: usize = 16;
+const MARKET_DOC_MAX_BYTES: usize = 64 * 1024;
+const MARKET_MANIFEST_MAX_BYTES: usize = 128 * 1024;
+const MARKET_CEDAR_TEXT_MAX_BYTES: usize = 256 * 1024;
+const MARKET_POLICY_TREE_MAX_BYTES: usize = 256 * 1024;
+const MARKET_SET_MEMBERS_MAX: usize = 100;
+const MARKET_QUERY_TEXT_MAX_CHARS: usize = 120;
+const MARKET_LIST_OFFSET_MAX: i64 = 10_000;
+
+// ---------------------------------------------------------------------------
+// Read endpoints
+// ---------------------------------------------------------------------------
+
+/// `GET /market/listings` — browse + filter + sort.
+pub async fn list_listings(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Query(q): Query<ListListingsQuery>,
+) -> Response {
+    let domain = match normalize_optional_query_text("domain", q.domain) {
+        Ok(v) => v,
+        Err(msg) => return (StatusCode::BAD_REQUEST, msg).into_response(),
+    };
+    let category = match normalize_optional_query_text("category", q.category) {
+        Ok(v) => v,
+        Err(msg) => return (StatusCode::BAD_REQUEST, msg).into_response(),
+    };
+    let publisher_id = match normalize_optional_query_text("publisher_id", q.publisher_id) {
+        Ok(v) => v,
+        Err(msg) => return (StatusCode::BAD_REQUEST, msg).into_response(),
+    };
+    let search = match normalize_optional_query_text("q", q.q) {
+        Ok(v) => v,
+        Err(msg) => return (StatusCode::BAD_REQUEST, msg).into_response(),
+    };
+    let offset = match normalize_market_list_offset(q.offset) {
+        Ok(v) => v,
+        Err(msg) => return (StatusCode::BAD_REQUEST, msg).into_response(),
+    };
+
+    let pool = state.global_db.pool();
+    let filter = ListingFilter {
+        kind: q.kind.map(|k| serde_kind(k).to_owned()),
+        domain,
+        category,
+        publisher_id,
+        publisher_tier: q.publisher_tier.map(|t| serde_tier(t).to_owned()),
+        q: search,
+    };
+    let sort = match q.sort {
+        ListingSort::Popular => DbListingSort::Popular,
+        ListingSort::New => DbListingSort::New,
+        ListingSort::Rating => DbListingSort::Rating,
+    };
+    let limit = q
+        .limit
+        .unwrap_or(LIST_LIMIT_DEFAULT)
+        .clamp(1, LIST_LIMIT_MAX);
+
+    match db_list_listings(pool, &filter, sort, limit, offset, Some(&user.user_id)).await {
+        Ok(rows) => {
+            let summaries: Vec<ListingSummary> = rows.iter().map(listing_row_to_summary).collect();
+            Json(summaries).into_response()
+        }
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+/// `GET /market/activity-summary` — per-listing install counts within a
+/// look-back window (default 7 days), most-installed first.
+///
+/// Powers the landing "최근 인기" recommendation hero. The counts are unique
+/// installers derived from real `market_installs` events (no personalization,
+/// no mock data); the dashboard buckets the returned slugs by its own category
+/// taxonomy.
+pub async fn activity_summary(
+    State(state): State<AppState>,
+    Extension(_user): Extension<AuthUser>,
+    Query(q): Query<ActivitySummaryQuery>,
+) -> Response {
+    let pool = state.global_db.pool();
+    let days = q.days.unwrap_or(7).clamp(1, 90);
+    let limit = q.limit.unwrap_or(50);
+    let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(d) => i64::try_from(d.as_secs()).unwrap_or(i64::MAX),
+        Err(e) => return server_error(&e.to_string()),
+    };
+    let since = now - days * 86_400;
+
+    match db_install_activity_since(pool, since, limit).await {
+        Ok(rows) => {
+            let entries: Vec<InstallActivityEntry> = rows
+                .iter()
+                .map(|r| InstallActivityEntry {
+                    slug: r.slug.clone(),
+                    kind: parse_kind(&r.kind),
+                    display_name: json_to_i18n(&r.display_name),
+                    category: r.category.clone(),
+                    recent_installs: r.recent_installs,
+                })
+                .collect();
+            Json(ActivitySummary {
+                days,
+                since,
+                entries,
+            })
+            .into_response()
+        }
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+/// `GET /market/listings/:slug` — listing detail + latest version + recent reviews.
+pub async fn get_listing(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(slug): Path<String>,
+) -> Response {
+    let pool = state.global_db.pool();
+    let listing = match db_get_listing_by_slug(pool, &slug, Some(&user.user_id)).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return (StatusCode::NOT_FOUND, "listing not found").into_response(),
+        Err(e) => return server_error(&e.to_string()),
+    };
+
+    let latest = match db_get_latest_version(pool, listing.id).await {
+        Ok(v) => v,
+        Err(e) => return server_error(&e.to_string()),
+    };
+
+    let reviews = match db_list_reviews(pool, listing.id, 10).await {
+        Ok(r) => r,
+        Err(e) => return server_error(&e.to_string()),
+    };
+
+    let detail = ListingDetail {
+        summary: listing_row_to_summary(&listing),
+        latest_version: latest.map(version_row_to_dto),
+        recent_reviews: reviews.iter().map(review_row_to_dto).collect(),
+    };
+    Json(detail).into_response()
+}
+
+/// `GET /market/listings/:id/versions/:ver` — a specific version body.
+/// Used by install: the client fetches this to copy into its editor.
+pub async fn get_version(
+    State(state): State<AppState>,
+    Extension(_user): Extension<AuthUser>,
+    Path((listing_id, version)): Path<(Uuid, String)>,
+) -> Response {
+    let pool = state.global_db.pool();
+    match db_get_version(pool, listing_id, &version).await {
+        Ok(Some(v)) => Json(version_row_to_dto(v)).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "version not found").into_response(),
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+/// `GET /market/listings/:id/reviews` — full review list (helpful-first).
+pub async fn list_reviews(
+    State(state): State<AppState>,
+    Extension(_user): Extension<AuthUser>,
+    Path(listing_id): Path<Uuid>,
+) -> Response {
+    let pool = state.global_db.pool();
+    match db_list_reviews(pool, listing_id, 200).await {
+        Ok(rows) => {
+            let dtos: Vec<Review> = rows.iter().map(review_row_to_dto).collect();
+            Json(dtos).into_response()
+        }
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+/// `GET /market/reports/mine` — reports submitted by the caller.
+pub async fn list_my_reports(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+) -> Response {
+    match db_list_reports_by_reporter(state.global_db.pool(), &user.user_id, 200).await {
+        Ok(rows) => {
+            let dtos: Vec<MarketReport> = rows.iter().map(report_row_to_dto).collect();
+            Json(dtos).into_response()
+        }
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct ListReportsQuery {
+    pub status: Option<ReportStatus>,
+    pub limit: Option<i64>,
+}
+
+/// `GET /market/reports` — admin moderation queue.
+pub async fn list_reports(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Query(q): Query<ListReportsQuery>,
+) -> Response {
+    if let Some(resp) = require_market_admin(&state, &user).await {
+        return resp;
+    }
+    let status = q.status.map(serde_report_status);
+    match db_list_reports(state.global_db.pool(), status, q.limit.unwrap_or(200)).await {
+        Ok(rows) => {
+            let dtos: Vec<MarketReport> = rows.iter().map(report_row_to_dto).collect();
+            Json(dtos).into_response()
+        }
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+/// `GET /market/watches` — caller's watched listings (with stats).
+pub async fn list_watches(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+) -> Response {
+    let pool = state.global_db.pool();
+    match db_list_watches(pool, &user.user_id).await {
+        Ok(rows) => {
+            let dtos: Vec<ListingSummary> = rows.iter().map(listing_row_to_summary).collect();
+            Json(dtos).into_response()
+        }
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Write endpoints
+// ---------------------------------------------------------------------------
+
+/// `POST /market/listings` — publish a new listing + initial version atomically.
+pub async fn create_listing(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Json(req): Json<CreateListingReq>,
+) -> Response {
+    // ---- request validation ------------------------------------------------
+    if let Err(msg) = validate_create_req(&req) {
+        return (StatusCode::BAD_REQUEST, msg).into_response();
+    }
+
+    let display_name = i18n_to_json(&req.display_name);
+    let description = req.description.as_ref().map(i18n_to_json);
+    let intents = req
+        .intents
+        .as_ref()
+        .map(|v| Value::Array(v.iter().map(|s| Value::String(s.clone())).collect()));
+
+    let kind_str = serde_kind(req.kind);
+
+    let body = match req.kind {
+        ListingKind::Policy => VersionBody {
+            cedar_text: req.cedar_text.clone(),
+            manifest: req.manifest.clone(),
+            policy_tree: req.policy_tree.clone(),
+            members: None,
+            changelog: req.changelog.as_ref().map(i18n_to_json),
+        },
+        ListingKind::Set => VersionBody {
+            cedar_text: None,
+            manifest: None,
+            policy_tree: None,
+            members: req.members.as_deref().map(members_to_json),
+            changelog: req.changelog.as_ref().map(i18n_to_json),
+        },
+    };
+
+    let new_listing = NewListing {
+        slug: req.slug.clone(),
+        kind: kind_str.to_owned(),
+        publisher_id: user.user_id.clone(),
+        publisher_tier: "community".to_owned(), // tier promotion is out of band
+        display_name,
+        description,
+        domain: req.domain.clone(),
+        category: req.category.clone(),
+        doc: req.doc.clone(),
+        intents,
+        severity: req.severity.map(|s| serde_severity(s).to_owned()),
+        forked_from: req.forked_from,
+        initial_version: req.version.clone(),
+        initial_body: body,
+    };
+
+    match db_create_listing(state.global_db.pool(), new_listing, now_secs()).await {
+        Ok(row) => Json(listing_row_to_summary(&row)).into_response(),
+        Err(e) => {
+            let msg = e.to_string();
+            if let Some(resp) = db_constraint_bad_request(&msg) {
+                resp
+            } else {
+                server_error(&msg)
+            }
+        }
+    }
+}
+
+/// `POST /market/listings/:id/versions` — publish a new `SemVer` version. Only
+/// the original publisher may do this.
+pub async fn create_version(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(listing_id): Path<Uuid>,
+    Json(req): Json<CreateVersionReq>,
+) -> Response {
+    let pool = state.global_db.pool();
+    let listing = match db_get_listing_by_id(pool, listing_id, Some(&user.user_id)).await {
+        Ok(Some(l)) => l,
+        Ok(None) => return (StatusCode::NOT_FOUND, "listing not found").into_response(),
+        Err(e) => return server_error(&e.to_string()),
+    };
+    if listing.publisher_id != user.user_id {
+        return (
+            StatusCode::FORBIDDEN,
+            "only the publisher can release new versions",
+        )
+            .into_response();
+    }
+    if let Err(e) = validate_semver(&req.version) {
+        return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
+    }
+    if !version_is_strictly_greater(&listing, &req.version) {
+        return (
+            StatusCode::BAD_REQUEST,
+            "new version must be strictly greater than current_version",
+        )
+            .into_response();
+    }
+    if let Err(msg) = validate_version_req(&listing.kind, &req) {
+        return (StatusCode::BAD_REQUEST, msg).into_response();
+    }
+
+    // Match body kind to listing kind
+    let body = match listing.kind.as_str() {
+        "policy" => VersionBody {
+            cedar_text: req.cedar_text,
+            manifest: req.manifest,
+            policy_tree: req.policy_tree,
+            members: None,
+            changelog: req.changelog.as_ref().map(i18n_to_json),
+        },
+        "set" => VersionBody {
+            cedar_text: None,
+            manifest: None,
+            policy_tree: None,
+            members: req.members.as_deref().map(members_to_json),
+            changelog: req.changelog.as_ref().map(i18n_to_json),
+        },
+        other => return server_error(&format!("unknown listing kind: {other}")),
+    };
+
+    match db_create_version(pool, listing_id, &req.version, body, now_secs()).await {
+        Ok(v) => Json(version_row_to_dto(v)).into_response(),
+        Err(DbError::NotFound { .. }) => {
+            (StatusCode::NOT_FOUND, "listing not found").into_response()
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            if let Some(resp) = db_constraint_bad_request(&msg) {
+                resp
+            } else {
+                server_error(&msg)
+            }
+        }
+    }
+}
+
+/// `POST /market/listings/:id/install` — record one install event.
+/// Server returns the version body so the client can write it locally in
+/// the same round-trip.
+pub async fn create_install(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(listing_id): Path<Uuid>,
+    Json(req): Json<CreateInstallReq>,
+) -> Response {
+    let pool = state.global_db.pool();
+    let now = now_secs();
+    let version =
+        match db_record_install_and_get_version(pool, listing_id, &req.version, &user.user_id, now)
+            .await
+        {
+            Ok(Some(v)) => v,
+            Ok(None) => return (StatusCode::NOT_FOUND, "version not found").into_response(),
+            Err(e) => return server_error(&e.to_string()),
+        };
+
+    // 패키지(set) 설치면 그 안에 든 멤버 정책도 각각 install 로 기록한다 — 멤버가
+    // 마켓에 개별 등재돼 있으면 그 listing 의 다운로드 수도 +1 된다. members 는
+    // set 버전에만 들어있어(cedar_text 와 상호배타) 이 블록이 자연히 set 에만 탄다.
+    // 다운로드 집계는 user_id DISTINCT 라 같은 사용자가 또 받아도 중복되지 않는다.
+    // 멤버 한 건이 실패해도(미등재/언퍼블리시) 패키지 설치 응답은 막지 않는다.
+    if let Some(members) = version.members.clone().and_then(json_to_members) {
+        for m in members {
+            if let Ok(Some(member)) = db_get_listing_by_slug(pool, &m.slug, None).await {
+                if let Some(ver) = member.current_version.as_deref() {
+                    let _ = db_record_install(pool, member.id, ver, &user.user_id, now).await;
+                }
+            }
+        }
+    }
+
+    Json(version_row_to_dto(version)).into_response()
+}
+
+/// `POST /market/listings/:id/reviews` — write or replace caller's review.
+pub async fn create_review(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(listing_id): Path<Uuid>,
+    Json(req): Json<CreateReviewReq>,
+) -> Response {
+    if !(1..=5).contains(&req.rating) {
+        return (StatusCode::BAD_REQUEST, "rating must be 1..=5").into_response();
+    }
+    if req.body.en.trim().is_empty() {
+        return (StatusCode::BAD_REQUEST, "review body.en is required").into_response();
+    }
+    if let Err(msg) = validate_i18n("review body", &req.body, MARKET_LONG_TEXT_MAX_CHARS) {
+        return (StatusCode::BAD_REQUEST, msg).into_response();
+    }
+    let body_json = i18n_to_json(&req.body);
+    match db_upsert_review(
+        state.global_db.pool(),
+        listing_id,
+        &user.user_id,
+        &req.version,
+        req.rating,
+        &body_json,
+        now_secs(),
+    )
+    .await
+    {
+        Ok(Some(r)) => Json(review_row_to_dto(&r)).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "published version not found").into_response(),
+        Err(DbError::Forbidden { reason }) => (StatusCode::FORBIDDEN, reason).into_response(),
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+/// `POST /market/listings/:id/report` — report a marketplace listing.
+pub async fn create_listing_report(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(listing_id): Path<Uuid>,
+    Json(req): Json<CreateReportReq>,
+) -> Response {
+    if let Err(msg) = validate_report_req(&req) {
+        return (StatusCode::BAD_REQUEST, msg).into_response();
+    }
+
+    let details = normalized_report_details(&req);
+    match db_create_listing_report(
+        state.global_db.pool(),
+        listing_id,
+        &user.user_id,
+        serde_report_reason(req.reason),
+        details.as_deref(),
+        now_secs(),
+    )
+    .await
+    {
+        Ok(Some(row)) => (StatusCode::CREATED, Json(report_row_to_dto(&row))).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "listing not found").into_response(),
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+/// `POST /market/reviews/:id/report` — report a marketplace review.
+pub async fn create_review_report(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(review_id): Path<Uuid>,
+    Json(req): Json<CreateReportReq>,
+) -> Response {
+    if let Err(msg) = validate_report_req(&req) {
+        return (StatusCode::BAD_REQUEST, msg).into_response();
+    }
+
+    let details = normalized_report_details(&req);
+    match db_create_review_report(
+        state.global_db.pool(),
+        review_id,
+        &user.user_id,
+        serde_report_reason(req.reason),
+        details.as_deref(),
+        now_secs(),
+    )
+    .await
+    {
+        Ok(Some(row)) => (StatusCode::CREATED, Json(report_row_to_dto(&row))).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "review not found").into_response(),
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+/// `PATCH /market/reports/:id` — admin moderation status update.
+pub async fn update_report_status(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(report_id): Path<Uuid>,
+    Json(req): Json<UpdateReportStatusReq>,
+) -> Response {
+    if let Some(resp) = require_market_admin(&state, &user).await {
+        return resp;
+    }
+    let status = serde_report_status(req.status);
+    match db_update_report_status(
+        state.global_db.pool(),
+        report_id,
+        status,
+        &user.user_id,
+        now_secs(),
+    )
+    .await
+    {
+        Ok(Some(row)) => Json(report_row_to_dto(&row)).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "report not found").into_response(),
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+/// `GET /market/publishers` — admin: list publisher accounts with their
+/// account-level tier + published-listing count (drives the verify UI).
+pub async fn list_publishers(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+) -> Response {
+    if let Some(resp) = require_market_admin(&state, &user).await {
+        return resp;
+    }
+    match db_list_publishers(state.global_db.pool()).await {
+        Ok(rows) => {
+            Json(rows.iter().map(publisher_row_to_json).collect::<Vec<_>>()).into_response()
+        }
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct SearchUsersQuery {
+    pub q: String,
+}
+
+const USER_SEARCH_LIMIT: i64 = 30;
+
+/// `GET /market/users/search?q=<email-substring>` — admin: search EVERY
+/// registered account (logged-in at least once) by email substring, so an admin
+/// can grade accounts that aren't in the publisher list yet (no listings,
+/// community tier). Returns the same shape as `/market/publishers`. A blank
+/// query returns `[]` rather than the whole user table.
+pub async fn search_users(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Query(params): Query<SearchUsersQuery>,
+) -> Response {
+    if let Some(resp) = require_market_admin(&state, &user).await {
+        return resp;
+    }
+    let q = params.q.trim();
+    if q.is_empty() {
+        return Json(Vec::<Value>::new()).into_response();
+    }
+    match db_search_users_by_email(state.global_db.pool(), q, USER_SEARCH_LIMIT).await {
+        Ok(rows) => {
+            Json(rows.iter().map(publisher_row_to_json).collect::<Vec<_>>()).into_response()
+        }
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct SetPublisherTierReq {
+    pub tier: String,
+}
+
+/// `PATCH /market/publishers/:id` — admin: set an account's publisher tier to any
+/// EXISTING tier except `official`. `official` (the Wallet Guardians brand) is
+/// reserved and set out of band, so it is intentionally NOT grantable here.
+pub async fn set_publisher_tier(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(target_user_id): Path<String>,
+    Json(req): Json<SetPublisherTierReq>,
+) -> Response {
+    if let Some(resp) = require_market_admin(&state, &user).await {
+        return resp;
+    }
+    let tier = req.tier.trim();
+    if tier == "official" {
+        return (
+            StatusCode::BAD_REQUEST,
+            "'official' is reserved (Wallet Guardians) and cannot be granted here",
+        )
+            .into_response();
+    }
+    match db_tier_exists(state.global_db.pool(), tier).await {
+        Ok(false) => return (StatusCode::BAD_REQUEST, "unknown tier").into_response(),
+        Err(e) => return server_error(&e.to_string()),
+        Ok(true) => {}
+    }
+    match db_set_publisher_tier(state.global_db.pool(), &target_user_id, tier).await {
+        Ok(Some(email)) => Json(serde_json::json!({
+            "user_id": target_user_id,
+            "email": email,
+            "publisher_tier": tier,
+        }))
+        .into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "user not found").into_response(),
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+fn publisher_row_to_json(r: &PublisherRow) -> Value {
+    serde_json::json!({
+        "user_id": r.user_id,
+        "email": r.email,
+        "publisher_tier": r.publisher_tier,
+        "listing_count": r.listing_count,
+    })
+}
+
+fn tier_row_to_json(r: &TierRow) -> Value {
+    serde_json::json!({
+        "id": r.id,
+        "label": r.label,
+        "checkmark": r.checkmark,
+        "color": r.color,
+        "rank": r.rank,
+        "reserved": r.reserved,
+        "member_count": r.member_count,
+    })
+}
+
+/// `GET /market/tiers` — list publisher tier definitions. Authenticated (not
+/// admin-only): the market UI needs these to render each publisher's badge.
+pub async fn list_tiers(
+    State(state): State<AppState>,
+    Extension(_user): Extension<AuthUser>,
+) -> Response {
+    match db_list_tiers(state.global_db.pool()).await {
+        Ok(rows) => Json(rows.iter().map(tier_row_to_json).collect::<Vec<_>>()).into_response(),
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct CreateTierReq {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub checkmark: bool,
+    pub color: String,
+    #[serde(default)]
+    pub rank: i32,
+}
+
+/// `POST /market/tiers` — admin: create a new (non-reserved) tier.
+pub async fn create_tier(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Json(req): Json<CreateTierReq>,
+) -> Response {
+    if let Some(resp) = require_market_admin(&state, &user).await {
+        return resp;
+    }
+    let id = req.id.trim();
+    let label = req.label.trim();
+    let color = req.color.trim();
+    if !(2..=32).contains(&id.len())
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        || !id.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            "id must be 2–32 chars of [a-z0-9-], starting alphanumeric",
+        )
+            .into_response();
+    }
+    if label.is_empty() || label.chars().count() > 40 {
+        return (StatusCode::BAD_REQUEST, "label must be 1–40 chars").into_response();
+    }
+    if !(color.len() == 7
+        && color.starts_with('#')
+        && color[1..].chars().all(|c| c.is_ascii_hexdigit()))
+    {
+        return (StatusCode::BAD_REQUEST, "color must be a #RRGGBB hex").into_response();
+    }
+    match db_create_tier(
+        state.global_db.pool(),
+        id,
+        label,
+        req.checkmark,
+        color,
+        req.rank,
+        now_secs(),
+    )
+    .await
+    {
+        Ok(Some(id)) => Json(serde_json::json!({ "id": id })).into_response(),
+        Ok(None) => (StatusCode::CONFLICT, "tier id already exists").into_response(),
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+/// `DELETE /market/tiers/:id` — admin: delete a non-reserved tier. Its members
+/// are reassigned to `community`.
+pub async fn delete_tier(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(id): Path<String>,
+) -> Response {
+    if let Some(resp) = require_market_admin(&state, &user).await {
+        return resp;
+    }
+    match db_delete_tier(state.global_db.pool(), &id).await {
+        Ok(Some(deleted)) => Json(serde_json::json!({ "deleted": deleted })).into_response(),
+        Ok(None) => (
+            StatusCode::BAD_REQUEST,
+            "tier not found or reserved (built-in tiers cannot be deleted)",
+        )
+            .into_response(),
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct GrantTierReq {
+    pub email: String,
+    pub tier: String,
+}
+
+/// `POST /market/grant-tier` — admin: set a tier on an account by EMAIL. Unlike
+/// `PATCH /market/publishers/:id`, this can grade an account that hasn't
+/// published yet (so it isn't in the publisher list) — it just has to exist
+/// (logged in once). `official` is reserved and not grantable here.
+pub async fn grant_tier_by_email(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Json(req): Json<GrantTierReq>,
+) -> Response {
+    if let Some(resp) = require_market_admin(&state, &user).await {
+        return resp;
+    }
+    let tier = req.tier.trim();
+    let email = req.email.trim();
+    if tier == "official" {
+        return (
+            StatusCode::BAD_REQUEST,
+            "'official' is reserved (Wallet Guardians) and cannot be granted here",
+        )
+            .into_response();
+    }
+    if email.is_empty() {
+        return (StatusCode::BAD_REQUEST, "email is required").into_response();
+    }
+    match db_tier_exists(state.global_db.pool(), tier).await {
+        Ok(false) => return (StatusCode::BAD_REQUEST, "unknown tier").into_response(),
+        Err(e) => return server_error(&e.to_string()),
+        Ok(true) => {}
+    }
+    match db_set_publisher_tier_by_email(state.global_db.pool(), email, tier).await {
+        Ok(Some(user_id)) => Json(serde_json::json!({
+            "user_id": user_id,
+            "email": email,
+            "publisher_tier": tier,
+        }))
+        .into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            "그 이메일의 계정이 없어요 — 해당 계정으로 한 번 로그인해야 등급을 줄 수 있어요",
+        )
+            .into_response(),
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+/// `POST /market/reviews/:id/helpful` — vote helpful (idempotent per user).
+pub async fn vote_helpful(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(review_id): Path<Uuid>,
+) -> Response {
+    match db_vote_helpful(state.global_db.pool(), review_id, &user.user_id, now_secs()).await {
+        Ok(Some(inserted)) => Json(serde_json::json!({ "newly_voted": inserted })).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "review not found").into_response(),
+        Err(DbError::Forbidden { reason }) => (StatusCode::FORBIDDEN, reason).into_response(),
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+/// `POST /market/listings/:id/watch` — subscribe to new-version notifications.
+pub async fn watch(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(listing_id): Path<Uuid>,
+) -> Response {
+    match db_watch(
+        state.global_db.pool(),
+        &user.user_id,
+        listing_id,
+        now_secs(),
+    )
+    .await
+    {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => (StatusCode::NOT_FOUND, "listing not found").into_response(),
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+/// `DELETE /market/listings/:id/watch` — cancel subscription.
+pub async fn unwatch(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(listing_id): Path<Uuid>,
+) -> Response {
+    match db_unwatch(state.global_db.pool(), &user.user_id, listing_id).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+/// `DELETE /market/listings/id/:id` — hide a listing you published. Only the
+/// publisher can archive their own published listing; child rows are retained
+/// for audit and moderation history. Returns 404 when the listing doesn't exist,
+/// is no longer published, or belongs to someone else.
+pub async fn delete_listing(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(listing_id): Path<Uuid>,
+) -> Response {
+    match db_delete_listing(state.global_db.pool(), listing_id, &user.user_id).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => (StatusCode::NOT_FOUND, "listing not found").into_response(),
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn validate_create_req(req: &CreateListingReq) -> Result<(), String> {
+    validate_slug("slug", &req.slug)?;
+    validate_i18n(
+        "display_name",
+        &req.display_name,
+        MARKET_SHORT_TEXT_MAX_CHARS,
+    )?;
+    validate_optional_i18n(
+        "description",
+        req.description.as_ref(),
+        MARKET_LONG_TEXT_MAX_CHARS,
+    )?;
+    validate_optional_short_text("category", req.category.as_deref())?;
+    validate_optional_json_size("doc", req.doc.as_ref(), MARKET_DOC_MAX_BYTES)?;
+    validate_intents(req.intents.as_deref())?;
+    validate_optional_i18n(
+        "changelog",
+        req.changelog.as_ref(),
+        MARKET_LONG_TEXT_MAX_CHARS,
+    )?;
+    if let Err(e) = validate_semver(&req.version) {
+        return Err(e.to_string());
+    }
+    match req.kind {
+        ListingKind::Policy => {
+            validate_policy_body(
+                req.cedar_text.as_deref(),
+                req.manifest.as_ref(),
+                req.policy_tree.as_deref(),
+                req.members.as_deref(),
+            )?;
+            validate_required_short_text("domain", req.domain.as_deref())?;
+            if req.severity.is_none() {
+                return Err("policy listing needs severity".into());
+            }
+        }
+        ListingKind::Set => {
+            validate_set_body(
+                req.cedar_text.as_deref(),
+                req.manifest.as_ref(),
+                req.policy_tree.as_deref(),
+                req.members.as_deref(),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+const REPORT_DETAILS_MAX_CHARS: usize = 1_000;
+
+fn validate_version_req(listing_kind: &str, req: &CreateVersionReq) -> Result<(), String> {
+    validate_optional_i18n(
+        "changelog",
+        req.changelog.as_ref(),
+        MARKET_LONG_TEXT_MAX_CHARS,
+    )?;
+    match listing_kind {
+        "policy" => validate_policy_body(
+            req.cedar_text.as_deref(),
+            req.manifest.as_ref(),
+            req.policy_tree.as_deref(),
+            req.members.as_deref(),
+        ),
+        "set" => validate_set_body(
+            req.cedar_text.as_deref(),
+            req.manifest.as_ref(),
+            req.policy_tree.as_deref(),
+            req.members.as_deref(),
+        ),
+        other => Err(format!("unknown listing kind: {other}")),
+    }
+}
+
+fn validate_policy_body(
+    cedar_text: Option<&str>,
+    manifest: Option<&Value>,
+    policy_tree: Option<&str>,
+    members: Option<&[SetMember]>,
+) -> Result<(), String> {
+    if members.is_some() {
+        return Err("policy version must not carry members[]".into());
+    }
+    validate_required_bytes("cedar_text", cedar_text, MARKET_CEDAR_TEXT_MAX_BYTES)?;
+    validate_cedar_text(
+        "cedar_text",
+        cedar_text.expect("required cedar_text already checked"),
+    )?;
+    validate_optional_json_size("manifest", manifest, MARKET_MANIFEST_MAX_BYTES)?;
+    validate_optional_bytes("policy_tree", policy_tree, MARKET_POLICY_TREE_MAX_BYTES)?;
+    Ok(())
+}
+
+fn validate_set_body(
+    cedar_text: Option<&str>,
+    manifest: Option<&Value>,
+    policy_tree: Option<&str>,
+    members: Option<&[SetMember]>,
+) -> Result<(), String> {
+    if cedar_text.is_some() {
+        return Err("set version must not carry cedar_text".into());
+    }
+    if manifest.is_some() {
+        return Err("set version must not carry manifest".into());
+    }
+    if policy_tree.is_some() {
+        return Err("set version must not carry policy_tree".into());
+    }
+    validate_set_members(members)
+}
+
+fn validate_set_members(members: Option<&[SetMember]>) -> Result<(), String> {
+    let Some(members) = members else {
+        return Err("set version needs members[]".into());
+    };
+    if members.is_empty() {
+        return Err("set version needs members[]".into());
+    }
+    if members.len() > MARKET_SET_MEMBERS_MAX {
+        return Err(format!(
+            "set version members[] must contain at most {MARKET_SET_MEMBERS_MAX} entries"
+        ));
+    }
+    let mut slugs = HashSet::with_capacity(members.len());
+    for (idx, member) in members.iter().enumerate() {
+        validate_slug(&format!("members[{idx}].slug"), &member.slug)?;
+        if !slugs.insert(member.slug.as_str()) {
+            return Err(format!("members[{idx}].slug must be unique"));
+        }
+        validate_required_chars(
+            &format!("members[{idx}].display_name"),
+            Some(member.display_name.as_str()),
+            MARKET_SHORT_TEXT_MAX_CHARS,
+        )?;
+        validate_required_bytes(
+            &format!("members[{idx}].cedar_text"),
+            Some(member.cedar_text.as_str()),
+            MARKET_CEDAR_TEXT_MAX_BYTES,
+        )?;
+        validate_cedar_text(
+            &format!("members[{idx}].cedar_text"),
+            member.cedar_text.as_str(),
+        )?;
+        validate_optional_json_size(
+            &format!("members[{idx}].manifest"),
+            member.manifest.as_ref(),
+            MARKET_MANIFEST_MAX_BYTES,
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_cedar_text(field: &str, raw: &str) -> Result<(), String> {
+    PolicySet::from_str(raw)
+        .map(|_| ())
+        .map_err(|_| format!("{field} must be valid Cedar policy text"))
+}
+
+fn validate_slug(field: &str, raw: &str) -> Result<(), String> {
+    validate_required_chars(field, Some(raw), MARKET_SLUG_MAX_CHARS)?;
+    if raw.trim() != raw {
+        return Err(format!("{field} must not have surrounding whitespace"));
+    }
+    if !raw
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'(' | b')'))
+    {
+        return Err(format!(
+            "{field} must contain only ASCII letters, digits, '.', '_', '-', '(' or ')'"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_i18n(field: &str, value: &I18nText, max_chars: usize) -> Result<(), String> {
+    validate_required_chars(&format!("{field}.en"), Some(value.en.as_str()), max_chars)?;
+    if let Some(ko) = &value.ko {
+        validate_required_chars(&format!("{field}.ko"), Some(ko.as_str()), max_chars)?;
+    }
+    Ok(())
+}
+
+fn validate_optional_i18n(
+    field: &str,
+    value: Option<&I18nText>,
+    max_chars: usize,
+) -> Result<(), String> {
+    match value {
+        Some(value) => validate_i18n(field, value, max_chars),
+        None => Ok(()),
+    }
+}
+
+fn validate_required_short_text(field: &str, raw: Option<&str>) -> Result<(), String> {
+    validate_required_chars(field, raw, MARKET_SHORT_TEXT_MAX_CHARS)
+}
+
+fn validate_optional_short_text(field: &str, raw: Option<&str>) -> Result<(), String> {
+    match raw {
+        Some(raw) => validate_required_chars(field, Some(raw), MARKET_SHORT_TEXT_MAX_CHARS),
+        None => Ok(()),
+    }
+}
+
+fn normalize_optional_query_text(
+    field: &str,
+    raw: Option<String>,
+) -> Result<Option<String>, String> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let value = raw.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if value.chars().count() > MARKET_QUERY_TEXT_MAX_CHARS {
+        return Err(format!(
+            "{field} must be at most {MARKET_QUERY_TEXT_MAX_CHARS} characters"
+        ));
+    }
+    Ok(Some(value.to_owned()))
+}
+
+fn normalize_market_list_offset(offset: Option<i64>) -> Result<i64, String> {
+    let offset = offset.unwrap_or(0).max(0);
+    if offset > MARKET_LIST_OFFSET_MAX {
+        return Err(format!("offset must be at most {MARKET_LIST_OFFSET_MAX}"));
+    }
+    Ok(offset)
+}
+
+fn validate_intents(intents: Option<&[String]>) -> Result<(), String> {
+    let Some(intents) = intents else {
+        return Ok(());
+    };
+    if intents.len() > MARKET_INTENTS_MAX {
+        return Err(format!(
+            "intents must contain at most {MARKET_INTENTS_MAX} entries"
+        ));
+    }
+    for (idx, intent) in intents.iter().enumerate() {
+        validate_required_chars(
+            &format!("intents[{idx}]"),
+            Some(intent.as_str()),
+            MARKET_SHORT_TEXT_MAX_CHARS,
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_required_chars(field: &str, raw: Option<&str>, max_chars: usize) -> Result<(), String> {
+    let Some(raw) = raw else {
+        return Err(format!("{field} is required"));
+    };
+    if raw.trim().is_empty() {
+        return Err(format!("{field} must not be blank"));
+    }
+    if raw.chars().count() > max_chars {
+        return Err(format!("{field} must be at most {max_chars} characters"));
+    }
+    Ok(())
+}
+
+fn validate_required_bytes(field: &str, raw: Option<&str>, max_bytes: usize) -> Result<(), String> {
+    let Some(raw) = raw else {
+        return Err(format!("{field} is required"));
+    };
+    if raw.trim().is_empty() {
+        return Err(format!("{field} must not be blank"));
+    }
+    if raw.len() > max_bytes {
+        return Err(format!("{field} must be at most {max_bytes} bytes"));
+    }
+    Ok(())
+}
+
+fn validate_optional_bytes(field: &str, raw: Option<&str>, max_bytes: usize) -> Result<(), String> {
+    match raw {
+        Some(raw) => validate_required_bytes(field, Some(raw), max_bytes),
+        None => Ok(()),
+    }
+}
+
+fn validate_optional_json_size(
+    field: &str,
+    value: Option<&Value>,
+    max_bytes: usize,
+) -> Result<(), String> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let len = serde_json::to_vec(value)
+        .map(|bytes| bytes.len())
+        .map_err(|_| format!("{field} must be serializable JSON"))?;
+    if len > max_bytes {
+        return Err(format!("{field} must be at most {max_bytes} bytes"));
+    }
+    Ok(())
+}
+
+fn validate_report_req(req: &CreateReportReq) -> Result<(), String> {
+    match req.details.as_deref() {
+        Some(details) if details.trim().is_empty() => {
+            return Err("details must not be blank".to_owned());
+        }
+        Some(details) if details.chars().count() > REPORT_DETAILS_MAX_CHARS => {
+            return Err("details must be at most 1000 characters".to_owned());
+        }
+        _ => {}
+    }
+    if req.reason == ReportReason::Other && req.details.is_none() {
+        return Err("details are required when reason is other".to_owned());
+    }
+    Ok(())
+}
+
+async fn require_market_admin(state: &AppState, user: &AuthUser) -> Option<Response> {
+    let admin_emails = std::env::var("MARKET_ADMIN_EMAILS").unwrap_or_default();
+    let current_email = match state.global_db.get_user_by_id(&user.user_id).await {
+        Ok(Some(row)) => row.email,
+        Ok(None) => {
+            return Some((StatusCode::FORBIDDEN, "market admin access required").into_response())
+        }
+        Err(e) => return Some(server_error(&e.to_string())),
+    };
+    if is_market_admin_email(&current_email, &admin_emails) {
+        None
+    } else {
+        Some((StatusCode::FORBIDDEN, "market admin access required").into_response())
+    }
+}
+
+fn is_market_admin_email(email: &str, allowlist: &str) -> bool {
+    let email = email.trim().to_ascii_lowercase();
+    if email.is_empty() {
+        return false;
+    }
+    allowlist
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .any(|admin| admin.eq_ignore_ascii_case(&email))
+}
+
+fn normalized_report_details(req: &CreateReportReq) -> Option<String> {
+    req.details.as_deref().map(str::trim).map(str::to_owned)
+}
+
+fn version_is_strictly_greater(listing: &ListingRow, new_version: &str) -> bool {
+    let Ok((nmaj, nmin, npat)) = validate_semver(new_version) else {
+        return false;
+    };
+    let Some(cur) = listing.current_version.as_deref() else {
+        return true;
+    };
+    let Ok((cmaj, cmin, cpat)) = validate_semver(cur) else {
+        return true;
+    };
+    (nmaj, nmin, npat) > (cmaj, cmin, cpat)
+}
+
+fn listing_row_to_summary(r: &ListingRow) -> ListingSummary {
+    ListingSummary {
+        id: r.id,
+        slug: r.slug.clone(),
+        kind: parse_kind(&r.kind),
+        publisher_id: r.publisher_id.clone(),
+        // raw 등급 id 그대로 — parse_tier 로 enum 화하면 커스텀 등급이 전부
+        // community 로 뭉개져 배지가 안 떴다(빌트인만 살아남음).
+        publisher_tier: r.publisher_tier.clone(),
+        display_name: json_to_i18n(&r.display_name),
+        description: r.description.as_ref().map(json_to_i18n),
+        domain: r.domain.clone(),
+        category: r.category.clone(),
+        doc: r.doc.clone(),
+        intents: r.intents.as_ref().and_then(json_to_string_array),
+        severity: r.severity.as_deref().and_then(parse_severity),
+        status: parse_status(&r.status),
+        current_version: r.current_version.clone(),
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+        install_count: r.install_count,
+        rating_avg: r.rating_avg,
+        rating_count: r.rating_count,
+        is_installed: r.is_installed,
+        publisher_email: r.publisher_email.as_deref().map(publisher_public_label),
+    }
+}
+
+/// 마켓 공개용 게시자 라벨 — 이메일의 local part(@ 앞부분)만 노출한다. 전체 주소
+/// (도메인 포함)는 마켓 응답에 싣지 않는다: 모든 게시자의 메일 주소가 공개·스크래핑
+/// 되는 걸 막기 위함. @ 가 없으면(이미 가공된 값 등) 통째로 사용한다.
+fn publisher_public_label(email: &str) -> String {
+    match email.split_once('@') {
+        Some((local, _domain)) if !local.is_empty() => local.to_owned(),
+        _ => email.to_owned(),
+    }
+}
+
+fn public_user_handle(prefix: &str, user_id: &str) -> String {
+    let digest = Sha256::digest(user_id.as_bytes());
+    format!("{prefix}-{}", hex::encode(&digest[..6]))
+}
+
+fn version_row_to_dto(v: VersionRow) -> ListingVersion {
+    ListingVersion {
+        listing_id: v.listing_id,
+        version: v.version,
+        major: v.major,
+        minor: v.minor,
+        patch: v.patch,
+        cedar_text: v.cedar_text,
+        manifest: v.manifest,
+        policy_tree: v.policy_tree,
+        members: v.members.and_then(json_to_members),
+        changelog: v.changelog.as_ref().map(json_to_i18n),
+        published_at: v.published_at,
+    }
+}
+
+fn review_row_to_dto(r: &ReviewRow) -> Review {
+    Review {
+        id: r.id,
+        listing_id: r.listing_id,
+        user_id: r.user_id.clone(),
+        reviewer_handle: public_user_handle("reviewer", &r.user_id),
+        version: r.version.clone(),
+        rating: r.rating,
+        body: json_to_i18n(&r.body),
+        helpful_count: r.helpful_count,
+        created_at: r.created_at,
+    }
+}
+
+fn report_row_to_dto(r: &ReportRow) -> MarketReport {
+    MarketReport {
+        id: r.id,
+        listing_id: r.listing_id,
+        review_id: r.review_id,
+        reporter_id: r.reporter_id.clone(),
+        reporter_handle: public_user_handle("reporter", &r.reporter_id),
+        reason: parse_report_reason(&r.reason),
+        details: r.details.clone(),
+        status: parse_report_status(&r.status),
+        resolved_by: r.resolved_by.clone(),
+        resolved_by_handle: r
+            .resolved_by
+            .as_deref()
+            .map(|user_id| public_user_handle("moderator", user_id)),
+        resolved_at: r.resolved_at,
+        created_at: r.created_at,
+    }
+}
+
+fn i18n_to_json(t: &I18nText) -> Value {
+    let mut m = serde_json::Map::new();
+    m.insert("en".into(), Value::String(t.en.clone()));
+    if let Some(ko) = &t.ko {
+        m.insert("ko".into(), Value::String(ko.clone()));
+    }
+    Value::Object(m)
+}
+
+fn json_to_i18n(v: &Value) -> I18nText {
+    let en = v
+        .get("en")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_owned();
+    let ko = v.get("ko").and_then(|x| x.as_str()).map(str::to_owned);
+    I18nText { en, ko }
+}
+
+fn members_to_json(members: &[SetMember]) -> Value {
+    serde_json::to_value(members).unwrap_or(Value::Array(Vec::new()))
+}
+
+fn json_to_members(v: Value) -> Option<Vec<SetMember>> {
+    serde_json::from_value(v).ok()
+}
+
+fn json_to_string_array(v: &Value) -> Option<Vec<String>> {
+    v.as_array().map(|arr| {
+        arr.iter()
+            .filter_map(|x| x.as_str().map(str::to_owned))
+            .collect()
+    })
+}
+
+const fn serde_kind(k: ListingKind) -> &'static str {
+    match k {
+        ListingKind::Policy => "policy",
+        ListingKind::Set => "set",
+    }
+}
+
+fn parse_kind(s: &str) -> ListingKind {
+    match s {
+        "set" => ListingKind::Set,
+        _ => ListingKind::Policy,
+    }
+}
+
+const fn serde_tier(t: PublisherTier) -> &'static str {
+    match t {
+        PublisherTier::Official => "official",
+        PublisherTier::Verified => "verified",
+        PublisherTier::Community => "community",
+    }
+}
+
+const fn serde_severity(s: Severity) -> &'static str {
+    match s {
+        Severity::Deny => "deny",
+        Severity::Warn => "warn",
+    }
+}
+
+fn parse_severity(s: &str) -> Option<Severity> {
+    match s {
+        "deny" => Some(Severity::Deny),
+        "warn" => Some(Severity::Warn),
+        _ => None,
+    }
+}
+
+fn parse_status(s: &str) -> ListingStatus {
+    match s {
+        "pending" => ListingStatus::Pending,
+        "archived" => ListingStatus::Archived,
+        "rejected" => ListingStatus::Rejected,
+        _ => ListingStatus::Published,
+    }
+}
+
+const fn serde_report_reason(reason: ReportReason) -> &'static str {
+    match reason {
+        ReportReason::UnsafePolicy => "unsafe_policy",
+        ReportReason::Misleading => "misleading",
+        ReportReason::Spam => "spam",
+        ReportReason::Abuse => "abuse",
+        ReportReason::Other => "other",
+    }
+}
+
+fn parse_report_reason(s: &str) -> ReportReason {
+    match s {
+        "unsafe_policy" => ReportReason::UnsafePolicy,
+        "misleading" => ReportReason::Misleading,
+        "spam" => ReportReason::Spam,
+        "abuse" => ReportReason::Abuse,
+        _ => ReportReason::Other,
+    }
+}
+
+fn parse_report_status(s: &str) -> ReportStatus {
+    match s {
+        "resolved" => ReportStatus::Resolved,
+        _ => ReportStatus::Open,
+    }
+}
+
+const fn serde_report_status(status: ReportStatus) -> &'static str {
+    match status {
+        ReportStatus::Open => "open",
+        ReportStatus::Resolved => "resolved",
+    }
+}
+
+fn now_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+}
+
+fn db_constraint_bad_request(msg: &str) -> Option<Response> {
+    if !is_db_constraint_error(msg) {
+        return None;
+    }
+    let safe_msg = crate::logging::redact_sensitive_log_text(msg);
+    tracing::warn!(error = %safe_msg, "market request violated database constraint");
+    Some(
+        (
+            StatusCode::BAD_REQUEST,
+            "marketplace request violates a uniqueness, schema, or visibility constraint",
+        )
+            .into_response(),
+    )
+}
+
+fn is_db_constraint_error(msg: &str) -> bool {
+    let msg = msg.to_ascii_lowercase();
+    msg.contains("duplicate key")
+        || msg.contains("unique constraint")
+        || msg.contains("violates unique constraint")
+        || msg.contains("check constraint")
+        || msg.contains("violates check constraint")
+        || msg.contains("forked_from listing must reference a published listing")
+        || msg.contains("new version must be strictly greater than current_version")
+}
+
+fn server_error(msg: &str) -> Response {
+    let safe_msg = crate::logging::redact_sensitive_log_text(msg);
+    tracing::error!(error = %safe_msg, "market handler internal error");
+    (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
+}
+
+// `Deserialize` flag used by axum's Query extractor — needed because the
+// `Default` impl for `ListListingsQuery` is generated above via #[derive].
+#[allow(dead_code)]
+#[derive(Deserialize)]
+struct _QueryProbe;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn i18n(en: &str) -> I18nText {
+        I18nText {
+            en: en.to_owned(),
+            ko: None,
+        }
+    }
+
+    fn set_member() -> SetMember {
+        SetMember {
+            slug: "member-policy".to_owned(),
+            display_name: "Member policy".to_owned(),
+            cedar_text: "permit(principal, action, resource);".to_owned(),
+            manifest: None,
+        }
+    }
+
+    fn policy_listing_req() -> CreateListingReq {
+        CreateListingReq {
+            slug: "safe-policy".to_owned(),
+            kind: ListingKind::Policy,
+            display_name: i18n("Safe policy"),
+            description: None,
+            domain: Some("token".to_owned()),
+            category: Some("approvals".to_owned()),
+            doc: None,
+            intents: None,
+            severity: Some(Severity::Warn),
+            version: "1.0.0".to_owned(),
+            cedar_text: Some("permit(principal, action, resource);".to_owned()),
+            manifest: Some(json!({"trigger": {"where": {"action.domain": {"eq": "token"}}}})),
+            policy_tree: None,
+            members: None,
+            changelog: None,
+            forked_from: None,
+        }
+    }
+
+    fn policy_version_req() -> CreateVersionReq {
+        CreateVersionReq {
+            version: "1.0.1".to_owned(),
+            cedar_text: Some("permit(principal, action, resource);".to_owned()),
+            manifest: None,
+            policy_tree: None,
+            members: None,
+            changelog: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn server_error_does_not_echo_internal_reason() {
+        let response = server_error("duplicate key includes secret");
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert_eq!(text, "Internal server error");
+        assert!(!text.contains("secret"), "body leaked: {text}");
+    }
+
+    #[tokio::test]
+    async fn db_constraint_bad_request_does_not_echo_internal_reason() {
+        let response =
+            db_constraint_bad_request("duplicate key value violates UNIQUE secret=token")
+                .expect("constraint error should map to 400");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert_eq!(
+            text,
+            "marketplace request violates a uniqueness, schema, or visibility constraint"
+        );
+        assert!(!text.contains("secret"), "body leaked: {text}");
+    }
+
+    #[test]
+    fn public_user_handle_is_stable_and_does_not_expose_source_id() {
+        let sensitive = "user_oauth_subject_internal_stable_id";
+        let a = public_user_handle("reviewer", sensitive);
+        let b = public_user_handle("reviewer", sensitive);
+
+        assert_eq!(a, b);
+        assert!(a.starts_with("reviewer-"), "handle={a}");
+        assert!(!a.contains(sensitive), "handle leaked source id: {a}");
+        assert_ne!(a, public_user_handle("publisher", sensitive));
+    }
+
+    #[test]
+    fn marketplace_public_dtos_do_not_serialize_internal_user_ids() {
+        let sensitive_user_id = "user_oauth_subject_internal_stable_id";
+        let sensitive_moderator_id = "moderator_oauth_subject_internal_stable_id";
+        let listing = ListingSummary {
+            id: Uuid::nil(),
+            slug: "safe-policy".to_owned(),
+            kind: ListingKind::Policy,
+            publisher_id: sensitive_user_id.to_owned(),
+            publisher_tier: "community".to_owned(),
+            display_name: i18n("Safe policy"),
+            description: None,
+            domain: Some("token".to_owned()),
+            category: Some("approvals".to_owned()),
+            doc: None,
+            intents: None,
+            severity: Some(Severity::Warn),
+            status: ListingStatus::Published,
+            current_version: Some("1.0.0".to_owned()),
+            created_at: 1,
+            updated_at: 1,
+            install_count: 0,
+            rating_avg: None,
+            rating_count: 0,
+            is_installed: false,
+            publisher_email: Some(public_user_handle("publisher", sensitive_user_id)),
+        };
+        let listing_json = serde_json::to_string(&listing).unwrap();
+        assert!(!listing_json.contains(sensitive_user_id), "{listing_json}");
+        assert!(!listing_json.contains("publisher_id"), "{listing_json}");
+
+        let review = Review {
+            id: Uuid::nil(),
+            listing_id: Uuid::nil(),
+            user_id: sensitive_user_id.to_owned(),
+            reviewer_handle: public_user_handle("reviewer", sensitive_user_id),
+            version: "1.0.0".to_owned(),
+            rating: 5,
+            body: i18n("Useful"),
+            helpful_count: 0,
+            created_at: 1,
+        };
+        let review_json = serde_json::to_string(&review).unwrap();
+        assert!(!review_json.contains(sensitive_user_id), "{review_json}");
+        assert!(!review_json.contains("user_id"), "{review_json}");
+        assert!(review_json.contains("reviewer_handle"), "{review_json}");
+
+        let report = MarketReport {
+            id: Uuid::nil(),
+            listing_id: Some(Uuid::nil()),
+            review_id: None,
+            reporter_id: sensitive_user_id.to_owned(),
+            reporter_handle: public_user_handle("reporter", sensitive_user_id),
+            reason: ReportReason::Spam,
+            details: Some("spam".to_owned()),
+            status: ReportStatus::Resolved,
+            resolved_by: Some(sensitive_moderator_id.to_owned()),
+            resolved_by_handle: Some(public_user_handle("moderator", sensitive_moderator_id)),
+            resolved_at: Some(2),
+            created_at: 1,
+        };
+        let report_json = serde_json::to_string(&report).unwrap();
+        assert!(!report_json.contains(sensitive_user_id), "{report_json}");
+        assert!(
+            !report_json.contains(sensitive_moderator_id),
+            "{report_json}"
+        );
+        assert!(!report_json.contains("reporter_id"), "{report_json}");
+        assert!(!report_json.contains("resolved_by\""), "{report_json}");
+        assert!(report_json.contains("reporter_handle"), "{report_json}");
+        assert!(report_json.contains("resolved_by_handle"), "{report_json}");
+    }
+
+    #[test]
+    fn market_create_validation_rejects_unsafe_slug_and_blank_policy_body() {
+        let mut req = policy_listing_req();
+        req.slug = "Bad/Slug".to_owned();
+        let err = validate_create_req(&req).unwrap_err();
+        assert!(err.contains("slug"), "got: {err}");
+
+        let mut req = policy_listing_req();
+        req.cedar_text = Some("   ".to_owned());
+        let err = validate_create_req(&req).unwrap_err();
+        assert!(err.contains("cedar_text"), "got: {err}");
+
+        let mut req = policy_listing_req();
+        req.domain = Some("   ".to_owned());
+        let err = validate_create_req(&req).unwrap_err();
+        assert!(err.contains("domain"), "got: {err}");
+    }
+
+    #[test]
+    fn market_version_validation_rejects_empty_or_mixed_body_shapes() {
+        let mut req = policy_version_req();
+        req.cedar_text = Some(" ".to_owned());
+        let err = validate_version_req("policy", &req).unwrap_err();
+        assert!(err.contains("cedar_text"), "got: {err}");
+
+        let mut req = policy_version_req();
+        req.members = Some(vec![set_member()]);
+        let err = validate_version_req("policy", &req).unwrap_err();
+        assert!(err.contains("members"), "got: {err}");
+
+        let req = CreateVersionReq {
+            version: "1.0.1".to_owned(),
+            cedar_text: Some("permit(principal, action, resource);".to_owned()),
+            manifest: None,
+            policy_tree: None,
+            members: Some(vec![set_member()]),
+            changelog: None,
+        };
+        let err = validate_version_req("set", &req).unwrap_err();
+        assert!(err.contains("cedar_text"), "got: {err}");
+    }
+
+    #[test]
+    fn market_validation_rejects_invalid_cedar_text() {
+        let mut req = policy_listing_req();
+        req.cedar_text = Some("permit(".to_owned());
+        let err = validate_create_req(&req).unwrap_err();
+        assert!(err.contains("valid Cedar"), "got: {err}");
+
+        let mut req = policy_version_req();
+        req.cedar_text = Some("forbid principal, action, resource);".to_owned());
+        let err = validate_version_req("policy", &req).unwrap_err();
+        assert!(err.contains("valid Cedar"), "got: {err}");
+
+        let req = CreateVersionReq {
+            version: "1.0.1".to_owned(),
+            cedar_text: None,
+            manifest: None,
+            policy_tree: None,
+            members: Some(vec![SetMember {
+                cedar_text: "bad cedar".to_owned(),
+                ..set_member()
+            }]),
+            changelog: None,
+        };
+        let err = validate_version_req("set", &req).unwrap_err();
+        assert!(err.contains("valid Cedar"), "got: {err}");
+    }
+
+    #[test]
+    fn market_validation_caps_user_controlled_json_and_member_fanout() {
+        let mut req = policy_listing_req();
+        req.doc = Some(json!({ "body": "x".repeat(MARKET_DOC_MAX_BYTES) }));
+        let err = validate_create_req(&req).unwrap_err();
+        assert!(err.contains("doc"), "got: {err}");
+
+        let req = CreateVersionReq {
+            version: "1.0.1".to_owned(),
+            cedar_text: None,
+            manifest: None,
+            policy_tree: None,
+            members: Some(vec![set_member(); MARKET_SET_MEMBERS_MAX + 1]),
+            changelog: None,
+        };
+        let err = validate_version_req("set", &req).unwrap_err();
+        assert!(err.contains("members"), "got: {err}");
+
+        let req = CreateVersionReq {
+            version: "1.0.1".to_owned(),
+            cedar_text: None,
+            manifest: None,
+            policy_tree: None,
+            members: Some(vec![set_member(), set_member()]),
+            changelog: None,
+        };
+        let err = validate_version_req("set", &req).unwrap_err();
+        assert!(err.contains("unique"), "got: {err}");
+    }
+
+    #[test]
+    fn market_list_query_normalization_caps_search_text_and_offset() {
+        assert_eq!(
+            normalize_optional_query_text("q", Some("  approvals  ".to_owned())).unwrap(),
+            Some("approvals".to_owned())
+        );
+        assert_eq!(
+            normalize_optional_query_text("q", Some("   ".to_owned())).unwrap(),
+            None
+        );
+
+        let long = "x".repeat(MARKET_QUERY_TEXT_MAX_CHARS + 1);
+        let err = normalize_optional_query_text("q", Some(long)).unwrap_err();
+        assert!(err.contains('q'), "got: {err}");
+
+        assert_eq!(normalize_market_list_offset(Some(-1)).unwrap(), 0);
+        assert_eq!(
+            normalize_market_list_offset(Some(MARKET_LIST_OFFSET_MAX)).unwrap(),
+            MARKET_LIST_OFFSET_MAX
+        );
+        let err = normalize_market_list_offset(Some(MARKET_LIST_OFFSET_MAX + 1)).unwrap_err();
+        assert!(err.contains("offset"), "got: {err}");
+    }
+
+    #[test]
+    fn report_request_validation_requires_details_for_other() {
+        let req = CreateReportReq {
+            reason: ReportReason::Other,
+            details: None,
+        };
+
+        assert_eq!(
+            validate_report_req(&req),
+            Err("details are required when reason is other".to_owned())
+        );
+    }
+
+    #[test]
+    fn report_request_validation_rejects_blank_details() {
+        let req = CreateReportReq {
+            reason: ReportReason::UnsafePolicy,
+            details: Some("   ".to_owned()),
+        };
+
+        assert_eq!(
+            validate_report_req(&req),
+            Err("details must not be blank".to_owned())
+        );
+    }
+
+    #[test]
+    fn report_request_validation_accepts_standard_reason_without_details() {
+        let req = CreateReportReq {
+            reason: ReportReason::Spam,
+            details: None,
+        };
+
+        assert_eq!(validate_report_req(&req), Ok(()));
+    }
+
+    #[test]
+    fn market_admin_email_allowlist_is_fail_closed_when_empty() {
+        assert!(!is_market_admin_email("carol@example.com", ""));
+        assert!(!is_market_admin_email("carol@example.com", " , "));
+    }
+
+    #[test]
+    fn market_admin_email_allowlist_trims_and_ignores_case() {
+        assert!(is_market_admin_email(
+            "CAROL@EXAMPLE.COM",
+            " alice@example.com, carol@example.com "
+        ));
+    }
+}

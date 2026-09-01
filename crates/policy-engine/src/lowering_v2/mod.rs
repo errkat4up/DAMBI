@@ -1,0 +1,62 @@
+//! New-model Cedar lowering — `policy_transition::action::ActionBody` →
+//! [`LoweredAction`] (`Wallet` / `<Namespace>::Action::"…"` / `Protocol` +
+//! cedarschema action-context JSON).
+//!
+//! This is the active lowering path for the ActionBody architecture. It targets
+//! the new action model directly and produces a context object that conforms to
+//! the per-action cedarschema types under `schema/policy-schema/actions/`.
+//!
+//! # Layout
+//!
+//! - [`dispatch`] — the `LoweredAction` / `TxMeta` / `LowerError` contract,
+//!   the `LowerCtx`, and `lower_action`, which matches an `ActionBody` on its
+//!   **domain** and delegates to that domain's `lower`.
+//! - [`common`] — shared sub-lowerings (Cedar primitives, token refs/keys,
+//!   action meta / nature / EIP-712 domain).
+//! - one module per **domain** (`amm`, `token`, `lending`, `airdrop`,
+//!   `launchpad`, `perp`, `permission`) + the two struct variants
+//!   (`multicall`, `unknown`). Each domain owns its directory and per-action
+//!   leaf modules.
+//!
+//! # Conventions
+//!
+//! - `principal` = `Wallet::"<tx.from>"`, `resource` = `Protocol::"<tx.to>"`.
+//! - `action_uid` is namespaced + `PascalCase`, e.g. `Amm::Action::"Swap"`.
+//!
+//! # JSON shape rules
+//!
+//! Cedar 4.10 has no enums/unions: Rust enums are modelled as discriminated
+//! records (`{ kind | name | standard: String, …optional }`) and `LiveField<T>`
+//! is inlined as its underlying `T`. The cedarschema uses **camelCase** keys, so
+//! every record is hand-built (a blind `serde_json::to_value` of the Rust struct
+//! would emit `snake_case` keys and whole `LiveField` objects). Optional fields
+//! are **omitted** when absent — never emitted as `null`. `Long` fields are
+//! plain JSON numbers; `U256`/`U128` values are lower-hex strings (`{:#x}`).
+
+pub use common::account::AccountLeverage;
+pub use common::amount::TokenDecimals;
+pub use common::enrichment::{AccountEnrichment, MarketEnrichment, OrderEnrichment};
+pub use dispatch::{
+    lower_action, lower_action_enriched, lower_action_with_decimals, LowerError, LoweredAction,
+    TxMeta,
+};
+
+mod airdrop;
+mod amm;
+mod bridge;
+mod common;
+mod dispatch;
+mod governance;
+mod hyperliquid_core;
+mod launchpad;
+mod lending;
+mod liquid_staking;
+mod marketplace;
+mod multicall;
+mod permission;
+mod perp;
+mod restaking;
+mod staking;
+mod token;
+mod unknown;
+mod yield_;

@@ -1,0 +1,198 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "policy-server.fullname" . }}-api
+  labels:
+    {{- include "policy-server.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "policy-server.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        {{- include "policy-server.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+      annotations:
+        checksum/sync-config: {{ .Values.syncConfig | sha256sum | quote }}
+    spec:
+      serviceAccountName: {{ include "policy-server.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: api
+          image: {{ include "policy-server.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["policy-server"]
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.port }}
+          env:
+            - name: POLICY_SERVER_ADDR
+              value: "0.0.0.0:{{ .Values.api.port }}"
+            - name: PUBLIC_API_URL
+              value: {{ .Values.api.publicApiUrl | quote }}
+            - name: DASHBOARD_URL
+              value: {{ .Values.api.dashboardUrl | quote }}
+            - name: OAUTH_ALLOWED_REDIRECT_URIS
+              value: {{ .Values.api.oauthAllowedRedirectUris | quote }}
+            - name: CORS_ALLOWED_ORIGINS
+              value: {{ join "," .Values.api.corsAllowedOrigins | quote }}
+            - name: CORS_ALLOW_PRIVATE_NETWORK
+              value: {{ .Values.api.corsAllowPrivateNetwork | quote }}
+            - name: MARKET_ADMIN_EMAILS
+              value: {{ .Values.api.marketAdminEmails | quote }}
+            - name: DAMBI_SYNC_CONFIG
+              value: /app/dambi-sync.toml
+            - name: REQUIRE_SYNC_CONFIG
+              value: {{ .Values.runtime.requireSyncConfig | quote }}
+            - name: REQUIRE_REDIS
+              value: {{ .Values.runtime.requireRedis | quote }}
+            - name: REQUIRE_OAUTH_CONFIG
+              value: {{ .Values.runtime.requireOAuthConfig | quote }}
+            - name: RUN_MIGRATIONS_ON_STARTUP
+              value: {{ .Values.runtime.runMigrationsOnStartup | quote }}
+            - name: REDIS_EVENTS_CHANNEL
+              value: {{ .Values.runtime.redisEventsChannel | quote }}
+            - name: SYNC_WORKER_TICK_SECS
+              value: {{ .Values.worker.tickSeconds | quote }}
+            - name: SYNC_LOCK_TTL_SECS
+              value: {{ .Values.worker.lockTtlSeconds | quote }}
+            - name: RUST_LOG
+              value: {{ .Values.runtime.rustLog | quote }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: REDIS_URL
+                  optional: {{ not .Values.runtime.requireRedis }}
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: GOOGLE_CLIENT_ID
+                  optional: {{ not .Values.runtime.requireOAuthConfig }}
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: GOOGLE_CLIENT_SECRET
+                  optional: {{ not .Values.runtime.requireOAuthConfig }}
+            - name: GOOGLE_REDIRECT_URI
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: GOOGLE_REDIRECT_URI
+                  optional: {{ not .Values.runtime.requireOAuthConfig }}
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: JWT_SECRET
+            - name: ETHERSCAN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: ETHERSCAN_API_KEY
+                  optional: true
+            - name: COINGECKO_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: COINGECKO_API_KEY
+                  optional: true
+            - name: UNISWAP_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: UNISWAP_KEY
+                  optional: true
+            # Dev Portal Bearer key shared by all 1inch venues (Fusion, Fusion+,
+            # LOP). API uses the same sync config for on-demand wallet sync as
+            # the worker uses for background sync, so both processes need the
+            # same env expansion view.
+            - name: ONEINCH_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: ONEINCH_KEY
+                  optional: true
+            {{- if .Values.oracleRpc.sanctionsUrl }}
+            - name: POLICY_SANCTIONS_RPC_URL
+              value: {{ .Values.oracleRpc.sanctionsUrl | quote }}
+            {{- end }}
+            {{- if .Values.oracleRpc.lendingUrl }}
+            - name: POLICY_LENDING_RPC_URL
+              value: {{ .Values.oracleRpc.lendingUrl | quote }}
+            {{- end }}
+            {{- if .Values.oracleRpc.priceUsd.ethereumUrl }}
+            - name: POLICY_PRICE_RPC_URL_1
+              value: {{ .Values.oracleRpc.priceUsd.ethereumUrl | quote }}
+            {{- end }}
+            {{- if .Values.oracleRpc.priceUsd.arbitrumUrl }}
+            - name: POLICY_PRICE_RPC_URL_42161
+              value: {{ .Values.oracleRpc.priceUsd.arbitrumUrl | quote }}
+            {{- end }}
+            {{- if .Values.oracleRpc.priceUsd.baseUrl }}
+            - name: POLICY_PRICE_RPC_URL_8453
+              value: {{ .Values.oracleRpc.priceUsd.baseUrl | quote }}
+            {{- end }}
+            # Alchemy archive-node RPC (eth_getAssetTransfers etc.) for the
+            # stat_window / similarity class-B enrichers. Carries a private API
+            # key in the URL → secret, NEVER values.yaml. Optional: when the key
+            # is absent the readers stay dormant (fail-open), like the others.
+            - name: ALCHEMY_RPC_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: ALCHEMY_RPC_URL
+                  optional: true
+          volumeMounts:
+            - name: sync-config
+              mountPath: /app/dambi-sync.toml
+              subPath: dambi-sync.toml
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          # Zero-downtime on GKE L7: keep serving for a few seconds after SIGTERM
+          # so the GCLB drops this pod from the NEG before it stops accepting
+          # connections (avoids 502s during rollouts). Graceful drain runs after.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "{{ .Values.api.preStopSleepSeconds }}"]
+      terminationGracePeriodSeconds: {{ .Values.api.terminationGracePeriodSeconds }}
+      volumes:
+        - name: sync-config
+          configMap:
+            name: {{ include "policy-server.fullname" . }}-sync

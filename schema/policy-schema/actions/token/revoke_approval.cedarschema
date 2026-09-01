@@ -1,0 +1,53 @@
+// Token::RevokeApproval — revoke a previously granted approval (any scope).
+//
+// `scope` is a discriminated record over the Rust `RevokeScope` variants
+// (Cedar lacks unions). The `kind` discriminator selects which optional
+// fields are populated:
+//
+//   - `"erc20"`             : `token` + `spender`
+//   - `"nft_single_token"`  : `nftKey`
+//   - `"nft_set_for_all"`   : `chain` + `contract` + `spender`
+//   - `"permit2_lockdown"`  : `token` + `spender`
+//   - `"permit2_unordered_nonce"` : `chain` + `wordPos` + `mask`
+//
+// Policies typically inspect `scope.kind` and the relevant fields together
+// (e.g. `scope.kind == "erc20" && scope.spender == "0x..."`).
+
+namespace Token {
+  type RevokeScope = {
+    // Discriminator: "erc20" | "nft_single_token" | "nft_set_for_all" | "permit2_lockdown" | "permit2_unordered_nonce".
+    kind: String,
+    // Token whose allowance is being revoked (erc20, permit2_lockdown).
+    token?: Core::TokenRef,
+    // Spender losing the allowance (erc20, nft_set_for_all, permit2_lockdown).
+    spender?: String,
+    // `TokenKey` identifying the specific NFT (nft_single_token).
+    nftKey?: Core::TokenKey,
+    // Chain on which the collection lives (nft_set_for_all).
+    chain?: String,
+    // `ERC721`/`ERC1155` contract address (nft_set_for_all).
+    contract?: String,
+    // Permit2 unordered nonce word position (U256 hex; permit2_unordered_nonce).
+    wordPos?: String,
+    // Permit2 unordered nonce bitmap mask (U256 hex; permit2_unordered_nonce).
+    mask?: String,
+  };
+
+  type RevokeApprovalContext = {
+    // Common envelope.
+    meta: Core::ActionMeta,
+    // Which approval to revoke.
+    scope: RevokeScope,
+    // Manifest-extensible slot.
+    custom?: RevokeApprovalCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields).
+  type RevokeApprovalCustomContext = {};
+
+  action "RevokeApproval" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: RevokeApprovalContext,
+  };
+}

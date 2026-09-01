@@ -1,0 +1,184 @@
+use std::collections::HashMap;
+
+use serde_json::{Map, Value};
+
+use crate::error::SyncError;
+
+#[derive(Clone, Debug, Default)]
+pub struct ResolveContext {
+    pub chain: Option<String>,
+    pub inputs: HashMap<String, Value>,
+    pub resolved: HashMap<String, Value>,
+    pub derived: HashMap<String, Value>,
+    pub tx: HashMap<String, Value>,
+}
+
+impl ResolveContext {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn with_chain(mut self, chain: impl Into<String>) -> Self {
+        self.chain = Some(chain.into());
+        self
+    }
+
+    #[must_use]
+    pub fn insert_input(mut self, key: impl Into<String>, value: Value) -> Self {
+        self.inputs.insert(key.into(), value);
+        self
+    }
+
+    #[must_use]
+    pub fn insert_resolved(mut self, key: impl Into<String>, value: Value) -> Self {
+        self.resolved.insert(key.into(), value);
+        self
+    }
+}
+
+/// * `"$chain"`        → ctx.chain
+/// * `"$inputs.X"`     → `ctx.inputs[X]`
+/// * `"$resolved.X"`   → `ctx.resolved[X]`
+/// * `"$derived.X"`    → `ctx.derived[X]`
+/// * `"$tx.X"`         → `ctx.tx[X]`
+pub fn resolve_placeholders(value: &Value, ctx: &ResolveContext) -> Result<Value, SyncError> {
+    match value {
+        Value::String(s) => resolve_string(s, ctx),
+
+        Value::Object(obj) => {
+            let mut new_obj = Map::with_capacity(obj.len());
+            for (k, v) in obj {
+                new_obj.insert(k.clone(), resolve_placeholders(v, ctx)?);
+            }
+            Ok(Value::Object(new_obj))
+        }
+
+        Value::Array(arr) => {
+            let mut new_arr = Vec::with_capacity(arr.len());
+            for v in arr {
+                new_arr.push(resolve_placeholders(v, ctx)?);
+            }
+            Ok(Value::Array(new_arr))
+        }
+
+        other => Ok(other.clone()),
+    }
+}
+
+fn resolve_string(s: &str, ctx: &ResolveContext) -> Result<Value, SyncError> {
+    if !s.starts_with('$') {
+        return Ok(Value::String(s.to_string()));
+    }
+
+    if s == "$chain" {
+        return ctx
+            .chain
+            .as_ref()
+            .map(|c| Value::String(c.clone()))
+            .ok_or_else(|| SyncError::FetchFailed {
+                source_id: "manifest_v2".into(),
+                reason: "$chain referenced but not set in ResolveContext".into(),
+            });
+    }
+
+    if let Some(rest) = s.strip_prefix('$') {
+        if let Some((scope, field)) = rest.split_once('.') {
+            let map = match scope {
+                "inputs" => &ctx.inputs,
+                "resolved" => &ctx.resolved,
+                "derived" => &ctx.derived,
+                "tx" => &ctx.tx,
+                _ => {
+                    return Err(SyncError::FetchFailed {
+                        source_id: "manifest_v2".into(),
+                        reason: format!("unknown scope: ${scope}"),
+                    });
+                }
+            };
+            return map
+                .get(field)
+                .cloned()
+                .ok_or_else(|| SyncError::FetchFailed {
+                    source_id: "manifest_v2".into(),
+                    reason: format!("${scope}.{field} not in ResolveContext"),
+                });
+        }
+    }
+
+    Err(SyncError::FetchFailed {
+        source_id: "manifest_v2".into(),
+        reason: format!("unrecognized placeholder: {s}"),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn resolves_chain() {
+        let ctx = ResolveContext::new().with_chain("eip155:1");
+        let v = Value::String("$chain".into());
+        let r = resolve_placeholders(&v, &ctx).unwrap();
+        assert_eq!(r, Value::String("eip155:1".into()));
+    }
+
+    #[test]
+    fn resolves_inputs() {
+        let ctx = ResolveContext::new()
+            .insert_input("amountIn", json!("1000"))
+            .insert_input("recipient", json!("0xUser..."));
+        let v = json!({
+            "amount": "$inputs.amountIn",
+            "to":     "$inputs.recipient"
+        });
+        let r = resolve_placeholders(&v, &ctx).unwrap();
+        assert_eq!(r["amount"], Value::String("1000".into()));
+        assert_eq!(r["to"], Value::String("0xUser...".into()));
+    }
+
+    #[test]
+    fn resolves_nested_source() {
+        let ctx = ResolveContext::new()
+            .with_chain("eip155:1")
+            .insert_resolved("pool", json!("0xUniV3Pool..."));
+        let v = json!({
+            "kind": "onchain_view",
+            "chain": "$chain",
+            "contract": "$resolved.pool",
+            "function": "slot0()",
+            "decoder_id": "uniswap_v3_slot0"
+        });
+        let r = resolve_placeholders(&v, &ctx).unwrap();
+        assert_eq!(r["chain"], Value::String("eip155:1".into()));
+        assert_eq!(r["contract"], Value::String("0xUniV3Pool...".into()));
+        assert_eq!(r["function"], Value::String("slot0()".into()));
+    }
+
+    #[test]
+    fn unknown_scope_errors() {
+        let ctx = ResolveContext::new();
+        let v = Value::String("$nonexistent.field".into());
+        let err = resolve_placeholders(&v, &ctx).unwrap_err();
+        assert!(format!("{err}").contains("unknown scope"));
+    }
+
+    #[test]
+    fn missing_value_errors() {
+        let ctx = ResolveContext::new();
+        let v = Value::String("$chain".into());
+        let err = resolve_placeholders(&v, &ctx).unwrap_err();
+        assert!(format!("{err}").contains("$chain referenced"));
+    }
+
+    #[test]
+    fn non_placeholder_passthrough() {
+        let ctx = ResolveContext::new();
+        let v = json!({ "kind": "oracle_feed", "feed_id": "USDC/USD" });
+        let r = resolve_placeholders(&v, &ctx).unwrap();
+        assert_eq!(r, v);
+    }
+}

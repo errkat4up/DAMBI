@@ -1,0 +1,179 @@
+/target
+**/*.rs.bk
+.DS_Store
+# Generated field-type audit report (field-type-audit.test.ts, FIELD_AUDIT=1). Artifact.
+field-type-audit.html
+docs/superpowers/
+# abi-resolver build artifacts (built locally by build_all.sh, never committed):
+#   - sourcify.sqlite is ~9 GB
+#   - parquet dumps are ~24 GB
+#   - mainnet_mapping.parquet is ~340 MB
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.parquet
+
+# Local Python venv used by the build scripts.
+parquet_venv/
+
+# Anything dumped under the canonical build dir (in case it lands in-tree).
+sourcify_dump/
+
+.serena/
+
+# Frontend build artifacts and dependencies
+**/node_modules/
+# On macOS+iCloud the real dep dirs live under `node_modules.nosync/` (the
+# `.nosync` suffix excludes them from iCloud sync) and the plain `node_modules`
+# is a symlink to it — neither is caught by the dir pattern above, so ignore
+# both forms explicitly.
+**/node_modules.nosync/
+**/node_modules
+**/dist/
+.vite/
+
+# Yarn 4 (Berry) caches / state — keep .yarn/releases/ committed for repo
+# determinism; ignore the rest.
+.yarn/cache/
+.yarn/unplugged/
+.yarn/install-state.gz
+.yarn/build-state.yml
+.pnp.*
+
+# Web-server runtime artifacts (managed by scripts/serve.sh).
+target/web-server.log
+target/web-server.pid
+
+# Claude Code per-developer settings (worktree isolation overrides, etc.)
+.claude/
+
+# Secret env vars (OAuth, JWT) — NEVER commit. See .env.example for layout.
+# Profile files (.env.local, .env.sim, .env.ext, …) feed
+# scripts/start-policy-server.sh and carry the same secrets as .env.
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# wasm-pack artifacts (produced by scripts/wasm-build*.sh and copied into consumers).
+crates/*-wasm/pkg/
+crates/*-wasm/pkg-tsify-test/
+browser-extension/backend/wasm/
+browser-extension/public/wasm/
+
+# Legacy v1/v2 `registry/` tree — moved out of the repo. Runtime + harness load
+# `registryV2/` only; this tree is dead weight. Kept locally at ~/Desktop/registry.
+/registry/
+
+# Generated registry index — output of `registryV2/scripts/build-index.ts`
+# (`cd registryV2 && npm run build`). Regenerated locally and in CI (rust job's
+# "Build registry index" step) from registryV2/{manifests,tokens}; never committed.
+/registryV2/index/
+/registryV2/bundles/
+/registryV2/contexts/
+# Detached bundle signatures — output of `registryV2/scripts/sign-bundles.ts`.
+# Generated + published to GCS like the index; never committed.
+/registryV2/signatures/
+
+# Bundle-signing LOCAL dev keys (BUNDLE_SIGNING_MODE=local). The private key
+# must NEVER be committed — production keys live in Cloud KMS. Only the dev
+# PUBLIC key (SPKI base64) is pinned, via the extension's .env.
+/registryV2/scripts/deploy/keys/
+
+# Local scratch copies of policy-server k8s manifests. The tracked local
+# self-service path is crates/policy-server/server/deploy/local/.
+/deploy-local/
+
+# Markdown docs, research + audit notes — only README.md stays tracked.
+*.md
+!README.md
+!crates/policy-server/server/deploy/local/README.md
+!crates/policy-server/server/deploy/PROD_RESET_RUNBOOK.md
+# OSS community + governance docs. The README links CONTRIBUTING/SECURITY/
+# GOVERNANCE, and GitHub reads CODE_OF_CONDUCT for the community profile, so
+# all four must travel with the repository.
+!CODE_OF_CONDUCT.md
+!CONTRIBUTING.md
+!GOVERNANCE.md
+!SECURITY.md
+# policy-server deployment guide — the README's Deployment section points at it
+# for the Workload Identity Federation setup.
+!crates/policy-server/deploy-guideline.md
+# Policy-catalog shared aggregator-method impl-spec library — tracked so the RPC
+# server implementer (and auditors) get each method's spec alongside the policies.
+!**/policy_catalog_v2/_methods/*.md
+# Registry trust-chain operator runbook — must travel with the repo (sole doc of
+# the signing contract, cutover order, and rotation).
+!registryV2/docs/REGISTRY_ARCHITECTURE.md
+!registryV2/docs/REGISTRY_RUNBOOK.md
+# Local Codex session memory; keep repo-specific copies out of git.
+AGENTS.md
+# The rest of /docs/ stays ignored (scratch research/audit notes).
+/docs/*
+
+# integration-tests is a LOCAL-ONLY crate (v3 decode harness + onboarding docs +
+# golden corpus + per-protocol e2e). No production logic — kept out of git by the
+# user's decision. Also removed from the workspace `members` list so a fresh
+# clone (CI) builds without it; cargo simply ignores the on-disk dir locally.
+crates/integration-tests/
+
+# Server runtime scratch dir (SQLite stores, per-user pools) — origin/main.
+.dambi-runtime/
+
+# Extension signing key — never commit
+*.pem
+
+# ── Local-only preset lab work (NOT shipped) ───────────────────────────────
+# Cedar/manifest preset SETs under presets/ are kept local (user's decision:
+# presets stay out of git). The compile/verify gates below READ that tree, so
+# they'd error on a fresh clone without it — keep them local too.
+presets/
+crates/policy-engine/tests/lido_preset_compile_gate.rs
+crates/policy-engine/tests/bridge_preset_compile_gate.rs
+crates/policy-engine/tests/hl_preset_compile_gate.rs
+crates/policy-engine/tests/codex_lido_compare_gate.rs
+crates/policy-engine/tests/eigenlayer_preset_verify_gate.rs
+crates/policy-engine/tests/preset_restaking_eigenlayer_gate.rs
+crates/policy-engine/tests/preset_staking_verify_gate.rs
+crates/policy-engine/tests/seaport_preset_compile_gate.rs
+crates/policy-engine/tests/airdrop_preset_compile_gate.rs
+# Per-preset e2e tests + their on-chain corpus (read the local presets/ tree).
+crates/policy-engine-wasm/tests/eigenlayer_*.rs
+crates/policy-engine-wasm/tests/hl_preset_e2e.rs
+crates/policy-engine-wasm/tests/airdrop_claim_preset_e2e.rs
+crates/policy-engine-wasm/tests/data/
+# (integration-tests/** preset e2e + corpus are covered by the whole-crate
+#  `crates/integration-tests/` ignore above.)
+# Built extension dist for aave/curve/ethena live e2e (regenerable build output).
+.live-e2e-aave-curve/
+e2e-browser/
+.e2e-tmp/
+# Local dApp playground — assemble tx/typed-sig/HL orders and fire them through
+# the extension to test policies. Local test tooling (same as e2e-browser/).
+playground/
+
+# Policy Lab (playwright) scratch — snapshots/screenshots from manual Lab adds.
+.playwright-mcp/
+/after-add-stake.yml
+/filled-form.yml
+/new-policy-page.png
+/stake-deny-filled.png
+
+# Operational hygiene: env-specific Terraform inputs stay local
+# (terraform.tfvars.example is the tracked template).
+*.tfvars
+!*.tfvars.example
+# browser-extension is a Yarn workspace — never track an npm lockfile there.
+browser-extension/package-lock.json
+# generated form field reference (open locally; regenerate via scripts/gen-field-explorer.ts)
+/field-explorer.html
+
+# local runtime scratch (sqlite, sockets) — never tracked
+.dambi-runtime/
+
+# local byte-perfect mirror of the project's GitBook "Docs" space.
+# Refreshed manually; never tracked.
+gitbook/
+
+# Local read-only GCP project inventory helper.
+scripts/gcp-inventory.local.sh

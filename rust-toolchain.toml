@@ -1,0 +1,15 @@
+# Pinned toolchain.
+#
+# Without this the CI workflows install whatever `stable` is on the day they
+# run, so a new clippy or rustfmt release can fail the build with no code
+# change — which is exactly what happened on 1.95.0's successors for
+# `clippy::result_large_err`. Pin here so local and CI agree, and bump
+# deliberately after running, from the repository root:
+#
+#   cargo fmt --all -- --check
+#   cargo clippy --all-targets --all-features -- -D warnings
+#   cargo test --all-features
+#
+[toolchain]
+channel = "1.95.0"
+components = ["rustfmt", "clippy"]

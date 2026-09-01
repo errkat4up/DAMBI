@@ -1,0 +1,37 @@
+// Lending::BuyCollateral — buy discounted collateral from lending protocol
+// reserves using the venue's base asset.
+//
+// Rust source: `crates/simulation/reducer/src/action/lending/buy_collateral.rs`
+// (`BuyCollateralAction`). Initial use case: Compound V3 Comet
+// `buyCollateral(asset,minAmount,baseAmount,recipient)`.
+
+namespace Lending {
+  type BuyCollateralContext = {
+    meta: Core::ActionMeta,
+    // Lending venue selling collateral.
+    venue: LendingVenue,
+    // Collateral token bought from reserves.
+    collateralAsset: Core::TokenRef,
+    // Base token paid into the protocol.
+    baseAsset: Core::TokenRef,
+    // Minimum acceptable collateral amount (U256 hex).
+    minCollateralAmount: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    minCollateralAmountNano?: Long,
+    // Base amount paid (U256 hex).
+    baseAmount: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    baseAmountNano?: Long,
+    // Recipient of bought collateral.
+    recipient: String,
+    custom?: BuyCollateralCustomContext,
+  };
+
+  type BuyCollateralCustomContext = {};
+
+  action "BuyCollateral" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: BuyCollateralContext,
+  };
+}
