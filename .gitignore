@@ -110,6 +110,11 @@ browser-extension/public/wasm/
 AGENTS.md
 # The rest of /docs/ stays ignored (scratch research/audit notes).
 /docs/*
+# SDK separation artifacts must travel with the repository; other /docs/ files
+# remain local scratch material.
+!docs/security-invariants.md
+!docs/sdk-migration/
+!docs/sdk-migration/**
 
 # integration-tests is a LOCAL-ONLY crate (v3 decode harness + onboarding docs +
 # golden corpus + per-protocol e2e). No production logic — kept out of git by the

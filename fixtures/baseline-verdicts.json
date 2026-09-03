@@ -1,0 +1,166 @@
+{
+  "format": 1,
+  "description": "Browser-free real-WASM verdict baseline for the Phase 0 SDK split.",
+  "source": {
+    "policy_set": "browser-extension/public/default-policies/policy-set-v2.json",
+    "sha256": "f6cfe0094c3c209f8ea47c970289efeceeb3fa56ecedad24b1f65301f75d0765"
+  },
+  "fixed_meta": {
+    "submitted_at": 1738000000,
+    "submitter": "0x1111111111111111111111111111111111111111",
+    "nature": {
+      "kind": "onchain_tx",
+      "chain": "eip155:1",
+      "nonce": 0,
+      "gas_limit": "0x0",
+      "gas_price": {
+        "value": "0x0",
+        "source": {
+          "kind": "oracle_feed",
+          "provider": "pyth",
+          "feed_id": "gas/eip155:1"
+        },
+        "synced_at": 1738000000
+      },
+      "value": "0x0"
+    }
+  },
+  "fixed_tx": {
+    "chain_id": "eip155:1",
+    "from": "0x1111111111111111111111111111111111111111",
+    "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+  },
+  "cases": [
+    {
+      "id": "bounded_approval",
+      "input": {
+        "action": {
+          "domain": "token",
+          "action": "erc20_approve",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:1",
+              "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            }
+          },
+          "spender": "0x2222222222222222222222222222222222222222",
+          "amount": "0x5f5e100"
+        },
+        "results": {}
+      },
+      "expected": {
+        "ok": true,
+        "data": {
+          "verdict": {
+            "kind": "pass"
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "unlimited_approval",
+      "input": {
+        "action": {
+          "domain": "token",
+          "action": "erc20_approve",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:1",
+              "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            }
+          },
+          "spender": "0x2222222222222222222222222222222222222222",
+          "amount": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        "results": {}
+      },
+      "expected": {
+        "ok": true,
+        "data": {
+          "verdict": {
+            "kind": "warn",
+            "matched": [
+              {
+                "policy_id": "unlimited-approval-deny",
+                "reason": null,
+                "severity": "warn",
+                "origin": "action"
+              }
+            ]
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "burn_transfer",
+      "input": {
+        "action": {
+          "domain": "token",
+          "action": "erc20_transfer",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:1",
+              "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            }
+          },
+          "recipient": "0x000000000000000000000000000000000000dead",
+          "amount": "0x1",
+          "is_router_egress": false
+        },
+        "results": {}
+      },
+      "expected": {
+        "ok": true,
+        "data": {
+          "verdict": {
+            "kind": "fail",
+            "matched": [
+              {
+                "policy_id": "send-first-time-or-burn-recipient-warn",
+                "reason": "This send goes to a burn address (0x000…000 / 0x…dead) — funds sent there are permanently lost",
+                "severity": "deny",
+                "origin": "action"
+              }
+            ]
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "opaque_call",
+      "input": {
+        "action": {
+          "domain": "unknown",
+          "target": "0xfeed000000000000000000000000000000000001",
+          "chain": "eip155:1",
+          "calldata": "0xdeadbeef",
+          "value": "0x0"
+        },
+        "results": {}
+      },
+      "expected": {
+        "ok": true,
+        "data": {
+          "verdict": {
+            "kind": "warn",
+            "matched": [
+              {
+                "policy_id": "unknown-blind-sign-warning",
+                "reason": null,
+                "severity": "warn",
+                "origin": "action"
+              }
+            ]
+          }
+        },
+        "error": null
+      }
+    }
+  ]
+}
