@@ -4,7 +4,7 @@
  * R7: 포트는 코어가 **물어보는** 협력자다. 코어는 fact를 저장하지 않는다.
  */
 
-import type { PlannedCall } from "../types/plan";
+import type { PlannedCall } from "../types/plan.js";
 
 /**
  * 하나의 fact 조회 결과.

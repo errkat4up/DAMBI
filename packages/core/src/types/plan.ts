@@ -3,7 +3,7 @@
  * 판정 입력으로 받는 정책 묶음 / fact 맵.
  */
 
-import type { FactResult } from "../ports/fact";
+import type { FactResult } from "../ports/fact.js";
 
 /**
  * 코어가 "이 콜을 실행해서 결과를 달라"고 호스트에 넘기는 하나의 계획된 콜.
