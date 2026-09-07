@@ -264,3 +264,46 @@ jobs:
         run: |
           cd registry-api
           npx vitest run --root ../registryV2 scripts/__tests__/sign-bundles.test.ts
+
+  # @dambi/core — the published SDK package (packages/core, root Yarn workspace).
+  # 0.0.1 is a types-only scaffold; this job is the guard that the publish path
+  # keeps working: typecheck, ESM build, a real import of the built output (the
+  # extensionless-import class of bug is invisible to tsc and only shows up at
+  # `node` resolution time), and a tarball dry-run so `files`/`exports` drift is
+  # caught before `npm publish`.
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Enable Yarn 4 (root workspace)
+        run: corepack enable && corepack prepare yarn@4.14.1 --activate
+
+      - name: Install (immutable)
+        run: yarn install --immutable
+
+      - name: Typecheck
+        run: yarn core:typecheck
+
+      - name: Build (ESM + .d.ts)
+        run: yarn core:build
+
+      - name: Import built output under Node ESM
+        run: |
+          node --input-type=module -e '
+            const m = await import("./packages/core/dist/index.js");
+            if (typeof m.createCore !== "function") { console.error("createCore missing"); process.exit(1); }
+            let threw = false;
+            try { m.createCore({}); } catch { threw = true; }
+            if (!threw) { console.error("0.0.x scaffold must throw"); process.exit(1); }
+            await import("./packages/core/dist/internal.js");
+            console.log("ok: createCore present, scaffold throws, internal entry resolves");
+          '
+
+      - name: Tarball dry-run (files / exports drift)
+        working-directory: packages/core
+        run: npm pack --dry-run

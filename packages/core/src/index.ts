@@ -5,12 +5,12 @@
  * 대시보드 전용 표면은 `./internal`에 따로 둔다 (지금은 비어 있음).
  */
 
-export type { CheckRequest, UnsupportedRequest } from "./types/request";
-export type { Verdict, MatchedPolicy } from "./types/verdict";
-export type { PlannedCall, PolicySet, FactMap } from "./types/plan";
+export type { CheckRequest, UnsupportedRequest } from "./types/request.js";
+export type { Verdict, MatchedPolicy } from "./types/verdict.js";
+export type { PlannedCall, PolicySet, FactMap } from "./types/plan.js";
 
-export type { Ports, CoreHooks, CoreConfig, DambiCore } from "./core";
-export { createCore } from "./core";
+export type { Ports, CoreHooks, CoreConfig, DambiCore } from "./core.js";
+export { createCore } from "./core.js";
 
 export type {
   PolicySource,
@@ -19,4 +19,4 @@ export type {
   FactResult,
   DecoderSource,
   Clock,
-} from "./ports/index";
+} from "./ports/index.js";

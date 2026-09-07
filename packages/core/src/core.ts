@@ -14,13 +14,13 @@
  * 즉시 throw 한 줄뿐이며 판정 로직이 아니다.
  */
 
-import type { CheckRequest, UnsupportedRequest } from "./types/request";
-import type { Verdict } from "./types/verdict";
-import type { PlannedCall, PolicySet, FactMap } from "./types/plan";
-import type { PolicySource } from "./ports/policy";
-import type { FactProvider } from "./ports/fact";
-import type { DecoderSource } from "./ports/decoder";
-import type { Clock } from "./ports/clock";
+import type { CheckRequest, UnsupportedRequest } from "./types/request.js";
+import type { Verdict } from "./types/verdict.js";
+import type { PlannedCall, PolicySet, FactMap } from "./types/plan.js";
+import type { PolicySource } from "./ports/policy.js";
+import type { FactProvider } from "./ports/fact.js";
+import type { DecoderSource } from "./ports/decoder.js";
+import type { Clock } from "./ports/clock.js";
 
 /**
  * R7. 포트 = 코어가 **물어보는** 곳. 코어는 아무것도 저장하지 않는다 — 저장은

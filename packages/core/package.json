@@ -1,6 +1,51 @@
 {
   "name": "@dambi/core",
   "version": "0.0.1",
+  "description": "Dambi pre-sign policy core — public type contract and entry point (0.0.1 scaffold: types only, createCore throws)",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/errkat4up/DAMBI.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/errkat4up/DAMBI/tree/main/packages/core#readme",
+  "bugs": {
+    "url": "https://github.com/errkat4up/DAMBI/issues"
+  },
   "type": "module",
-  "private": true
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./internal": {
+      "types": "./dist/internal.d.ts",
+      "import": "./dist/internal.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "pack:check": "npm pack --dry-run"
+  },
+  "devDependencies": {
+    "typescript": "5.7.3"
+  }
 }

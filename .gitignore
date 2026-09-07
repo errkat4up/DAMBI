@@ -115,6 +115,8 @@ AGENTS.md
 !docs/security-invariants.md
 !docs/sdk-migration/
 !docs/sdk-migration/**
+# Published package changelog must ship with the package and the repo.
+!packages/core/CHANGELOG.md
 
 # integration-tests is a LOCAL-ONLY crate (v3 decode harness + onboarding docs +
 # golden corpus + per-protocol e2e). No production logic — kept out of git by the

@@ -3,7 +3,7 @@
  * 사후 재현 가능성이 이 타입의 설계 목표다 (R4).
  */
 
-import type { FactResult } from "../ports/fact";
+import type { FactResult } from "../ports/fact.js";
 
 /**
  * 판정 결과. 3-state.

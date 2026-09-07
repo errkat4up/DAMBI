@@ -3,7 +3,7 @@
  * `core.ts`의 `CoreConfig.ports`가 이걸 요구한다.
  */
 
-export type { PolicySource, SignedPolicyBundle } from "./policy";
-export type { FactProvider, FactResult } from "./fact";
-export type { DecoderSource } from "./decoder";
-export type { Clock } from "./clock";
+export type { PolicySource, SignedPolicyBundle } from "./policy.js";
+export type { FactProvider, FactResult } from "./fact.js";
+export type { DecoderSource } from "./decoder.js";
+export type { Clock } from "./clock.js";
