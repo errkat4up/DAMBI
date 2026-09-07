@@ -1,0 +1,662 @@
+strict digraph "dependency-cruiser output"{
+    rankdir="LR" splines="true" overlap="false" nodesep="0.16" ranksep="0.18" fontname="Helvetica-bold" fontsize="9" style="rounded,bold,filled" fillcolor="#ffffff" compound="true"
+    node [shape="box" style="rounded, filled" height="0.2" color="black" fillcolor="#ffffcc" fontcolor="black" fontname="Helvetica" fontsize="9"]
+    edge [arrowhead="normal" arrowsize="0.6" penwidth="2.0" color="#00000033" fontname="Helvetica" fontsize="9"]
+
+    subgraph "cluster_.." {label=".." subgraph "cluster_../wasm" {label="wasm" "../wasm/policy_engine_wasm" [label=<policy_engine_wasm> tooltip="policy_engine_wasm" ] } }
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/content-scripts" {label="content-scripts" subgraph "cluster_backend/content-scripts/__tests__" {label="__tests__" "backend/content-scripts/__tests__/bridge-fail-closed.test.ts" [label=<bridge-fail-closed.test.ts> tooltip="bridge-fail-closed.test.ts" URL="backend/content-scripts/__tests__/bridge-fail-closed.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/content-scripts/__tests__/bridge-fail-closed.test.ts" -> "backend/content-scripts/fetch-bridge.ts" [style="dashed"]
+    "backend/content-scripts/__tests__/bridge-fail-closed.test.ts" -> "backend/content-scripts/window-ethereum-messages.ts" [style="dashed"]
+    "backend/content-scripts/__tests__/bridge-fail-closed.test.ts" -> "backend/lib/identifier.ts"
+    "backend/content-scripts/__tests__/bridge-fail-closed.test.ts" -> "backend/lib/types.ts"
+    "backend/content-scripts/__tests__/bridge-fail-closed.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/content-scripts" {label="content-scripts" subgraph "cluster_backend/content-scripts/__tests__" {label="__tests__" "backend/content-scripts/__tests__/bypass-check.test.ts" [label=<bypass-check.test.ts> tooltip="bypass-check.test.ts" URL="backend/content-scripts/__tests__/bypass-check.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/content-scripts/__tests__/bypass-check.test.ts" -> "backend/content-scripts/bypass-check.ts" [style="dashed"]
+    "backend/content-scripts/__tests__/bypass-check.test.ts" -> "backend/lib/identifier.ts"
+    "backend/content-scripts/__tests__/bypass-check.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/content-scripts" {label="content-scripts" subgraph "cluster_backend/content-scripts/__tests__" {label="__tests__" "backend/content-scripts/__tests__/dashboard-bridge.test.ts" [label=<dashboard-bridge.test.ts> tooltip="dashboard-bridge.test.ts" URL="backend/content-scripts/__tests__/dashboard-bridge.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/content-scripts/__tests__/dashboard-bridge.test.ts" -> "backend/content-scripts/dashboard-bridge.ts" [style="dashed"]
+    "backend/content-scripts/__tests__/dashboard-bridge.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/content-scripts" {label="content-scripts" "backend/content-scripts/bypass-check.ts" [label=<bypass-check.ts> tooltip="bypass-check.ts" URL="backend/content-scripts/bypass-check.ts" fillcolor="#ddfeff"] } }
+    "backend/content-scripts/bypass-check.ts" -> "backend/lib/identifier.ts"
+    "backend/content-scripts/bypass-check.ts" -> "backend/lib/messages.ts"
+    "backend/content-scripts/bypass-check.ts" -> "backend/lib/types.ts"
+    "backend/content-scripts/bypass-check.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/content-scripts" {label="content-scripts" "backend/content-scripts/dambi-advisory.ts" [label=<dambi-advisory.ts> tooltip="dambi-advisory.ts" URL="backend/content-scripts/dambi-advisory.ts" fillcolor="#ddfeff"] } }
+    "backend/content-scripts/dambi-advisory.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/content-scripts" {label="content-scripts" "backend/content-scripts/dashboard-bridge.ts" [label=<dashboard-bridge.ts> tooltip="dashboard-bridge.ts" URL="backend/content-scripts/dashboard-bridge.ts" fillcolor="#ddfeff"] } }
+    "backend/content-scripts/dashboard-bridge.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/content-scripts" {label="content-scripts" "backend/content-scripts/fetch-bridge.ts" [label=<fetch-bridge.ts> tooltip="fetch-bridge.ts" URL="backend/content-scripts/fetch-bridge.ts" fillcolor="#ddfeff"] } }
+    "backend/content-scripts/fetch-bridge.ts" -> "backend/lib/identifier.ts"
+    "backend/content-scripts/fetch-bridge.ts" -> "backend/lib/messages.ts"
+    "backend/content-scripts/fetch-bridge.ts" -> "backend/lib/types.ts"
+    "backend/content-scripts/fetch-bridge.ts" -> "backend/lib/verdict-channel.ts"
+    "backend/content-scripts/fetch-bridge.ts" -> "node_modules/@metamask/post-message-stream/dist/index.cjs" [penwidth="1.0"]
+    "backend/content-scripts/fetch-bridge.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/content-scripts" {label="content-scripts" "backend/content-scripts/inject-scripts.ts" [label=<inject-scripts.ts> tooltip="inject-scripts.ts" URL="backend/content-scripts/inject-scripts.ts" fillcolor="#ddfeff"] } }
+    "backend/content-scripts/inject-scripts.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/content-scripts" {label="content-scripts" "backend/content-scripts/window-ethereum-messages.ts" [label=<window-ethereum-messages.ts> tooltip="window-ethereum-messages.ts" URL="backend/content-scripts/window-ethereum-messages.ts" fillcolor="#ddfeff"] } }
+    "backend/content-scripts/window-ethereum-messages.ts" -> "backend/lib/identifier.ts"
+    "backend/content-scripts/window-ethereum-messages.ts" -> "backend/lib/messages.ts"
+    "backend/content-scripts/window-ethereum-messages.ts" -> "backend/lib/types.ts"
+    "backend/content-scripts/window-ethereum-messages.ts" -> "backend/lib/verdict-channel.ts"
+    "backend/content-scripts/window-ethereum-messages.ts" -> "node_modules/@metamask/post-message-stream/dist/index.cjs" [penwidth="1.0"]
+    "backend/content-scripts/window-ethereum-messages.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/injected" {label="injected" subgraph "cluster_backend/injected/__tests__" {label="__tests__" "backend/injected/__tests__/connected-account.test.ts" [label=<connected-account.test.ts> tooltip="connected-account.test.ts" URL="backend/injected/__tests__/connected-account.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/injected/__tests__/connected-account.test.ts" -> "backend/injected/connected-account.ts"
+    "backend/injected/__tests__/connected-account.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/injected" {label="injected" subgraph "cluster_backend/injected/__tests__" {label="__tests__" "backend/injected/__tests__/fetch-hook-connected-account.test.ts" [label=<fetch-hook-connected-account.test.ts> tooltip="fetch-hook-connected-account.test.ts" URL="backend/injected/__tests__/fetch-hook-connected-account.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/injected/__tests__/fetch-hook-connected-account.test.ts" -> "backend/injected/fetch-hook.ts" [style="dashed"]
+    "backend/injected/__tests__/fetch-hook-connected-account.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/injected" {label="injected" subgraph "cluster_backend/injected/__tests__" {label="__tests__" "backend/injected/__tests__/fetch-hook.test.ts" [label=<fetch-hook.test.ts> tooltip="fetch-hook.test.ts" URL="backend/injected/__tests__/fetch-hook.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/injected/__tests__/fetch-hook.test.ts" -> "backend/injected/hl-exchange-parse.ts"
+    "backend/injected/__tests__/fetch-hook.test.ts" -> "backend/lib/types.ts"
+    "backend/injected/__tests__/fetch-hook.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/injected" {label="injected" subgraph "cluster_backend/injected/__tests__" {label="__tests__" "backend/injected/__tests__/hl-exchange-parse.test.ts" [label=<hl-exchange-parse.test.ts> tooltip="hl-exchange-parse.test.ts" URL="backend/injected/__tests__/hl-exchange-parse.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/injected/__tests__/hl-exchange-parse.test.ts" -> "backend/injected/hl-exchange-parse.ts"
+    "backend/injected/__tests__/hl-exchange-parse.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/injected" {label="injected" subgraph "cluster_backend/injected/__tests__" {label="__tests__" "backend/injected/__tests__/hl-execution-report.test.ts" [label=<hl-execution-report.test.ts> tooltip="hl-execution-report.test.ts" URL="backend/injected/__tests__/hl-execution-report.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/injected/__tests__/hl-execution-report.test.ts" -> "backend/injected/hl-execution-report.ts"
+    "backend/injected/__tests__/hl-execution-report.test.ts" -> "backend/lib/types.ts"
+    "backend/injected/__tests__/hl-execution-report.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/injected" {label="injected" subgraph "cluster_backend/injected/__tests__" {label="__tests__" "backend/injected/__tests__/proxy-injected-providers.test.ts" [label=<proxy-injected-providers.test.ts> tooltip="proxy-injected-providers.test.ts" URL="backend/injected/__tests__/proxy-injected-providers.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/injected/__tests__/proxy-injected-providers.test.ts" -> "backend/injected/proxy-injected-providers.ts" [style="dashed"]
+    "backend/injected/__tests__/proxy-injected-providers.test.ts" -> "backend/lib/identifier.ts"
+    "backend/injected/__tests__/proxy-injected-providers.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/injected" {label="injected" subgraph "cluster_backend/injected/__tests__" {label="__tests__" "backend/injected/__tests__/xhr-hook.test.ts" [label=<xhr-hook.test.ts> tooltip="xhr-hook.test.ts" URL="backend/injected/__tests__/xhr-hook.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/injected/__tests__/xhr-hook.test.ts" -> "backend/injected/hl-exchange-parse.ts"
+    "backend/injected/__tests__/xhr-hook.test.ts" -> "backend/lib/types.ts"
+    "backend/injected/__tests__/xhr-hook.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/injected" {label="injected" "backend/injected/connected-account.ts" [label=<connected-account.ts> tooltip="connected-account.ts" URL="backend/injected/connected-account.ts" fillcolor="#ddfeff"] } }
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/injected" {label="injected" "backend/injected/fetch-hook.ts" [label=<fetch-hook.ts> tooltip="fetch-hook.ts" URL="backend/injected/fetch-hook.ts" fillcolor="#ddfeff"] } }
+    "backend/injected/fetch-hook.ts" -> "backend/injected/connected-account.ts"
+    "backend/injected/fetch-hook.ts" -> "backend/injected/hl-exchange-parse.ts"
+    "backend/injected/fetch-hook.ts" -> "backend/injected/hl-execution-report.ts"
+    "backend/injected/fetch-hook.ts" -> "backend/lib/identifier.ts"
+    "backend/injected/fetch-hook.ts" -> "backend/lib/messages.ts"
+    "backend/injected/fetch-hook.ts" -> "backend/lib/types.ts"
+    "backend/injected/fetch-hook.ts" -> "backend/lib/verdict-channel.ts"
+    "backend/injected/fetch-hook.ts" -> "node_modules/@metamask/post-message-stream/dist/index.cjs" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/injected" {label="injected" "backend/injected/hl-exchange-parse.ts" [label=<hl-exchange-parse.ts> tooltip="hl-exchange-parse.ts" URL="backend/injected/hl-exchange-parse.ts" fillcolor="#ddfeff"] } }
+    "backend/injected/hl-exchange-parse.ts" -> "backend/lib/types.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/injected" {label="injected" "backend/injected/hl-execution-report.ts" [label=<hl-execution-report.ts> tooltip="hl-execution-report.ts" URL="backend/injected/hl-execution-report.ts" fillcolor="#ddfeff"] } }
+    "backend/injected/hl-execution-report.ts" -> "backend/lib/types.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/injected" {label="injected" "backend/injected/proxy-injected-providers.ts" [label=<proxy-injected-providers.ts> tooltip="proxy-injected-providers.ts" URL="backend/injected/proxy-injected-providers.ts" fillcolor="#ddfeff"] } }
+    "backend/injected/proxy-injected-providers.ts" -> "backend/lib/identifier.ts"
+    "backend/injected/proxy-injected-providers.ts" -> "backend/lib/messages.ts"
+    "backend/injected/proxy-injected-providers.ts" -> "backend/lib/types.ts"
+    "backend/injected/proxy-injected-providers.ts" -> "backend/lib/verdict-channel.ts"
+    "backend/injected/proxy-injected-providers.ts" -> "node_modules/@metamask/post-message-stream/dist/index.cjs" [penwidth="1.0"]
+    "backend/injected/proxy-injected-providers.ts" -> "node_modules/eth-rpc-errors/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/lib" {label="lib" subgraph "cluster_backend/lib/__tests__" {label="__tests__" "backend/lib/__tests__/messages.test.ts" [label=<messages.test.ts> tooltip="messages.test.ts" URL="backend/lib/__tests__/messages.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/lib/__tests__/messages.test.ts" -> "backend/lib/messages.ts"
+    "backend/lib/__tests__/messages.test.ts" -> "backend/lib/types.ts"
+    "backend/lib/__tests__/messages.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/lib" {label="lib" subgraph "cluster_backend/lib/__tests__" {label="__tests__" "backend/lib/__tests__/policy-meta.test.ts" [label=<policy-meta.test.ts> tooltip="policy-meta.test.ts" URL="backend/lib/__tests__/policy-meta.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/lib/__tests__/policy-meta.test.ts" -> "backend/lib/policy-meta.ts"
+    "backend/lib/__tests__/policy-meta.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/lib" {label="lib" subgraph "cluster_backend/lib/__tests__" {label="__tests__" "backend/lib/__tests__/verdict-channel.test.ts" [label=<verdict-channel.test.ts> tooltip="verdict-channel.test.ts" URL="backend/lib/__tests__/verdict-channel.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/lib/__tests__/verdict-channel.test.ts" -> "backend/lib/verdict-channel.ts"
+    "backend/lib/__tests__/verdict-channel.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/lib" {label="lib" "backend/lib/identifier.ts" [label=<identifier.ts> tooltip="identifier.ts" URL="backend/lib/identifier.ts" fillcolor="#ddfeff"] } }
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/lib" {label="lib" "backend/lib/messages.ts" [label=<messages.ts> tooltip="messages.ts" URL="backend/lib/messages.ts" fillcolor="#ddfeff"] } }
+    "backend/lib/messages.ts" -> "backend/lib/types.ts"
+    "backend/lib/messages.ts" -> "backend/lib/verdict-channel.ts"
+    "backend/lib/messages.ts" -> "node_modules/@metamask/post-message-stream/dist/index.cjs" [penwidth="1.0"]
+    "backend/lib/messages.ts" -> "node_modules/object-hash/index.js" [penwidth="1.0"]
+    "backend/lib/messages.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/lib" {label="lib" "backend/lib/policy-meta.ts" [label=<policy-meta.ts> tooltip="policy-meta.ts" URL="backend/lib/policy-meta.ts" fillcolor="#ddfeff"] } }
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/lib" {label="lib" "backend/lib/types.ts" [label=<types.ts> tooltip="types.ts" URL="backend/lib/types.ts" fillcolor="#ddfeff"] } }
+    "backend/lib/types.ts" -> "node_modules/viem/_cjs/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/lib" {label="lib" "backend/lib/verdict-channel.ts" [label=<verdict-channel.ts> tooltip="verdict-channel.ts" URL="backend/lib/verdict-channel.ts" fillcolor="#ddfeff"] } }
+    "backend/lib/verdict-channel.ts" -> "backend/lib/types.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/baked-default-set-manifests.test.ts" [label=<baked-default-set-manifests.test.ts> tooltip="baked-default-set-manifests.test.ts" URL="backend/service-worker/__tests__/baked-default-set-manifests.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/baked-default-set-manifests.test.ts" -> "child_process" [style="dashed" penwidth="1.0"]
+    "backend/service-worker/__tests__/baked-default-set-manifests.test.ts" -> "fs" [style="dashed" penwidth="1.0"]
+    "backend/service-worker/__tests__/baked-default-set-manifests.test.ts" -> "path" [style="dashed" penwidth="1.0"]
+    "backend/service-worker/__tests__/baked-default-set-manifests.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/bundle-verify.test.ts" [label=<bundle-verify.test.ts> tooltip="bundle-verify.test.ts" URL="backend/service-worker/__tests__/bundle-verify.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/bundle-verify.test.ts" -> "backend/service-worker/adapter-loader/bundle-verify.ts"
+    "backend/service-worker/__tests__/bundle-verify.test.ts" -> "node_modules/canonicalize/lib/canonicalize.js" [penwidth="1.0"]
+    "backend/service-worker/__tests__/bundle-verify.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/dambi-auth-client.test.ts" [label=<dambi-auth-client.test.ts> tooltip="dambi-auth-client.test.ts" URL="backend/service-worker/__tests__/dambi-auth-client.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/dambi-auth-client.test.ts" -> "backend/service-worker/dambi-auth/client.ts"
+    "backend/service-worker/__tests__/dambi-auth-client.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/declarative-adapter-loader.test.ts" [label=<declarative-adapter-loader.test.ts> tooltip="declarative-adapter-loader.test.ts" URL="backend/service-worker/__tests__/declarative-adapter-loader.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/declarative-adapter-loader.test.ts" -> "backend/service-worker/adapter-loader/declarative-adapter-loader.ts"
+    "backend/service-worker/__tests__/declarative-adapter-loader.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/declarative-route.test.ts" [label=<declarative-route.test.ts> tooltip="declarative-route.test.ts" URL="backend/service-worker/__tests__/declarative-route.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/declarative-route.test.ts" -> "backend/service-worker/adapter-loader/bundle-schema.ts"
+    "backend/service-worker/__tests__/declarative-route.test.ts" -> "backend/service-worker/adapter-loader/declarative-adapter-loader.ts"
+    "backend/service-worker/__tests__/declarative-route.test.ts" -> "backend/service-worker/adapter-loader/declarative-route.ts"
+    "backend/service-worker/__tests__/declarative-route.test.ts" -> "node_modules/viem/_cjs/index.js" [penwidth="1.0"]
+    "backend/service-worker/__tests__/declarative-route.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/execution-report.test.ts" [label=<execution-report.test.ts> tooltip="execution-report.test.ts" URL="backend/service-worker/__tests__/execution-report.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/execution-report.test.ts" -> "backend/service-worker/execution-report.ts"
+    "backend/service-worker/__tests__/execution-report.test.ts" -> "backend/lib/types.ts"
+    "backend/service-worker/__tests__/execution-report.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" subgraph "cluster_backend/service-worker/__tests__/fixtures" {label="fixtures" "backend/service-worker/__tests__/fixtures/hl-info-snapshot.json" [label=<hl-info-snapshot.json> tooltip="hl-info-snapshot.json" URL="backend/service-worker/__tests__/fixtures/hl-info-snapshot.json" fillcolor="#ffee44"] } } } }
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/gitbook-perp-injection.test.ts" [label=<gitbook-perp-injection.test.ts> tooltip="gitbook-perp-injection.test.ts" URL="backend/service-worker/__tests__/gitbook-perp-injection.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/gitbook-perp-injection.test.ts" -> "backend/injected/hl-exchange-parse.ts"
+    "backend/service-worker/__tests__/gitbook-perp-injection.test.ts" -> "backend/service-worker/hl-order-to-action.ts"
+    "backend/service-worker/__tests__/gitbook-perp-injection.test.ts" -> "backend/service-worker/venue/hl-info-client.ts"
+    "backend/service-worker/__tests__/gitbook-perp-injection.test.ts" -> "backend/service-worker/venue/resolve-order-symbol.ts"
+    "backend/service-worker/__tests__/gitbook-perp-injection.test.ts" -> "fs" [style="dashed" penwidth="1.0"]
+    "backend/service-worker/__tests__/gitbook-perp-injection.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/hl-fuzz-coverage.test.ts" [label=<hl-fuzz-coverage.test.ts> tooltip="hl-fuzz-coverage.test.ts" URL="backend/service-worker/__tests__/hl-fuzz-coverage.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/hl-fuzz-coverage.test.ts" -> "backend/injected/hl-exchange-parse.ts"
+    "backend/service-worker/__tests__/hl-fuzz-coverage.test.ts" -> "backend/service-worker/hl-order-to-action.ts"
+    "backend/service-worker/__tests__/hl-fuzz-coverage.test.ts" -> "backend/service-worker/__tests__/fixtures/hl-info-snapshot.json"
+    "backend/service-worker/__tests__/hl-fuzz-coverage.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/hl-order-to-action.test.ts" [label=<hl-order-to-action.test.ts> tooltip="hl-order-to-action.test.ts" URL="backend/service-worker/__tests__/hl-order-to-action.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/hl-order-to-action.test.ts" -> "backend/service-worker/hl-order-to-action.ts"
+    "backend/service-worker/__tests__/hl-order-to-action.test.ts" -> "backend/lib/types.ts"
+    "backend/service-worker/__tests__/hl-order-to-action.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/local-method-handlers.test.ts" [label=<local-method-handlers.test.ts> tooltip="local-method-handlers.test.ts" URL="backend/service-worker/__tests__/local-method-handlers.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/local-method-handlers.test.ts" -> "backend/service-worker/local-method-handlers.ts"
+    "backend/service-worker/__tests__/local-method-handlers.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/manifest-install-rejects-missing-field.test.ts" [label=<manifest-install-rejects-missing-field.test.ts> tooltip="manifest-install-rejects-missing-field.test.ts" URL="backend/service-worker/__tests__/manifest-install-rejects-missing-field.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/manifest-install-rejects-missing-field.test.ts" -> "backend/service-worker/manifests/atomic-install.ts" [style="dashed"]
+    "backend/service-worker/__tests__/manifest-install-rejects-missing-field.test.ts" -> "backend/service-worker/manifests/store.ts"
+    "backend/service-worker/__tests__/manifest-install-rejects-missing-field.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/mascot-badge.test.ts" [label=<mascot-badge.test.ts> tooltip="mascot-badge.test.ts" URL="backend/service-worker/__tests__/mascot-badge.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/mascot-badge.test.ts" -> "backend/service-worker/mascot-badge.ts"
+    "backend/service-worker/__tests__/mascot-badge.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/migration-disable-and-install.test.ts" [label=<migration-disable-and-install.test.ts> tooltip="migration-disable-and-install.test.ts" URL="backend/service-worker/__tests__/migration-disable-and-install.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/migration-disable-and-install.test.ts" -> "backend/service-worker/dashboard/storage.ts" [style="dashed"]
+    "backend/service-worker/__tests__/migration-disable-and-install.test.ts" -> "backend/service-worker/manifests/migration-detector.ts" [style="dashed"]
+    "backend/service-worker/__tests__/migration-disable-and-install.test.ts" -> "backend/service-worker/policies-loader.ts" [style="dashed"]
+    "backend/service-worker/__tests__/migration-disable-and-install.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/notify-settings.test.ts" [label=<notify-settings.test.ts> tooltip="notify-settings.test.ts" URL="backend/service-worker/__tests__/notify-settings.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/notify-settings.test.ts" -> "backend/service-worker/notify-settings.ts"
+    "backend/service-worker/__tests__/notify-settings.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/orchestrator.test.ts" [label=<orchestrator.test.ts> tooltip="orchestrator.test.ts" URL="backend/service-worker/__tests__/orchestrator.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/orchestrator.test.ts" -> "backend/service-worker/orchestrator.ts"
+    "backend/service-worker/__tests__/orchestrator.test.ts" -> "backend/lib/types.ts"
+    "backend/service-worker/__tests__/orchestrator.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/permit-report.test.ts" [label=<permit-report.test.ts> tooltip="permit-report.test.ts" URL="backend/service-worker/__tests__/permit-report.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/permit-report.test.ts" -> "backend/service-worker/permit-report.ts"
+    "backend/service-worker/__tests__/permit-report.test.ts" -> "backend/lib/types.ts"
+    "backend/service-worker/__tests__/permit-report.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/policies-loader.test.ts" [label=<policies-loader.test.ts> tooltip="policies-loader.test.ts" URL="backend/service-worker/__tests__/policies-loader.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/policies-loader.test.ts" -> "backend/service-worker/policies-loader.ts" [style="dashed"]
+    "backend/service-worker/__tests__/policies-loader.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/policy-rpc.test.ts" [label=<policy-rpc.test.ts> tooltip="policy-rpc.test.ts" URL="backend/service-worker/__tests__/policy-rpc.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/policy-rpc.test.ts" -> "backend/service-worker/policy-rpc.ts"
+    "backend/service-worker/__tests__/policy-rpc.test.ts" -> "backend/service-worker/wasm-bridge.types.ts"
+    "backend/service-worker/__tests__/policy-rpc.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/policy-selection.test.ts" [label=<policy-selection.test.ts> tooltip="policy-selection.test.ts" URL="backend/service-worker/__tests__/policy-selection.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/policy-selection.test.ts" -> "backend/service-worker/policy-selection.ts"
+    "backend/service-worker/__tests__/policy-selection.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/sig-routing.test.ts" [label=<sig-routing.test.ts> tooltip="sig-routing.test.ts" URL="backend/service-worker/__tests__/sig-routing.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/sig-routing.test.ts" -> "backend/service-worker/sig-routing.ts"
+    "backend/service-worker/__tests__/sig-routing.test.ts" -> "backend/lib/types.ts"
+    "backend/service-worker/__tests__/sig-routing.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/verdict-storage.test.ts" [label=<verdict-storage.test.ts> tooltip="verdict-storage.test.ts" URL="backend/service-worker/__tests__/verdict-storage.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/verdict-storage.test.ts" -> "backend/service-worker/verdict-storage.ts"
+    "backend/service-worker/__tests__/verdict-storage.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/wasm-bridge.test.ts" [label=<wasm-bridge.test.ts> tooltip="wasm-bridge.test.ts" URL="backend/service-worker/__tests__/wasm-bridge.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/wasm-bridge.test.ts" -> "backend/service-worker/wasm-bridge.ts"
+    "backend/service-worker/__tests__/wasm-bridge.test.ts" -> "backend/service-worker/wasm-bridge.types.ts"
+    "backend/service-worker/__tests__/wasm-bridge.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/__tests__" {label="__tests__" "backend/service-worker/__tests__/webpack-env.test.ts" [label=<webpack-env.test.ts> tooltip="webpack-env.test.ts" URL="backend/service-worker/__tests__/webpack-env.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/__tests__/webpack-env.test.ts" -> "webpack/env.js"
+    "backend/service-worker/__tests__/webpack-env.test.ts" -> "fs" [style="dashed" penwidth="1.0"]
+    "backend/service-worker/__tests__/webpack-env.test.ts" -> "module" [style="dashed" penwidth="1.0"]
+    "backend/service-worker/__tests__/webpack-env.test.ts" -> "path" [style="dashed" penwidth="1.0"]
+    "backend/service-worker/__tests__/webpack-env.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/adapter-loader" {label="adapter-loader" subgraph "cluster_backend/service-worker/adapter-loader/__tests__" {label="__tests__" "backend/service-worker/adapter-loader/__tests__/bundle-schema.test.ts" [label=<bundle-schema.test.ts> tooltip="bundle-schema.test.ts" URL="backend/service-worker/adapter-loader/__tests__/bundle-schema.test.ts" fillcolor="#ddfeff"] } } } }
+    "backend/service-worker/adapter-loader/__tests__/bundle-schema.test.ts" -> "backend/service-worker/adapter-loader/bundle-schema.ts"
+    "backend/service-worker/adapter-loader/__tests__/bundle-schema.test.ts" -> "fs" [style="dashed" penwidth="1.0"]
+    "backend/service-worker/adapter-loader/__tests__/bundle-schema.test.ts" -> "path" [style="dashed" penwidth="1.0"]
+    "backend/service-worker/adapter-loader/__tests__/bundle-schema.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/adapter-loader" {label="adapter-loader" subgraph "cluster_backend/service-worker/adapter-loader/__tests__" {label="__tests__" "backend/service-worker/adapter-loader/__tests__/bundle-validator.test.ts" [label=<bundle-validator.test.ts> tooltip="bundle-validator.test.ts" URL="backend/service-worker/adapter-loader/__tests__/bundle-validator.test.ts" fillcolor="#ddfeff"] } } } }
+    "backend/service-worker/adapter-loader/__tests__/bundle-validator.test.ts" -> "backend/service-worker/adapter-loader/bundle-validator.ts"
+    "backend/service-worker/adapter-loader/__tests__/bundle-validator.test.ts" -> "node_modules/jszip/lib/index.js" [penwidth="1.0"]
+    "backend/service-worker/adapter-loader/__tests__/bundle-validator.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/adapter-loader" {label="adapter-loader" subgraph "cluster_backend/service-worker/adapter-loader/__tests__" {label="__tests__" "backend/service-worker/adapter-loader/__tests__/declarative-decode.test.ts" [label=<declarative-decode.test.ts> tooltip="declarative-decode.test.ts" URL="backend/service-worker/adapter-loader/__tests__/declarative-decode.test.ts" fillcolor="#ddfeff"] } } } }
+    "backend/service-worker/adapter-loader/__tests__/declarative-decode.test.ts" -> "backend/service-worker/adapter-loader/declarative-decode.ts"
+    "backend/service-worker/adapter-loader/__tests__/declarative-decode.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/adapter-loader" {label="adapter-loader" subgraph "cluster_backend/service-worker/adapter-loader/__tests__" {label="__tests__" "backend/service-worker/adapter-loader/__tests__/declarative-v3-cache.test.ts" [label=<declarative-v3-cache.test.ts> tooltip="declarative-v3-cache.test.ts" URL="backend/service-worker/adapter-loader/__tests__/declarative-v3-cache.test.ts" fillcolor="#ddfeff"] } } } }
+    "backend/service-worker/adapter-loader/__tests__/declarative-v3-cache.test.ts" -> "backend/service-worker/adapter-loader/bundle-schema.ts"
+    "backend/service-worker/adapter-loader/__tests__/declarative-v3-cache.test.ts" -> "backend/service-worker/adapter-loader/declarative-v3-cache.ts"
+    "backend/service-worker/adapter-loader/__tests__/declarative-v3-cache.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/adapter-loader" {label="adapter-loader" subgraph "cluster_backend/service-worker/adapter-loader/__tests__" {label="__tests__" "backend/service-worker/adapter-loader/__tests__/params-validator.test.ts" [label=<params-validator.test.ts> tooltip="params-validator.test.ts" URL="backend/service-worker/adapter-loader/__tests__/params-validator.test.ts" fillcolor="#ddfeff"] } } } }
+    "backend/service-worker/adapter-loader/__tests__/params-validator.test.ts" -> "backend/service-worker/adapter-loader/params-validator.ts"
+    "backend/service-worker/adapter-loader/__tests__/params-validator.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/adapter-loader" {label="adapter-loader" subgraph "cluster_backend/service-worker/adapter-loader/__tests__" {label="__tests__" "backend/service-worker/adapter-loader/__tests__/template-renderer.test.ts" [label=<template-renderer.test.ts> tooltip="template-renderer.test.ts" URL="backend/service-worker/adapter-loader/__tests__/template-renderer.test.ts" fillcolor="#ddfeff"] } } } }
+    "backend/service-worker/adapter-loader/__tests__/template-renderer.test.ts" -> "backend/service-worker/adapter-loader/template-renderer.ts"
+    "backend/service-worker/adapter-loader/__tests__/template-renderer.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/adapter-loader" {label="adapter-loader" "backend/service-worker/adapter-loader/bundle-schema.ts" [label=<bundle-schema.ts> tooltip="bundle-schema.ts" URL="backend/service-worker/adapter-loader/bundle-schema.ts" fillcolor="#ddfeff"] } } }
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/adapter-loader" {label="adapter-loader" "backend/service-worker/adapter-loader/bundle-validator.ts" [label=<bundle-validator.ts> tooltip="bundle-validator.ts" URL="backend/service-worker/adapter-loader/bundle-validator.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/adapter-loader/bundle-validator.ts" -> "node_modules/jszip/lib/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/adapter-loader" {label="adapter-loader" "backend/service-worker/adapter-loader/bundle-verify.ts" [label=<bundle-verify.ts> tooltip="bundle-verify.ts" URL="backend/service-worker/adapter-loader/bundle-verify.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/adapter-loader/bundle-verify.ts" -> "node_modules/canonicalize/lib/canonicalize.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/adapter-loader" {label="adapter-loader" "backend/service-worker/adapter-loader/cedar-literal.ts" [label=<cedar-literal.ts> tooltip="cedar-literal.ts" URL="backend/service-worker/adapter-loader/cedar-literal.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/adapter-loader/cedar-literal.ts" -> "backend/service-worker/adapter-loader/params-validator.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/adapter-loader" {label="adapter-loader" "backend/service-worker/adapter-loader/declarative-adapter-loader.ts" [label=<declarative-adapter-loader.ts> tooltip="declarative-adapter-loader.ts" URL="backend/service-worker/adapter-loader/declarative-adapter-loader.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/adapter-loader/declarative-adapter-loader.ts" -> "backend/service-worker/diagnostics.ts"
+    "backend/service-worker/adapter-loader/declarative-adapter-loader.ts" -> "backend/service-worker/wasm-bridge.ts"
+    "backend/service-worker/adapter-loader/declarative-adapter-loader.ts" -> "backend/service-worker/adapter-loader/bundle-schema.ts"
+    "backend/service-worker/adapter-loader/declarative-adapter-loader.ts" -> "backend/service-worker/adapter-loader/bundle-verify.ts"
+    "backend/service-worker/adapter-loader/declarative-adapter-loader.ts" -> "backend/service-worker/adapter-loader/declarative-v3-cache.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/adapter-loader" {label="adapter-loader" "backend/service-worker/adapter-loader/declarative-decode.ts" [label=<declarative-decode.ts> tooltip="declarative-decode.ts" URL="backend/service-worker/adapter-loader/declarative-decode.ts" fillcolor="#ddfeff"] } } }
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/adapter-loader" {label="adapter-loader" "backend/service-worker/adapter-loader/declarative-route.ts" [label=<declarative-route.ts> tooltip="declarative-route.ts" URL="backend/service-worker/adapter-loader/declarative-route.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/adapter-loader/declarative-route.ts" -> "backend/service-worker/wasm-bridge.ts"
+    "backend/service-worker/adapter-loader/declarative-route.ts" -> "backend/service-worker/adapter-loader/bundle-schema.ts"
+    "backend/service-worker/adapter-loader/declarative-route.ts" -> "backend/service-worker/adapter-loader/declarative-adapter-loader.ts"
+    "backend/service-worker/adapter-loader/declarative-route.ts" -> "backend/service-worker/adapter-loader/declarative-decode.ts"
+    "backend/service-worker/adapter-loader/declarative-route.ts" -> "node_modules/viem/_cjs/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/adapter-loader" {label="adapter-loader" "backend/service-worker/adapter-loader/declarative-v3-cache.ts" [label=<declarative-v3-cache.ts> tooltip="declarative-v3-cache.ts" URL="backend/service-worker/adapter-loader/declarative-v3-cache.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/adapter-loader/declarative-v3-cache.ts" -> "backend/service-worker/adapter-loader/bundle-schema.ts"
+    "backend/service-worker/adapter-loader/declarative-v3-cache.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/adapter-loader" {label="adapter-loader" "backend/service-worker/adapter-loader/params-validator.ts" [label=<params-validator.ts> tooltip="params-validator.ts" URL="backend/service-worker/adapter-loader/params-validator.ts" fillcolor="#ddfeff"] } } }
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/adapter-loader" {label="adapter-loader" "backend/service-worker/adapter-loader/storage.ts" [label=<storage.ts> tooltip="storage.ts" URL="backend/service-worker/adapter-loader/storage.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/adapter-loader/storage.ts" -> "backend/service-worker/adapter-loader/params-validator.ts"
+    "backend/service-worker/adapter-loader/storage.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/adapter-loader" {label="adapter-loader" "backend/service-worker/adapter-loader/template-renderer.ts" [label=<template-renderer.ts> tooltip="template-renderer.ts" URL="backend/service-worker/adapter-loader/template-renderer.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/adapter-loader/template-renderer.ts" -> "backend/service-worker/adapter-loader/cedar-literal.ts"
+    "backend/service-worker/adapter-loader/template-renderer.ts" -> "backend/service-worker/adapter-loader/params-validator.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/chains" {label="chains" subgraph "cluster_backend/service-worker/chains/__tests__" {label="__tests__" "backend/service-worker/chains/__tests__/chain-config.test.ts" [label=<chain-config.test.ts> tooltip="chain-config.test.ts" URL="backend/service-worker/chains/__tests__/chain-config.test.ts" fillcolor="#ddfeff"] } } } }
+    "backend/service-worker/chains/__tests__/chain-config.test.ts" -> "backend/service-worker/chains/chain-config.ts"
+    "backend/service-worker/chains/__tests__/chain-config.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/chains" {label="chains" subgraph "cluster_backend/service-worker/chains/__tests__" {label="__tests__" "backend/service-worker/chains/__tests__/rpc-client.test.ts" [label=<rpc-client.test.ts> tooltip="rpc-client.test.ts" URL="backend/service-worker/chains/__tests__/rpc-client.test.ts" fillcolor="#ddfeff"] } } } }
+    "backend/service-worker/chains/__tests__/rpc-client.test.ts" -> "backend/service-worker/chains/rpc-client.ts"
+    "backend/service-worker/chains/__tests__/rpc-client.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/chains" {label="chains" "backend/service-worker/chains/chain-config.ts" [label=<chain-config.ts> tooltip="chain-config.ts" URL="backend/service-worker/chains/chain-config.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/chains/chain-config.ts" -> "node_modules/viem/_cjs/index.js" [penwidth="1.0"]
+    "backend/service-worker/chains/chain-config.ts" -> "node_modules/viem/_cjs/chains/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/chains" {label="chains" "backend/service-worker/chains/rpc-client.ts" [label=<rpc-client.ts> tooltip="rpc-client.ts" URL="backend/service-worker/chains/rpc-client.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/chains/rpc-client.ts" -> "backend/service-worker/chains/chain-config.ts"
+    "backend/service-worker/chains/rpc-client.ts" -> "node_modules/viem/_cjs/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/dambi-auth" {label="dambi-auth" "backend/service-worker/dambi-auth/client.ts" [label=<client.ts> tooltip="client.ts" URL="backend/service-worker/dambi-auth/client.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/dambi-auth/client.ts" -> "backend/service-worker/dambi-auth/tokenStore.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/dambi-auth" {label="dambi-auth" "backend/service-worker/dambi-auth/index.ts" [label=<index.ts> tooltip="index.ts" URL="backend/service-worker/dambi-auth/index.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/dambi-auth/index.ts" -> "backend/service-worker/dambi-auth/client.ts" [arrowhead="inv"]
+    "backend/service-worker/dambi-auth/index.ts" -> "backend/service-worker/dambi-auth/oauthFlow.ts" [arrowhead="inv"]
+    "backend/service-worker/dambi-auth/index.ts" -> "backend/service-worker/dambi-auth/tokenStore.ts" [arrowhead="inv"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/dambi-auth" {label="dambi-auth" "backend/service-worker/dambi-auth/oauthFlow.test.ts" [label=<oauthFlow.test.ts> tooltip="oauthFlow.test.ts" URL="backend/service-worker/dambi-auth/oauthFlow.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/dambi-auth/oauthFlow.test.ts" -> "backend/service-worker/dambi-auth/oauthFlow.ts"
+    "backend/service-worker/dambi-auth/oauthFlow.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/dambi-auth" {label="dambi-auth" "backend/service-worker/dambi-auth/oauthFlow.ts" [label=<oauthFlow.ts> tooltip="oauthFlow.ts" URL="backend/service-worker/dambi-auth/oauthFlow.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/dambi-auth/oauthFlow.ts" -> "backend/service-worker/dambi-auth/client.ts"
+    "backend/service-worker/dambi-auth/oauthFlow.ts" -> "backend/service-worker/dambi-auth/tokenStore.ts"
+    "backend/service-worker/dambi-auth/oauthFlow.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/dambi-auth" {label="dambi-auth" "backend/service-worker/dambi-auth/tokenStore.test.ts" [label=<tokenStore.test.ts> tooltip="tokenStore.test.ts" URL="backend/service-worker/dambi-auth/tokenStore.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/dambi-auth/tokenStore.test.ts" -> "backend/service-worker/dambi-auth/tokenStore.ts"
+    "backend/service-worker/dambi-auth/tokenStore.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/dambi-auth" {label="dambi-auth" "backend/service-worker/dambi-auth/tokenStore.ts" [label=<tokenStore.ts> tooltip="tokenStore.ts" URL="backend/service-worker/dambi-auth/tokenStore.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/dambi-auth/tokenStore.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/dashboard" {label="dashboard" subgraph "cluster_backend/service-worker/dashboard/__tests__" {label="__tests__" "backend/service-worker/dashboard/__tests__/api.test.ts" [label=<api.test.ts> tooltip="api.test.ts" URL="backend/service-worker/dashboard/__tests__/api.test.ts" fillcolor="#ddfeff"] } } } }
+    "backend/service-worker/dashboard/__tests__/api.test.ts" -> "backend/service-worker/dashboard/api.ts"
+    "backend/service-worker/dashboard/__tests__/api.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/dashboard" {label="dashboard" subgraph "cluster_backend/service-worker/dashboard/__tests__" {label="__tests__" "backend/service-worker/dashboard/__tests__/storage.test.ts" [label=<storage.test.ts> tooltip="storage.test.ts" URL="backend/service-worker/dashboard/__tests__/storage.test.ts" fillcolor="#ddfeff"] } } } }
+    "backend/service-worker/dashboard/__tests__/storage.test.ts" -> "backend/service-worker/dashboard/storage.ts"
+    "backend/service-worker/dashboard/__tests__/storage.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/dashboard" {label="dashboard" "backend/service-worker/dashboard/api.ts" [label=<api.ts> tooltip="api.ts" URL="backend/service-worker/dashboard/api.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/dashboard/api.ts" -> "backend/service-worker/dashboard/current-user.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/dashboard" {label="dashboard" "backend/service-worker/dashboard/current-user.ts" [label=<current-user.ts> tooltip="current-user.ts" URL="backend/service-worker/dashboard/current-user.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/dashboard/current-user.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/dashboard" {label="dashboard" "backend/service-worker/dashboard/storage.ts" [label=<storage.ts> tooltip="storage.ts" URL="backend/service-worker/dashboard/storage.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/dashboard/storage.ts" -> "backend/service-worker/adapter-loader/params-validator.ts"
+    "backend/service-worker/dashboard/storage.ts" -> "backend/service-worker/adapter-loader/storage.ts"
+    "backend/service-worker/dashboard/storage.ts" -> "backend/service-worker/dashboard/current-user.ts"
+    "backend/service-worker/dashboard/storage.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/diagnosis-context-storage.ts" [label=<diagnosis-context-storage.ts> tooltip="diagnosis-context-storage.ts" URL="backend/service-worker/diagnosis-context-storage.ts" fillcolor="#ddfeff"] } }
+    "backend/service-worker/diagnosis-context-storage.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/diagnostics.ts" [label=<diagnostics.ts> tooltip="diagnostics.ts" URL="backend/service-worker/diagnostics.ts" fillcolor="#ddfeff"] } }
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/execution-report-storage.ts" [label=<execution-report-storage.ts> tooltip="execution-report-storage.ts" URL="backend/service-worker/execution-report-storage.ts" fillcolor="#ddfeff"] } }
+    "backend/service-worker/execution-report-storage.ts" -> "backend/lib/types.ts"
+    "backend/service-worker/execution-report-storage.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/execution-report.ts" [label=<execution-report.ts> tooltip="execution-report.ts" URL="backend/service-worker/execution-report.ts" fillcolor="#ddfeff"] } }
+    "backend/service-worker/execution-report.ts" -> "backend/service-worker/execution-report-storage.ts"
+    "backend/service-worker/execution-report.ts" -> "backend/lib/types.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/hl-order-to-action.ts" [label=<hl-order-to-action.ts> tooltip="hl-order-to-action.ts" URL="backend/service-worker/hl-order-to-action.ts" fillcolor="#ddfeff"] } }
+    "backend/service-worker/hl-order-to-action.ts" -> "backend/lib/types.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/index.ts" [label=<index.ts> tooltip="index.ts" URL="backend/service-worker/index.ts" fillcolor="#ddfeff"] } }
+    "backend/service-worker/index.ts" -> "backend/service-worker/dambi-auth/index.ts"
+    "backend/service-worker/index.ts" -> "backend/service-worker/dashboard/api.ts"
+    "backend/service-worker/index.ts" -> "backend/service-worker/diagnosis-context-storage.ts"
+    "backend/service-worker/index.ts" -> "backend/service-worker/execution-report.ts"
+    "backend/service-worker/index.ts" -> "backend/service-worker/execution-report-storage.ts"
+    "backend/service-worker/index.ts" -> "backend/service-worker/manifests/adapter-loader-storage-migration.ts"
+    "backend/service-worker/index.ts" -> "backend/service-worker/manifests/handlers.ts"
+    "backend/service-worker/index.ts" -> "backend/service-worker/manifests/hydrate.ts"
+    "backend/service-worker/index.ts" -> "backend/service-worker/manifests/migration-detector.ts"
+    "backend/service-worker/index.ts" -> "backend/service-worker/mascot-badge.ts"
+    "backend/service-worker/index.ts" -> "backend/service-worker/notify-settings.ts"
+    "backend/service-worker/index.ts" -> "backend/service-worker/orchestrator.ts"
+    "backend/service-worker/index.ts" -> "backend/service-worker/policy-store/api.ts"
+    "backend/service-worker/index.ts" -> "backend/service-worker/policy-store/seed.ts"
+    "backend/service-worker/index.ts" -> "backend/service-worker/state-delta-storage.ts"
+    "backend/service-worker/index.ts" -> "backend/service-worker/v3-bundle-loader.ts"
+    "backend/service-worker/index.ts" -> "backend/service-worker/verdict-storage.ts"
+    "backend/service-worker/index.ts" -> "backend/service-worker/wasm-bridge.ts"
+    "backend/service-worker/index.ts" -> "backend/lib/identifier.ts"
+    "backend/service-worker/index.ts" -> "backend/lib/types.ts"
+    "backend/service-worker/index.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/legacy-v1-rpc.ts" [label=<legacy-v1-rpc.ts> tooltip="legacy-v1-rpc.ts" URL="backend/service-worker/legacy-v1-rpc.ts" fillcolor="#ddfeff"] } }
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/local-method-handlers.ts" [label=<local-method-handlers.ts> tooltip="local-method-handlers.ts" URL="backend/service-worker/local-method-handlers.ts" fillcolor="#ddfeff"] } }
+    "backend/service-worker/local-method-handlers.ts" -> "backend/service-worker/wasm-bridge.types.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/manifests" {label="manifests" "backend/service-worker/manifests/adapter-loader-storage-migration.test.ts" [label=<adapter-loader-storage-migration.test.ts> tooltip="adapter-loader-storage-migration.test.ts" URL="backend/service-worker/manifests/adapter-loader-storage-migration.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/manifests/adapter-loader-storage-migration.test.ts" -> "backend/service-worker/manifests/adapter-loader-storage-migration.ts"
+    "backend/service-worker/manifests/adapter-loader-storage-migration.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/manifests" {label="manifests" "backend/service-worker/manifests/adapter-loader-storage-migration.ts" [label=<adapter-loader-storage-migration.ts> tooltip="adapter-loader-storage-migration.ts" URL="backend/service-worker/manifests/adapter-loader-storage-migration.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/manifests/adapter-loader-storage-migration.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/manifests" {label="manifests" "backend/service-worker/manifests/atomic-install.test.ts" [label=<atomic-install.test.ts> tooltip="atomic-install.test.ts" URL="backend/service-worker/manifests/atomic-install.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/manifests/atomic-install.test.ts" -> "backend/service-worker/manifests/atomic-install.ts"
+    "backend/service-worker/manifests/atomic-install.test.ts" -> "backend/service-worker/manifests/store.ts"
+    "backend/service-worker/manifests/atomic-install.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/manifests" {label="manifests" "backend/service-worker/manifests/atomic-install.ts" [label=<atomic-install.ts> tooltip="atomic-install.ts" URL="backend/service-worker/manifests/atomic-install.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/manifests/atomic-install.ts" -> "backend/service-worker/manifests/store.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/manifests" {label="manifests" "backend/service-worker/manifests/dev-seed.test.ts" [label=<dev-seed.test.ts> tooltip="dev-seed.test.ts" URL="backend/service-worker/manifests/dev-seed.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/manifests/dev-seed.test.ts" -> "backend/service-worker/manifests/dev-seed.ts"
+    "backend/service-worker/manifests/dev-seed.test.ts" -> "backend/service-worker/manifests/store.ts"
+    "backend/service-worker/manifests/dev-seed.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/manifests" {label="manifests" "backend/service-worker/manifests/dev-seed.ts" [label=<dev-seed.ts> tooltip="dev-seed.ts" URL="backend/service-worker/manifests/dev-seed.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/manifests/dev-seed.ts" -> "backend/service-worker/legacy-v1-rpc.ts"
+    "backend/service-worker/manifests/dev-seed.ts" -> "backend/service-worker/manifests/store.ts"
+    "backend/service-worker/manifests/dev-seed.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0" style="dashed"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/manifests" {label="manifests" "backend/service-worker/manifests/handlers.test.ts" [label=<handlers.test.ts> tooltip="handlers.test.ts" URL="backend/service-worker/manifests/handlers.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/manifests/handlers.test.ts" -> "backend/service-worker/manifests/handlers.ts"
+    "backend/service-worker/manifests/handlers.test.ts" -> "backend/service-worker/manifests/store.ts"
+    "backend/service-worker/manifests/handlers.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/manifests" {label="manifests" "backend/service-worker/manifests/handlers.ts" [label=<handlers.ts> tooltip="handlers.ts" URL="backend/service-worker/manifests/handlers.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/manifests/handlers.ts" -> "backend/service-worker/legacy-v1-rpc.ts"
+    "backend/service-worker/manifests/handlers.ts" -> "backend/service-worker/policies-loader.ts"
+    "backend/service-worker/manifests/handlers.ts" -> "backend/service-worker/policy-selection.ts"
+    "backend/service-worker/manifests/handlers.ts" -> "backend/service-worker/wasm-bridge.ts"
+    "backend/service-worker/manifests/handlers.ts" -> "backend/service-worker/manifests/atomic-install.ts"
+    "backend/service-worker/manifests/handlers.ts" -> "backend/service-worker/manifests/dev-seed.ts"
+    "backend/service-worker/manifests/handlers.ts" -> "backend/service-worker/manifests/migration.ts"
+    "backend/service-worker/manifests/handlers.ts" -> "backend/service-worker/manifests/store.ts"
+    "backend/service-worker/manifests/handlers.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0" style="dashed"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/manifests" {label="manifests" "backend/service-worker/manifests/hydrate.test.ts" [label=<hydrate.test.ts> tooltip="hydrate.test.ts" URL="backend/service-worker/manifests/hydrate.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/manifests/hydrate.test.ts" -> "backend/service-worker/manifests/dev-seed.ts" [style="dashed"]
+    "backend/service-worker/manifests/hydrate.test.ts" -> "backend/service-worker/manifests/hydrate.ts"
+    "backend/service-worker/manifests/hydrate.test.ts" -> "backend/service-worker/manifests/store.ts"
+    "backend/service-worker/manifests/hydrate.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/manifests" {label="manifests" "backend/service-worker/manifests/hydrate.ts" [label=<hydrate.ts> tooltip="hydrate.ts" URL="backend/service-worker/manifests/hydrate.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/manifests/hydrate.ts" -> "backend/service-worker/policies-loader.ts"
+    "backend/service-worker/manifests/hydrate.ts" -> "backend/service-worker/wasm-bridge.ts"
+    "backend/service-worker/manifests/hydrate.ts" -> "backend/service-worker/manifests/dev-seed.ts"
+    "backend/service-worker/manifests/hydrate.ts" -> "backend/service-worker/manifests/store.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/manifests" {label="manifests" "backend/service-worker/manifests/migration-detector.test.ts" [label=<migration-detector.test.ts> tooltip="migration-detector.test.ts" URL="backend/service-worker/manifests/migration-detector.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/manifests/migration-detector.test.ts" -> "sdk/extension-client.ts" [style="dashed"]
+    "backend/service-worker/manifests/migration-detector.test.ts" -> "backend/service-worker/dashboard/storage.ts"
+    "backend/service-worker/manifests/migration-detector.test.ts" -> "backend/service-worker/manifests/migration.ts"
+    "backend/service-worker/manifests/migration-detector.test.ts" -> "backend/service-worker/manifests/migration-detector.ts"
+    "backend/service-worker/manifests/migration-detector.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/manifests" {label="manifests" "backend/service-worker/manifests/migration-detector.ts" [label=<migration-detector.ts> tooltip="migration-detector.ts" URL="backend/service-worker/manifests/migration-detector.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/manifests/migration-detector.ts" -> "sdk/extension-client.ts"
+    "backend/service-worker/manifests/migration-detector.ts" -> "backend/service-worker/dashboard/current-user.ts"
+    "backend/service-worker/manifests/migration-detector.ts" -> "backend/service-worker/dashboard/storage.ts"
+    "backend/service-worker/manifests/migration-detector.ts" -> "backend/service-worker/manifests/migration.ts"
+    "backend/service-worker/manifests/migration-detector.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/manifests" {label="manifests" "backend/service-worker/manifests/migration.test.ts" [label=<migration.test.ts> tooltip="migration.test.ts" URL="backend/service-worker/manifests/migration.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/manifests/migration.test.ts" -> "backend/service-worker/manifests/migration.ts"
+    "backend/service-worker/manifests/migration.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/manifests" {label="manifests" "backend/service-worker/manifests/migration.ts" [label=<migration.ts> tooltip="migration.ts" URL="backend/service-worker/manifests/migration.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/manifests/migration.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/manifests" {label="manifests" "backend/service-worker/manifests/store.test.ts" [label=<store.test.ts> tooltip="store.test.ts" URL="backend/service-worker/manifests/store.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/manifests/store.test.ts" -> "backend/service-worker/manifests/store.ts"
+    "backend/service-worker/manifests/store.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/manifests" {label="manifests" "backend/service-worker/manifests/store.ts" [label=<store.ts> tooltip="store.ts" URL="backend/service-worker/manifests/store.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/manifests/store.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/mascot-badge.ts" [label=<mascot-badge.ts> tooltip="mascot-badge.ts" URL="backend/service-worker/mascot-badge.ts" fillcolor="#ddfeff"] } }
+    "backend/service-worker/mascot-badge.ts" -> "backend/service-worker/verdict-storage.ts"
+    "backend/service-worker/mascot-badge.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/multicall-handler.ts" [label=<multicall-handler.ts> tooltip="multicall-handler.ts" URL="backend/service-worker/multicall-handler.ts" fillcolor="#ddfeff"] } }
+    "backend/service-worker/multicall-handler.ts" -> "backend/service-worker/adapter-loader/declarative-route.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/notify-settings.ts" [label=<notify-settings.ts> tooltip="notify-settings.ts" URL="backend/service-worker/notify-settings.ts" fillcolor="#ddfeff"] } }
+    "backend/service-worker/notify-settings.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/orchestrator.ts" [label=<orchestrator.ts> tooltip="orchestrator.ts" URL="backend/service-worker/orchestrator.ts" fillcolor="#ddfeff"] } }
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/adapter-loader/declarative-route.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/dambi-auth/index.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/dashboard/current-user.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/diagnosis-context-storage.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/diagnostics.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/hl-order-to-action.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/mascot-badge.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/notify-settings.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/permit-report.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/policy-rpc.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/policy-store/resolve.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/registry/collect-token-decimals.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/sig-routing.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/state-delta-storage.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/storage.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/venue/collect-hl-leverage.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/venue/collect-order-enrichment.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/venue/leverage-cap-guard.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/venue/resolve-hl-master.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/venue/resolve-order-symbol.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/verdict-storage.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/wasm-bridge.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/service-worker/wasm-bridge.types.ts"
+    "backend/service-worker/orchestrator.ts" -> "backend/lib/types.ts"
+    "backend/service-worker/orchestrator.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/permit-report.ts" [label=<permit-report.ts> tooltip="permit-report.ts" URL="backend/service-worker/permit-report.ts" fillcolor="#ddfeff"] } }
+    "backend/service-worker/permit-report.ts" -> "backend/service-worker/dambi-auth/client.ts"
+    "backend/service-worker/permit-report.ts" -> "backend/service-worker/dambi-auth/tokenStore.ts" [style="dashed"]
+    "backend/service-worker/permit-report.ts" -> "backend/lib/types.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/policies-loader.ts" [label=<policies-loader.ts> tooltip="policies-loader.ts" URL="backend/service-worker/policies-loader.ts" fillcolor="#ddfeff"] } }
+    "backend/service-worker/policies-loader.ts" -> "backend/service-worker/adapter-loader/storage.ts"
+    "backend/service-worker/policies-loader.ts" -> "backend/service-worker/dashboard/storage.ts"
+    "backend/service-worker/policies-loader.ts" -> "backend/service-worker/manifests/store.ts"
+    "backend/service-worker/policies-loader.ts" -> "backend/service-worker/policy-selection.ts"
+    "backend/service-worker/policies-loader.ts" -> "backend/service-worker/wasm-bridge.ts"
+    "backend/service-worker/policies-loader.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/policy-rpc.ts" [label=<policy-rpc.ts> tooltip="policy-rpc.ts" URL="backend/service-worker/policy-rpc.ts" fillcolor="#ddfeff"] } }
+    "backend/service-worker/policy-rpc.ts" -> "backend/service-worker/dambi-auth/client.ts" [style="dashed"]
+    "backend/service-worker/policy-rpc.ts" -> "backend/service-worker/dambi-auth/tokenStore.ts" [style="dashed"]
+    "backend/service-worker/policy-rpc.ts" -> "backend/service-worker/diagnostics.ts"
+    "backend/service-worker/policy-rpc.ts" -> "backend/service-worker/legacy-v1-rpc.ts"
+    "backend/service-worker/policy-rpc.ts" -> "backend/service-worker/local-method-handlers.ts"
+    "backend/service-worker/policy-rpc.ts" -> "backend/service-worker/wasm-bridge.types.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/policy-selection.ts" [label=<policy-selection.ts> tooltip="policy-selection.ts" URL="backend/service-worker/policy-selection.ts" fillcolor="#ddfeff"] } }
+    "backend/service-worker/policy-selection.ts" -> "backend/service-worker/adapter-loader/storage.ts"
+    "backend/service-worker/policy-selection.ts" -> "backend/service-worker/dashboard/current-user.ts"
+    "backend/service-worker/policy-selection.ts" -> "backend/service-worker/dashboard/storage.ts"
+    "backend/service-worker/policy-selection.ts" -> "backend/lib/policy-meta.ts"
+    "backend/service-worker/policy-selection.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/policy-store" {label="policy-store" "backend/service-worker/policy-store/api.test.ts" [label=<api.test.ts> tooltip="api.test.ts" URL="backend/service-worker/policy-store/api.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/policy-store/api.test.ts" -> "backend/service-worker/dashboard/current-user.ts" [style="dashed"]
+    "backend/service-worker/policy-store/api.test.ts" -> "backend/service-worker/policy-store/api.ts"
+    "backend/service-worker/policy-store/api.test.ts" -> "backend/service-worker/policy-store/ops.ts"
+    "backend/service-worker/policy-store/api.test.ts" -> "backend/service-worker/policy-store/store.ts"
+    "backend/service-worker/policy-store/api.test.ts" -> "backend/service-worker/policy-store/types.ts"
+    "backend/service-worker/policy-store/api.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/policy-store" {label="policy-store" "backend/service-worker/policy-store/api.ts" [label=<api.ts> tooltip="api.ts" URL="backend/service-worker/policy-store/api.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/policy-store/api.ts" -> "backend/service-worker/dashboard/current-user.ts"
+    "backend/service-worker/policy-store/api.ts" -> "backend/service-worker/policy-store/ops.ts"
+    "backend/service-worker/policy-store/api.ts" -> "backend/service-worker/policy-store/seed.ts"
+    "backend/service-worker/policy-store/api.ts" -> "backend/service-worker/policy-store/store.ts"
+    "backend/service-worker/policy-store/api.ts" -> "backend/service-worker/policy-store/types.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/policy-store" {label="policy-store" "backend/service-worker/policy-store/ops.test.ts" [label=<ops.test.ts> tooltip="ops.test.ts" URL="backend/service-worker/policy-store/ops.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/policy-store/ops.test.ts" -> "backend/service-worker/policy-store/ops.ts"
+    "backend/service-worker/policy-store/ops.test.ts" -> "backend/service-worker/policy-store/store.ts"
+    "backend/service-worker/policy-store/ops.test.ts" -> "backend/service-worker/policy-store/types.ts"
+    "backend/service-worker/policy-store/ops.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/policy-store" {label="policy-store" "backend/service-worker/policy-store/ops.ts" [label=<ops.ts> tooltip="ops.ts" URL="backend/service-worker/policy-store/ops.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/policy-store/ops.ts" -> "backend/service-worker/policy-store/store.ts"
+    "backend/service-worker/policy-store/ops.ts" -> "backend/service-worker/policy-store/types.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/policy-store" {label="policy-store" "backend/service-worker/policy-store/render.test.ts" [label=<render.test.ts> tooltip="render.test.ts" URL="backend/service-worker/policy-store/render.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/policy-store/render.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/policy-store" {label="policy-store" "backend/service-worker/policy-store/render.ts" [label=<render.ts> tooltip="render.ts" URL="backend/service-worker/policy-store/render.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/policy-store/render.ts" -> "sdk/block-ir/blocksToEst.ts"
+    "backend/service-worker/policy-store/render.ts" -> "sdk/block-ir/ir.ts"
+    "backend/service-worker/policy-store/render.ts" -> "sdk/block-ir/params.ts"
+    "backend/service-worker/policy-store/render.ts" -> "backend/service-worker/wasm-bridge.ts"
+    "backend/service-worker/policy-store/render.ts" -> "backend/service-worker/policy-store/types.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/policy-store" {label="policy-store" "backend/service-worker/policy-store/resolve.test.ts" [label=<resolve.test.ts> tooltip="resolve.test.ts" URL="backend/service-worker/policy-store/resolve.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/policy-store/resolve.test.ts" -> "backend/service-worker/policy-store/ops.ts"
+    "backend/service-worker/policy-store/resolve.test.ts" -> "backend/service-worker/policy-store/render.ts" [style="dashed"]
+    "backend/service-worker/policy-store/resolve.test.ts" -> "backend/service-worker/policy-store/resolve.ts"
+    "backend/service-worker/policy-store/resolve.test.ts" -> "backend/service-worker/policy-store/store.ts"
+    "backend/service-worker/policy-store/resolve.test.ts" -> "backend/service-worker/policy-store/types.ts"
+    "backend/service-worker/policy-store/resolve.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/policy-store" {label="policy-store" "backend/service-worker/policy-store/resolve.ts" [label=<resolve.ts> tooltip="resolve.ts" URL="backend/service-worker/policy-store/resolve.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/policy-store/resolve.ts" -> "backend/service-worker/policy-store/render.ts"
+    "backend/service-worker/policy-store/resolve.ts" -> "backend/service-worker/policy-store/seed.ts"
+    "backend/service-worker/policy-store/resolve.ts" -> "backend/service-worker/policy-store/store.ts"
+    "backend/service-worker/policy-store/resolve.ts" -> "backend/service-worker/policy-store/types.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/policy-store" {label="policy-store" "backend/service-worker/policy-store/seed.test.ts" [label=<seed.test.ts> tooltip="seed.test.ts" URL="backend/service-worker/policy-store/seed.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/policy-store/seed.test.ts" -> "backend/service-worker/policy-store/seed.ts"
+    "backend/service-worker/policy-store/seed.test.ts" -> "backend/service-worker/policy-store/store.ts"
+    "backend/service-worker/policy-store/seed.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/policy-store" {label="policy-store" "backend/service-worker/policy-store/seed.ts" [label=<seed.ts> tooltip="seed.ts" URL="backend/service-worker/policy-store/seed.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/policy-store/seed.ts" -> "sdk/block-ir/est.ts"
+    "backend/service-worker/policy-store/seed.ts" -> "sdk/block-ir/estToBlocks.ts"
+    "backend/service-worker/policy-store/seed.ts" -> "backend/service-worker/wasm-bridge.ts"
+    "backend/service-worker/policy-store/seed.ts" -> "backend/service-worker/policy-store/store.ts"
+    "backend/service-worker/policy-store/seed.ts" -> "backend/service-worker/policy-store/types.ts"
+    "backend/service-worker/policy-store/seed.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/policy-store" {label="policy-store" "backend/service-worker/policy-store/store.test.ts" [label=<store.test.ts> tooltip="store.test.ts" URL="backend/service-worker/policy-store/store.test.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/policy-store/store.test.ts" -> "backend/service-worker/policy-store/store.ts"
+    "backend/service-worker/policy-store/store.test.ts" -> "backend/service-worker/policy-store/types.ts"
+    "backend/service-worker/policy-store/store.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/policy-store" {label="policy-store" "backend/service-worker/policy-store/store.ts" [label=<store.ts> tooltip="store.ts" URL="backend/service-worker/policy-store/store.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/policy-store/store.ts" -> "backend/service-worker/policy-store/types.ts"
+    "backend/service-worker/policy-store/store.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/policy-store" {label="policy-store" "backend/service-worker/policy-store/types.ts" [label=<types.ts> tooltip="types.ts" URL="backend/service-worker/policy-store/types.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/policy-store/types.ts" -> "sdk/policy-store-types.ts" [arrowhead="inv"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/registry" {label="registry" subgraph "cluster_backend/service-worker/registry/__tests__" {label="__tests__" "backend/service-worker/registry/__tests__/collect-token-decimals.live.test.ts" [label=<collect-token-decimals.live.test.ts> tooltip="collect-token-decimals.live.test.ts" URL="backend/service-worker/registry/__tests__/collect-token-decimals.live.test.ts" fillcolor="#ddfeff"] } } } }
+    "backend/service-worker/registry/__tests__/collect-token-decimals.live.test.ts" -> "backend/service-worker/registry/collect-token-decimals.ts"
+    "backend/service-worker/registry/__tests__/collect-token-decimals.live.test.ts" -> "backend/service-worker/registry/token-client.ts"
+    "backend/service-worker/registry/__tests__/collect-token-decimals.live.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/registry" {label="registry" subgraph "cluster_backend/service-worker/registry/__tests__" {label="__tests__" "backend/service-worker/registry/__tests__/collect-token-decimals.test.ts" [label=<collect-token-decimals.test.ts> tooltip="collect-token-decimals.test.ts" URL="backend/service-worker/registry/__tests__/collect-token-decimals.test.ts" fillcolor="#ddfeff"] } } } }
+    "backend/service-worker/registry/__tests__/collect-token-decimals.test.ts" -> "backend/service-worker/registry/collect-token-decimals.ts"
+    "backend/service-worker/registry/__tests__/collect-token-decimals.test.ts" -> "backend/service-worker/registry/token-client.ts"
+    "backend/service-worker/registry/__tests__/collect-token-decimals.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/registry" {label="registry" subgraph "cluster_backend/service-worker/registry/__tests__" {label="__tests__" "backend/service-worker/registry/__tests__/token-client.test.ts" [label=<token-client.test.ts> tooltip="token-client.test.ts" URL="backend/service-worker/registry/__tests__/token-client.test.ts" fillcolor="#ddfeff"] } } } }
+    "backend/service-worker/registry/__tests__/token-client.test.ts" -> "backend/service-worker/registry/token-client.ts"
+    "backend/service-worker/registry/__tests__/token-client.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/registry" {label="registry" "backend/service-worker/registry/collect-token-decimals.ts" [label=<collect-token-decimals.ts> tooltip="collect-token-decimals.ts" URL="backend/service-worker/registry/collect-token-decimals.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/registry/collect-token-decimals.ts" -> "backend/service-worker/registry/token-client.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/registry" {label="registry" "backend/service-worker/registry/token-client.ts" [label=<token-client.ts> tooltip="token-client.ts" URL="backend/service-worker/registry/token-client.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/registry/token-client.ts" -> "backend/service-worker/diagnostics.ts"
+    "backend/service-worker/registry/token-client.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/sig-routing.ts" [label=<sig-routing.ts> tooltip="sig-routing.ts" URL="backend/service-worker/sig-routing.ts" fillcolor="#ddfeff"] } }
+    "backend/service-worker/sig-routing.ts" -> "backend/service-worker/adapter-loader/declarative-adapter-loader.ts"
+    "backend/service-worker/sig-routing.ts" -> "backend/service-worker/wasm-bridge.ts"
+    "backend/service-worker/sig-routing.ts" -> "backend/lib/types.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/state-delta-storage.ts" [label=<state-delta-storage.ts> tooltip="state-delta-storage.ts" URL="backend/service-worker/state-delta-storage.ts" fillcolor="#ddfeff"] } }
+    "backend/service-worker/state-delta-storage.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/storage.ts" [label=<storage.ts> tooltip="storage.ts" URL="backend/service-worker/storage.ts" fillcolor="#ddfeff"] } }
+    "backend/service-worker/storage.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/v3-bundle-loader.ts" [label=<v3-bundle-loader.ts> tooltip="v3-bundle-loader.ts" URL="backend/service-worker/v3-bundle-loader.ts" fillcolor="#ddfeff"] } }
+    "backend/service-worker/v3-bundle-loader.ts" -> "backend/service-worker/wasm-bridge.ts"
+    "backend/service-worker/v3-bundle-loader.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/venue" {label="venue" subgraph "cluster_backend/service-worker/venue/__tests__" {label="__tests__" "backend/service-worker/venue/__tests__/hl-leverage-enrichment.test.ts" [label=<hl-leverage-enrichment.test.ts> tooltip="hl-leverage-enrichment.test.ts" URL="backend/service-worker/venue/__tests__/hl-leverage-enrichment.test.ts" fillcolor="#ddfeff"] } } } }
+    "backend/service-worker/venue/__tests__/hl-leverage-enrichment.test.ts" -> "backend/service-worker/venue/collect-hl-leverage.ts"
+    "backend/service-worker/venue/__tests__/hl-leverage-enrichment.test.ts" -> "backend/service-worker/venue/hl-agent-master.ts"
+    "backend/service-worker/venue/__tests__/hl-leverage-enrichment.test.ts" -> "backend/service-worker/venue/hl-info-client.ts"
+    "backend/service-worker/venue/__tests__/hl-leverage-enrichment.test.ts" -> "backend/service-worker/venue/hl-master-store.ts"
+    "backend/service-worker/venue/__tests__/hl-leverage-enrichment.test.ts" -> "backend/service-worker/venue/hl-signature-recovery.ts"
+    "backend/service-worker/venue/__tests__/hl-leverage-enrichment.test.ts" -> "backend/service-worker/venue/resolve-hl-master.ts"
+    "backend/service-worker/venue/__tests__/hl-leverage-enrichment.test.ts" -> "backend/lib/types.ts"
+    "backend/service-worker/venue/__tests__/hl-leverage-enrichment.test.ts" -> "node_modules/viem/_cjs/accounts/index.js" [penwidth="1.0"]
+    "backend/service-worker/venue/__tests__/hl-leverage-enrichment.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/venue" {label="venue" subgraph "cluster_backend/service-worker/venue/__tests__" {label="__tests__" "backend/service-worker/venue/__tests__/hl-order-enrichment.test.ts" [label=<hl-order-enrichment.test.ts> tooltip="hl-order-enrichment.test.ts" URL="backend/service-worker/venue/__tests__/hl-order-enrichment.test.ts" fillcolor="#ddfeff"] } } } }
+    "backend/service-worker/venue/__tests__/hl-order-enrichment.test.ts" -> "backend/service-worker/venue/collect-order-enrichment.ts"
+    "backend/service-worker/venue/__tests__/hl-order-enrichment.test.ts" -> "backend/service-worker/venue/hl-info-client.ts"
+    "backend/service-worker/venue/__tests__/hl-order-enrichment.test.ts" -> "backend/service-worker/venue/hl-master-store.ts"
+    "backend/service-worker/venue/__tests__/hl-order-enrichment.test.ts" -> "backend/lib/types.ts"
+    "backend/service-worker/venue/__tests__/hl-order-enrichment.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/venue" {label="venue" subgraph "cluster_backend/service-worker/venue/__tests__" {label="__tests__" "backend/service-worker/venue/__tests__/hl-real-order-demo.test.ts" [label=<hl-real-order-demo.test.ts> tooltip="hl-real-order-demo.test.ts" URL="backend/service-worker/venue/__tests__/hl-real-order-demo.test.ts" fillcolor="#ddfeff"] } } } }
+    "backend/service-worker/venue/__tests__/hl-real-order-demo.test.ts" -> "backend/injected/hl-exchange-parse.ts"
+    "backend/service-worker/venue/__tests__/hl-real-order-demo.test.ts" -> "backend/service-worker/hl-order-to-action.ts"
+    "backend/service-worker/venue/__tests__/hl-real-order-demo.test.ts" -> "backend/service-worker/venue/collect-hl-leverage.ts"
+    "backend/service-worker/venue/__tests__/hl-real-order-demo.test.ts" -> "backend/service-worker/venue/collect-order-enrichment.ts"
+    "backend/service-worker/venue/__tests__/hl-real-order-demo.test.ts" -> "backend/service-worker/venue/hl-info-client.ts"
+    "backend/service-worker/venue/__tests__/hl-real-order-demo.test.ts" -> "backend/service-worker/venue/resolve-order-symbol.ts"
+    "backend/service-worker/venue/__tests__/hl-real-order-demo.test.ts" -> "backend/lib/types.ts"
+    "backend/service-worker/venue/__tests__/hl-real-order-demo.test.ts" -> "fs" [style="dashed" penwidth="1.0"]
+    "backend/service-worker/venue/__tests__/hl-real-order-demo.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/venue" {label="venue" subgraph "cluster_backend/service-worker/venue/__tests__" {label="__tests__" "backend/service-worker/venue/__tests__/hl-signature-recovery.test.ts" [label=<hl-signature-recovery.test.ts> tooltip="hl-signature-recovery.test.ts" URL="backend/service-worker/venue/__tests__/hl-signature-recovery.test.ts" fillcolor="#ddfeff"] } } } }
+    "backend/service-worker/venue/__tests__/hl-signature-recovery.test.ts" -> "backend/service-worker/venue/hl-signature-recovery.ts"
+    "backend/service-worker/venue/__tests__/hl-signature-recovery.test.ts" -> "backend/lib/types.ts"
+    "backend/service-worker/venue/__tests__/hl-signature-recovery.test.ts" -> "node_modules/viem/_cjs/index.js" [penwidth="1.0"]
+    "backend/service-worker/venue/__tests__/hl-signature-recovery.test.ts" -> "node_modules/viem/_cjs/accounts/index.js" [penwidth="1.0"]
+    "backend/service-worker/venue/__tests__/hl-signature-recovery.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/venue" {label="venue" subgraph "cluster_backend/service-worker/venue/__tests__" {label="__tests__" "backend/service-worker/venue/__tests__/leverage-cap-guard.test.ts" [label=<leverage-cap-guard.test.ts> tooltip="leverage-cap-guard.test.ts" URL="backend/service-worker/venue/__tests__/leverage-cap-guard.test.ts" fillcolor="#ddfeff"] } } } }
+    "backend/service-worker/venue/__tests__/leverage-cap-guard.test.ts" -> "backend/service-worker/venue/leverage-cap-guard.ts"
+    "backend/service-worker/venue/__tests__/leverage-cap-guard.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/venue" {label="venue" subgraph "cluster_backend/service-worker/venue/__tests__" {label="__tests__" "backend/service-worker/venue/__tests__/resolve-order-symbol.test.ts" [label=<resolve-order-symbol.test.ts> tooltip="resolve-order-symbol.test.ts" URL="backend/service-worker/venue/__tests__/resolve-order-symbol.test.ts" fillcolor="#ddfeff"] } } } }
+    "backend/service-worker/venue/__tests__/resolve-order-symbol.test.ts" -> "backend/service-worker/venue/collect-order-enrichment.ts"
+    "backend/service-worker/venue/__tests__/resolve-order-symbol.test.ts" -> "backend/service-worker/venue/hl-info-client.ts"
+    "backend/service-worker/venue/__tests__/resolve-order-symbol.test.ts" -> "backend/service-worker/venue/resolve-order-symbol.ts"
+    "backend/service-worker/venue/__tests__/resolve-order-symbol.test.ts" -> "backend/lib/types.ts"
+    "backend/service-worker/venue/__tests__/resolve-order-symbol.test.ts" -> "node_modules/vitest/dist/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/venue" {label="venue" "backend/service-worker/venue/collect-hl-leverage.ts" [label=<collect-hl-leverage.ts> tooltip="collect-hl-leverage.ts" URL="backend/service-worker/venue/collect-hl-leverage.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/venue/collect-hl-leverage.ts" -> "backend/service-worker/venue/hl-info-client.ts"
+    "backend/service-worker/venue/collect-hl-leverage.ts" -> "backend/service-worker/venue/resolve-hl-master.ts"
+    "backend/service-worker/venue/collect-hl-leverage.ts" -> "backend/lib/types.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/venue" {label="venue" "backend/service-worker/venue/collect-order-enrichment.ts" [label=<collect-order-enrichment.ts> tooltip="collect-order-enrichment.ts" URL="backend/service-worker/venue/collect-order-enrichment.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/venue/collect-order-enrichment.ts" -> "backend/service-worker/venue/collect-hl-leverage.ts"
+    "backend/service-worker/venue/collect-order-enrichment.ts" -> "backend/service-worker/venue/hl-info-client.ts"
+    "backend/service-worker/venue/collect-order-enrichment.ts" -> "backend/service-worker/venue/resolve-hl-master.ts"
+    "backend/service-worker/venue/collect-order-enrichment.ts" -> "backend/lib/types.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/venue" {label="venue" "backend/service-worker/venue/hl-agent-master.ts" [label=<hl-agent-master.ts> tooltip="hl-agent-master.ts" URL="backend/service-worker/venue/hl-agent-master.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/venue/hl-agent-master.ts" -> "backend/service-worker/venue/hl-info-client.ts"
+    "backend/service-worker/venue/hl-agent-master.ts" -> "backend/service-worker/venue/hl-signature-recovery.ts"
+    "backend/service-worker/venue/hl-agent-master.ts" -> "backend/lib/types.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/venue" {label="venue" "backend/service-worker/venue/hl-info-client.ts" [label=<hl-info-client.ts> tooltip="hl-info-client.ts" URL="backend/service-worker/venue/hl-info-client.ts" fillcolor="#ddfeff"] } } }
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/venue" {label="venue" "backend/service-worker/venue/hl-master-store.ts" [label=<hl-master-store.ts> tooltip="hl-master-store.ts" URL="backend/service-worker/venue/hl-master-store.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/venue/hl-master-store.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/venue" {label="venue" "backend/service-worker/venue/hl-signature-recovery.ts" [label=<hl-signature-recovery.ts> tooltip="hl-signature-recovery.ts" URL="backend/service-worker/venue/hl-signature-recovery.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/venue/hl-signature-recovery.ts" -> "backend/lib/types.ts"
+    "backend/service-worker/venue/hl-signature-recovery.ts" -> "node_modules/viem/_cjs/index.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/venue" {label="venue" "backend/service-worker/venue/leverage-cap-guard.ts" [label=<leverage-cap-guard.ts> tooltip="leverage-cap-guard.ts" URL="backend/service-worker/venue/leverage-cap-guard.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/venue/leverage-cap-guard.ts" -> "backend/service-worker/wasm-bridge.types.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/venue" {label="venue" "backend/service-worker/venue/resolve-hl-master.ts" [label=<resolve-hl-master.ts> tooltip="resolve-hl-master.ts" URL="backend/service-worker/venue/resolve-hl-master.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/venue/resolve-hl-master.ts" -> "backend/service-worker/dashboard/current-user.ts"
+    "backend/service-worker/venue/resolve-hl-master.ts" -> "backend/service-worker/policy-store/store.ts"
+    "backend/service-worker/venue/resolve-hl-master.ts" -> "backend/service-worker/venue/hl-agent-master.ts"
+    "backend/service-worker/venue/resolve-hl-master.ts" -> "backend/service-worker/venue/hl-master-store.ts"
+    "backend/service-worker/venue/resolve-hl-master.ts" -> "backend/lib/types.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" subgraph "cluster_backend/service-worker/venue" {label="venue" "backend/service-worker/venue/resolve-order-symbol.ts" [label=<resolve-order-symbol.ts> tooltip="resolve-order-symbol.ts" URL="backend/service-worker/venue/resolve-order-symbol.ts" fillcolor="#ddfeff"] } } }
+    "backend/service-worker/venue/resolve-order-symbol.ts" -> "backend/service-worker/venue/collect-hl-leverage.ts"
+    "backend/service-worker/venue/resolve-order-symbol.ts" -> "backend/service-worker/venue/hl-info-client.ts"
+    "backend/service-worker/venue/resolve-order-symbol.ts" -> "backend/lib/types.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/verdict-storage.ts" [label=<verdict-storage.ts> tooltip="verdict-storage.ts" URL="backend/service-worker/verdict-storage.ts" fillcolor="#ddfeff"] } }
+    "backend/service-worker/verdict-storage.ts" -> "node_modules/webextension-polyfill/dist/browser-polyfill.js" [penwidth="1.0"]
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/wasm-bridge.ts" [label=<wasm-bridge.ts> tooltip="wasm-bridge.ts" URL="backend/service-worker/wasm-bridge.ts" fillcolor="#ddfeff"] } }
+    "backend/service-worker/wasm-bridge.ts" -> "../wasm/policy_engine_wasm"
+    "backend/service-worker/wasm-bridge.ts" -> "backend/service-worker/wasm-bridge.types.ts"
+    subgraph "cluster_backend" {label="backend" subgraph "cluster_backend/service-worker" {label="service-worker" "backend/service-worker/wasm-bridge.types.ts" [label=<wasm-bridge.types.ts> tooltip="wasm-bridge.types.ts" URL="backend/service-worker/wasm-bridge.types.ts" fillcolor="#ddfeff"] } }
+    "child_process" [label=<child_process> tooltip="child_process" URL="https://nodejs.org/api/child_process.html" color="grey" fontcolor="grey"]
+    "fs" [label=<fs> tooltip="fs" URL="https://nodejs.org/api/fs.html" color="grey" fontcolor="grey"]
+    "module" [label=<module> tooltip="module" URL="https://nodejs.org/api/module.html" color="grey" fontcolor="grey"]
+    subgraph "cluster_node_modules" {label="node_modules" subgraph "cluster_node_modules/@metamask" {label="@metamask" subgraph "cluster_node_modules/@metamask/post-message-stream" {label="post-message-stream" subgraph "cluster_node_modules/@metamask/post-message-stream/dist" {label="dist" "node_modules/@metamask/post-message-stream/dist/index.cjs" [label=<index.cjs> tooltip="index.cjs" URL="https://www.npmjs.com/package/@metamask/post-message-stream" shape="folder" fillcolor="#c40b0a1a" fontcolor="#c40b0a"] } } } }
+    subgraph "cluster_node_modules" {label="node_modules" subgraph "cluster_node_modules/canonicalize" {label="canonicalize" subgraph "cluster_node_modules/canonicalize/lib" {label="lib" "node_modules/canonicalize/lib/canonicalize.js" [label=<canonicalize.js> tooltip="canonicalize.js" URL="https://www.npmjs.com/package/canonicalize" shape="folder" fillcolor="#c40b0a1a" fontcolor="#c40b0a"] } } }
+    subgraph "cluster_node_modules" {label="node_modules" subgraph "cluster_node_modules/dotenv" {label="dotenv" subgraph "cluster_node_modules/dotenv/lib" {label="lib" "node_modules/dotenv/lib/main.js" [label=<main.js> tooltip="main.js" URL="https://www.npmjs.com/package/dotenv" shape="folder" fillcolor="#c40b0a1a" fontcolor="#c40b0a"] } } }
+    subgraph "cluster_node_modules" {label="node_modules" subgraph "cluster_node_modules/eth-rpc-errors" {label="eth-rpc-errors" subgraph "cluster_node_modules/eth-rpc-errors/dist" {label="dist" "node_modules/eth-rpc-errors/dist/index.js" [label=<index.js> tooltip="index.js" URL="https://www.npmjs.com/package/eth-rpc-errors" shape="folder" fillcolor="#c40b0a1a" fontcolor="#c40b0a"] } } }
+    subgraph "cluster_node_modules" {label="node_modules" subgraph "cluster_node_modules/jszip" {label="jszip" subgraph "cluster_node_modules/jszip/lib" {label="lib" "node_modules/jszip/lib/index.js" [label=<index.js> tooltip="index.js" URL="https://www.npmjs.com/package/jszip" shape="folder" fillcolor="#c40b0a1a" fontcolor="#c40b0a"] } } }
+    subgraph "cluster_node_modules" {label="node_modules" subgraph "cluster_node_modules/object-hash" {label="object-hash" "node_modules/object-hash/index.js" [label=<index.js> tooltip="index.js" URL="https://www.npmjs.com/package/object-hash" shape="folder" fillcolor="#c40b0a1a" fontcolor="#c40b0a"] } }
+    subgraph "cluster_node_modules" {label="node_modules" subgraph "cluster_node_modules/viem" {label="viem" subgraph "cluster_node_modules/viem/_cjs" {label="_cjs" subgraph "cluster_node_modules/viem/_cjs/accounts" {label="accounts" "node_modules/viem/_cjs/accounts/index.js" [label=<index.js> tooltip="index.js" URL="https://www.npmjs.com/package/viem" shape="folder" fillcolor="#c40b0a1a" fontcolor="#c40b0a"] } } } }
+    subgraph "cluster_node_modules" {label="node_modules" subgraph "cluster_node_modules/viem" {label="viem" subgraph "cluster_node_modules/viem/_cjs" {label="_cjs" subgraph "cluster_node_modules/viem/_cjs/chains" {label="chains" "node_modules/viem/_cjs/chains/index.js" [label=<index.js> tooltip="index.js" URL="https://www.npmjs.com/package/viem" shape="folder" fillcolor="#c40b0a1a" fontcolor="#c40b0a"] } } } }
+    subgraph "cluster_node_modules" {label="node_modules" subgraph "cluster_node_modules/viem" {label="viem" subgraph "cluster_node_modules/viem/_cjs" {label="_cjs" "node_modules/viem/_cjs/index.js" [label=<index.js> tooltip="index.js" URL="https://www.npmjs.com/package/viem" shape="folder" fillcolor="#c40b0a1a" fontcolor="#c40b0a"] } } }
+    subgraph "cluster_node_modules" {label="node_modules" subgraph "cluster_node_modules/vitest" {label="vitest" subgraph "cluster_node_modules/vitest/dist" {label="dist" "node_modules/vitest/dist/index.js" [label=<index.js> tooltip="index.js" URL="https://www.npmjs.com/package/vitest" shape="folder" fillcolor="#c40b0a1a" fontcolor="#c40b0a"] } } }
+    subgraph "cluster_node_modules" {label="node_modules" subgraph "cluster_node_modules/webextension-polyfill" {label="webextension-polyfill" subgraph "cluster_node_modules/webextension-polyfill/dist" {label="dist" "node_modules/webextension-polyfill/dist/browser-polyfill.js" [label=<browser-polyfill.js> tooltip="browser-polyfill.js" URL="https://www.npmjs.com/package/webextension-polyfill" shape="folder" fillcolor="#c40b0a1a" fontcolor="#c40b0a"] } } }
+    "path" [label=<path> tooltip="path" URL="https://nodejs.org/api/path.html" color="grey" fontcolor="grey"]
+    subgraph "cluster_sdk" {label="sdk" subgraph "cluster_sdk/block-ir" {label="block-ir" "sdk/block-ir/blocksToEst.ts" [label=<blocksToEst.ts> tooltip="blocksToEst.ts" URL="sdk/block-ir/blocksToEst.ts" fillcolor="#ddfeff"] } }
+    "sdk/block-ir/blocksToEst.ts" -> "sdk/block-ir/est.ts"
+    "sdk/block-ir/blocksToEst.ts" -> "sdk/block-ir/ir.ts"
+    subgraph "cluster_sdk" {label="sdk" subgraph "cluster_sdk/block-ir" {label="block-ir" "sdk/block-ir/est.ts" [label=<est.ts> tooltip="est.ts" URL="sdk/block-ir/est.ts" fillcolor="#ddfeff"] } }
+    subgraph "cluster_sdk" {label="sdk" subgraph "cluster_sdk/block-ir" {label="block-ir" "sdk/block-ir/estToBlocks.ts" [label=<estToBlocks.ts> tooltip="estToBlocks.ts" URL="sdk/block-ir/estToBlocks.ts" fillcolor="#ddfeff"] } }
+    "sdk/block-ir/estToBlocks.ts" -> "sdk/block-ir/est.ts"
+    "sdk/block-ir/estToBlocks.ts" -> "sdk/block-ir/ir.ts"
+    "sdk/block-ir/estToBlocks.ts" -> "sdk/block-ir/schema.ts"
+    subgraph "cluster_sdk" {label="sdk" subgraph "cluster_sdk/block-ir" {label="block-ir" "sdk/block-ir/ir.ts" [label=<ir.ts> tooltip="ir.ts" URL="sdk/block-ir/ir.ts" fillcolor="#ddfeff"] } }
+    subgraph "cluster_sdk" {label="sdk" subgraph "cluster_sdk/block-ir" {label="block-ir" "sdk/block-ir/params.ts" [label=<params.ts> tooltip="params.ts" URL="sdk/block-ir/params.ts" fillcolor="#ddfeff"] } }
+    "sdk/block-ir/params.ts" -> "sdk/block-ir/ir.ts"
+    subgraph "cluster_sdk" {label="sdk" subgraph "cluster_sdk/block-ir" {label="block-ir" "sdk/block-ir/schema.ts" [label=<schema.ts> tooltip="schema.ts" URL="sdk/block-ir/schema.ts" fillcolor="#ddfeff"] } }
+    "sdk/block-ir/schema.ts" -> "sdk/block-ir/ir.ts"
+    subgraph "cluster_sdk" {label="sdk" "sdk/extension-client.ts" [label=<extension-client.ts> tooltip="extension-client.ts" URL="sdk/extension-client.ts" fillcolor="#ddfeff"] }
+    subgraph "cluster_sdk" {label="sdk" "sdk/policy-store-types.ts" [label=<policy-store-types.ts> tooltip="policy-store-types.ts" URL="sdk/policy-store-types.ts" fillcolor="#ddfeff"] }
+    subgraph "cluster_webpack" {label="webpack" "webpack/env.js" [label=<env.js> tooltip="env.js" URL="webpack/env.js" ] }
+    "webpack/env.js" -> "node_modules/dotenv/lib/main.js" [penwidth="1.0"]
+    "webpack/env.js" -> "path" [style="dashed" penwidth="1.0"]
+}

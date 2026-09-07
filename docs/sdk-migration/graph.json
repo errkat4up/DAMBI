@@ -1,0 +1,186 @@
+{
+  "../../sdk/block-ir/blocksToEst.ts": [
+    "../../sdk/block-ir/est.ts",
+    "../../sdk/block-ir/ir.ts"
+  ],
+  "../../sdk/block-ir/est.ts": [],
+  "../../sdk/block-ir/estToBlocks.ts": [
+    "../../sdk/block-ir/est.ts",
+    "../../sdk/block-ir/ir.ts",
+    "../../sdk/block-ir/schema.ts"
+  ],
+  "../../sdk/block-ir/ir.ts": [],
+  "../../sdk/block-ir/params.ts": [
+    "../../sdk/block-ir/ir.ts"
+  ],
+  "../../sdk/block-ir/schema.ts": [
+    "../../sdk/block-ir/ir.ts"
+  ],
+  "../../sdk/policy-store-types.ts": [],
+  "../lib/types.ts": [],
+  "adapter-loader/bundle-schema.ts": [],
+  "adapter-loader/bundle-verify.ts": [],
+  "adapter-loader/declarative-adapter-loader.ts": [
+    "adapter-loader/bundle-schema.ts",
+    "adapter-loader/bundle-verify.ts",
+    "adapter-loader/declarative-v3-cache.ts",
+    "diagnostics.ts",
+    "wasm-bridge.ts"
+  ],
+  "adapter-loader/declarative-decode.ts": [],
+  "adapter-loader/declarative-route.ts": [
+    "adapter-loader/bundle-schema.ts",
+    "adapter-loader/declarative-adapter-loader.ts",
+    "adapter-loader/declarative-decode.ts",
+    "wasm-bridge.ts"
+  ],
+  "adapter-loader/declarative-v3-cache.ts": [
+    "adapter-loader/bundle-schema.ts"
+  ],
+  "dambi-auth/client.ts": [
+    "dambi-auth/tokenStore.ts"
+  ],
+  "dambi-auth/index.ts": [
+    "dambi-auth/client.ts",
+    "dambi-auth/oauthFlow.ts",
+    "dambi-auth/tokenStore.ts"
+  ],
+  "dambi-auth/oauthFlow.ts": [
+    "dambi-auth/client.ts",
+    "dambi-auth/tokenStore.ts"
+  ],
+  "dambi-auth/tokenStore.ts": [],
+  "dashboard/current-user.ts": [],
+  "diagnosis-context-storage.ts": [],
+  "diagnostics.ts": [],
+  "hl-order-to-action.ts": [
+    "../lib/types.ts"
+  ],
+  "legacy-v1-rpc.ts": [],
+  "local-method-handlers.ts": [
+    "wasm-bridge.types.ts"
+  ],
+  "mascot-badge.ts": [
+    "verdict-storage.ts"
+  ],
+  "notify-settings.ts": [],
+  "orchestrator.ts": [
+    "../lib/types.ts",
+    "adapter-loader/declarative-route.ts",
+    "dambi-auth/index.ts",
+    "dashboard/current-user.ts",
+    "diagnosis-context-storage.ts",
+    "diagnostics.ts",
+    "hl-order-to-action.ts",
+    "mascot-badge.ts",
+    "notify-settings.ts",
+    "permit-report.ts",
+    "policy-rpc.ts",
+    "policy-store/resolve.ts",
+    "registry/collect-token-decimals.ts",
+    "sig-routing.ts",
+    "state-delta-storage.ts",
+    "storage.ts",
+    "venue/collect-hl-leverage.ts",
+    "venue/collect-order-enrichment.ts",
+    "venue/leverage-cap-guard.ts",
+    "venue/resolve-hl-master.ts",
+    "venue/resolve-order-symbol.ts",
+    "verdict-storage.ts",
+    "wasm-bridge.ts",
+    "wasm-bridge.types.ts"
+  ],
+  "permit-report.ts": [
+    "../lib/types.ts",
+    "dambi-auth/client.ts",
+    "dambi-auth/tokenStore.ts"
+  ],
+  "policy-rpc.ts": [
+    "dambi-auth/client.ts",
+    "dambi-auth/tokenStore.ts",
+    "diagnostics.ts",
+    "legacy-v1-rpc.ts",
+    "local-method-handlers.ts",
+    "wasm-bridge.types.ts"
+  ],
+  "policy-store/render.ts": [
+    "../../sdk/block-ir/blocksToEst.ts",
+    "../../sdk/block-ir/ir.ts",
+    "../../sdk/block-ir/params.ts",
+    "policy-store/types.ts",
+    "wasm-bridge.ts"
+  ],
+  "policy-store/resolve.ts": [
+    "policy-store/render.ts",
+    "policy-store/seed.ts",
+    "policy-store/store.ts",
+    "policy-store/types.ts"
+  ],
+  "policy-store/seed.ts": [
+    "../../sdk/block-ir/est.ts",
+    "../../sdk/block-ir/estToBlocks.ts",
+    "policy-store/store.ts",
+    "policy-store/types.ts",
+    "wasm-bridge.ts"
+  ],
+  "policy-store/store.ts": [
+    "policy-store/types.ts"
+  ],
+  "policy-store/types.ts": [
+    "../../sdk/policy-store-types.ts"
+  ],
+  "registry/collect-token-decimals.ts": [
+    "registry/token-client.ts"
+  ],
+  "registry/token-client.ts": [
+    "diagnostics.ts"
+  ],
+  "sig-routing.ts": [
+    "../lib/types.ts",
+    "adapter-loader/declarative-adapter-loader.ts",
+    "wasm-bridge.ts"
+  ],
+  "state-delta-storage.ts": [],
+  "storage.ts": [],
+  "venue/collect-hl-leverage.ts": [
+    "../lib/types.ts",
+    "venue/hl-info-client.ts",
+    "venue/resolve-hl-master.ts"
+  ],
+  "venue/collect-order-enrichment.ts": [
+    "../lib/types.ts",
+    "venue/collect-hl-leverage.ts",
+    "venue/hl-info-client.ts",
+    "venue/resolve-hl-master.ts"
+  ],
+  "venue/hl-agent-master.ts": [
+    "../lib/types.ts",
+    "venue/hl-info-client.ts",
+    "venue/hl-signature-recovery.ts"
+  ],
+  "venue/hl-info-client.ts": [],
+  "venue/hl-master-store.ts": [],
+  "venue/hl-signature-recovery.ts": [
+    "../lib/types.ts"
+  ],
+  "venue/leverage-cap-guard.ts": [
+    "wasm-bridge.types.ts"
+  ],
+  "venue/resolve-hl-master.ts": [
+    "../lib/types.ts",
+    "dashboard/current-user.ts",
+    "policy-store/store.ts",
+    "venue/hl-agent-master.ts",
+    "venue/hl-master-store.ts"
+  ],
+  "venue/resolve-order-symbol.ts": [
+    "../lib/types.ts",
+    "venue/collect-hl-leverage.ts",
+    "venue/hl-info-client.ts"
+  ],
+  "verdict-storage.ts": [],
+  "wasm-bridge.ts": [
+    "wasm-bridge.types.ts"
+  ],
+  "wasm-bridge.types.ts": []
+}
