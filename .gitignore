@@ -115,6 +115,9 @@ AGENTS.md
 !docs/security-invariants.md
 !docs/sdk-migration/
 !docs/sdk-migration/**
+# Decision log — one-line ADRs so a settled call isn't re-litigated later.
+!docs/decisions/
+!docs/decisions/**
 # Published package changelog must ship with the package and the repo.
 !packages/core/CHANGELOG.md
 

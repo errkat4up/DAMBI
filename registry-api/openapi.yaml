@@ -1,0 +1,368 @@
+openapi: 3.0.3
+info:
+  title: Dambi Registry Sync API
+  description: |
+    Public contract for **Registry Sync** (`registryV2` + `registry-api`) — one
+    of the two dambi Cloud services (see `docs/decisions/0001-cloud-split.md`).
+    Serves signed decoder/selector data an integrator's `dambi-core` instance
+    resolves a pending call's decoder bundle against, and — once implemented —
+    signed policy bundles.
+
+    Status as of 2026-09-07:
+    - `GET /v1/registry/selectors` and `GET /v1/registry/by-callkey` are
+      **implemented and live**.
+    - `GET /v1/bundle` and `POST /v1/audit` are **planned, not implemented**.
+      Their shapes below are the agreed contract, not yet backed by code.
+      `POST /v1/audit` additionally still needs its home decided — see
+      `docs/decisions/0001-cloud-split.md` (current lean: Policy Hub, the
+      other dambi Cloud service, since it already has DB + auth).
+
+    This server also mirrors the underlying object store 1:1 at
+    `/index/<kind>/<key>.json`, `/tokens/<chain>/<addr>.json`,
+    `/bundles/<sha>.json`, `/signatures/<sha>.sig`, `/contexts/<scope…>.json`.
+    Those are the internal representation the `/v1/...` routes above rewrite
+    into — an SDK integrator should use the `/v1/...` contract, not the raw
+    object paths, which carry no stability guarantee.
+
+    Every error response shares one envelope: `{ ok: false, error: { code,
+    message } }`. A found object never returns `ok`/`error` — its body is the
+    object's own JSON.
+  version: "0.1.0"
+
+servers:
+  - url: http://127.0.0.1:8787
+    description: Local dev
+
+tags:
+  - name: registry
+    description: Decoder/selector lookups (implemented)
+  - name: bundle
+    description: Signed policy bundle distribution (planned)
+  - name: audit
+    description: Client-submitted judgment log (planned)
+  - name: meta
+    description: Health
+
+paths:
+  /health:
+    get:
+      tags: [meta]
+      summary: Liveness probe
+      responses:
+        "200":
+          description: Server is up
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean, example: true } } }
+
+  /v1/registry/selectors:
+    get:
+      tags: [registry]
+      summary: Resolve the decoder bundle for a pending request (tx calldata or EIP-712 typed data)
+      description: |
+        One lookup route; the parameter shape selects the index:
+
+        | shape | index | use |
+        |---|---|---|
+        | `chain_id` + `to` + `selector` | `by-callkey` | on-chain call to a known contract |
+        | `chain_id` + `selector` (no `to`) | `by-selector` | address-agnostic adapter, e.g. standard NFT `setApprovalForAll` |
+        | `chain_id` + `verifying_contract` + `primary_type` | `by-typed-data` | off-chain EIP-712 signature (Permit2, Hyperliquid, Seaport…) |
+
+        The server never falls back between shapes — a `by-callkey` miss is a
+        404, not a retry as `by-selector`. Whether an address-agnostic decoder
+        may stand in is the SDK's decision, gated by the decoder's own verified
+        declaration. A mixed shape (e.g. `to` together with `primary_type`) or
+        an incomplete one is a 404. Rewrites to the matching
+        `index/<kind>/<key>.json` object and serves it — see
+        `registry-api/src/server.ts`.
+      parameters:
+        - name: chain_id
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+          example: 1
+        - name: to
+          in: query
+          required: false
+          description: Target contract address (tx shape). Omit for an address-agnostic lookup. Case-insensitive on input.
+          schema: { type: string, pattern: "^0x[0-9a-fA-F]{40}$" }
+        - name: selector
+          in: query
+          required: false
+          description: 4-byte function selector (tx shape), `0x` + 8 hex chars. Case-insensitive on input.
+          schema: { type: string, pattern: "^0x[0-9a-fA-F]{8}$" }
+          example: "0xa22cb465"
+        - name: verifying_contract
+          in: query
+          required: false
+          description: EIP-712 domain `verifyingContract` (typed-data shape). Case-insensitive on input.
+          schema: { type: string, pattern: "^0x[0-9a-fA-F]{40}$" }
+        - name: primary_type
+          in: query
+          required: false
+          description: EIP-712 `primaryType` (typed-data shape), case-sensitive. A namespaced name may be passed with `:` (e.g. `HyperliquidTransaction:UsdSend`) or already escaped as `__`.
+          schema: { type: string, pattern: "^[A-Za-z0-9_:]+$" }
+          example: PermitSingle
+      responses:
+        "200":
+          description: Bundle found
+          headers:
+            ETag: { schema: { type: string }, description: 'sha256 of the response body, quoted' }
+            Cache-Control: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegistryEntry" }
+        "304":
+          description: Body unchanged since the ETag in `If-None-Match`
+        "404":
+          description: No decoder registered for this key, or a mixed/incomplete parameter shape — real status, not a soft miss
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } }
+        "429":
+          description: Rate limited
+          headers:
+            Retry-After: { schema: { type: string } }
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } }
+
+  /v1/registry/by-callkey:
+    get:
+      tags: [registry]
+      summary: Resolve a decoder bundle by chain + contract + selector (secondary alias)
+      parameters:
+        - name: chain_id
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+        - name: to
+          in: query
+          required: true
+          description: Target contract address. Case-insensitive on input.
+          schema: { type: string, pattern: "^0x[0-9a-fA-F]{40}$" }
+        - name: selector
+          in: query
+          required: true
+          schema: { type: string, pattern: "^0x[0-9a-fA-F]{8}$" }
+      responses:
+        "200":
+          description: Bundle found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegistryEntry" }
+        "404":
+          description: No decoder registered for this (chain, contract, selector)
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } }
+        "429":
+          description: Rate limited
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } }
+
+  /v1/bundle:
+    get:
+      tags: [bundle]
+      summary: Fetch a signed policy bundle
+      x-status: planned — payload schema + parameter contract decided
+        2026-09-07 (see docs/decisions/0001-cloud-split.md); not implemented
+        yet. The core's `SignedPolicyBundle.payload` stays `unknown` — this
+        shape lives only on the wire and in whatever parses payload after
+        verification, not in packages/core's types.
+      description: |
+        Signature scheme (fixed, from `registryV2/scripts/sign-bundles.ts`,
+        already used for decoder bundles): the signed message is
+        `canonicalize(payload)` (RFC 8785 JCS); the detached signature is
+        ECDSA P-256 over SHA-256 of that message, P1363 (`r‖s`) encoding,
+        base64. `alg` / `key_id` in the response are informational — the SDK
+        pins the verification algorithm and key, it does not trust these
+        fields to select either.
+
+        Rewrites into the same object-proxy pattern `/v1/registry/selectors`
+        already uses, no live DB lookup: `version` given → the immutable,
+        forever-cacheable `policy-bundles/<profile>/<version>.json`;
+        `version` omitted → the short-cache mutable pointer
+        `policy-bundles/<profile>/latest.json`. A publish writes the same
+        signed bytes to both paths — no server-side ref-resolution needed.
+        No chain scoping: policies match chains from inside their own Cedar
+        source, not as an external dimension.
+      parameters:
+        - name: profile
+          in: query
+          required: false
+          description: |
+            Policy profile name, `^[a-z0-9-]+$`. v0.1 only ever serves
+            "default" (any other value is a real 404, not a soft fallback) —
+            reserved for v0.2 multi-profile support.
+          schema: { type: string, default: default, pattern: "^[a-z0-9-]+$" }
+        - name: version
+          in: query
+          required: false
+          description: |
+            Pin to a specific `sequence` instead of latest. Must be a
+            positive integer; a malformed value or a `sequence` that was
+            never issued are both a 404 (registry-api never distinguishes
+            malformed-request from not-found — same convention as every
+            other route here). v0.1 retains every sequence ever issued, so
+            any previously-valid `version` always resolves.
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Signed bundle
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control:
+              schema: { type: string }
+              description: Immutable long-lived cache when `version` was given; short mutable cache for latest.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SignedPolicyBundle" }
+        "304":
+          description: Body unchanged since the ETag in `If-None-Match`
+        "404":
+          description: Unknown profile, or no bundle at all / at the requested `version`
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } }
+
+  /v1/audit:
+    post:
+      tags: [audit]
+      summary: Record a client-computed judgment (deduplicated by event id)
+      x-status: planned — not implemented; home service (Policy Hub vs
+        Registry Sync) not finalized, see docs/decisions/0001-cloud-split.md
+      description: |
+        Audit records are the **client's own report of what it decided**, not
+        a server-verified judgment — the server never re-runs Cedar. A
+        `wallet_address` field is deliberately absent from this contract: no
+        field here should let a raw wallet address reach this endpoint.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AuditEvent" }
+      responses:
+        "202":
+          description: Recorded (or already recorded — same `event_id` is not an error)
+        "400":
+          description: Malformed event
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } }
+        "401":
+          description: Missing/invalid API key
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } }
+
+components:
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [ok, error]
+      properties:
+        ok: { type: boolean, enum: [false] }
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, example: not_found }
+            message: { type: string }
+
+    RegistryEntry:
+      type: object
+      description: Resolved decoder bundle, ref-materialized if the index entry pointed at a template.
+      required: [matched, bundle_id, manifest_path, bundle_sha256, bundle]
+      properties:
+        matched: { type: boolean, enum: [true] }
+        bundle_id: { type: string }
+        manifest_path: { type: string }
+        bundle_sha256: { type: string, pattern: "^0x[0-9a-f]{64}$" }
+        bundle: { type: object, description: Decoder adapter bundle (type, match, abi_fragment, emit, requires). }
+
+    SignedPolicyBundle:
+      type: object
+      description: |
+        Envelope for the SDK's `PolicySource` port. **Transport location:
+        single JSON response body** (not a header, not a detached sidecar
+        file, unlike decoder bundles' `bundles/<sha>.json` +
+        `signatures/<sha>.sig` pair). **`payload` is a string** holding the
+        RFC 8785 JCS canonical JSON text of a `BundlePayload` — the exact
+        bytes that were signed. Decided 2026-09-07, see
+        `docs/decisions/0001-cloud-split.md`.
+
+        Why a string and not an embedded object: the SDK verifies the
+        signature over `payloadBytes` and then parses those bytes itself with
+        a strict parser (duplicate keys, malformed numbers and encodings are
+        rejected there). If `payload` were an object, the adapter would have
+        to re-serialize what JSON.parse gave it, and the signed bytes would
+        depend on the adapter's parser + canonicalizer. As a string the
+        adapter is a byte pass-through: `payloadBytes = utf8(payload)`,
+        `signatureBytes = base64decode(signature)`. The server-side signer
+        emits exactly `canonicalize(bundlePayload)` into this field.
+      required: [payload, signature]
+      properties:
+        payload:
+          type: string
+          description: JCS (RFC 8785) canonical JSON text of a `BundlePayload`. Verify first, then parse — never parse-then-reserialize.
+        signature: { type: string, description: base64, P1363 r‖s, ECDSA P-256 over SHA-256 of the UTF-8 bytes of `payload` }
+        key_id: { type: string, description: Telemetry only — the SDK verifies against its own configured trust key(s), never a key named in the response. Policy bundles are signed with a dedicated key, separate from the decoder-bundle key; the SDK pins both. }
+
+    BundlePayload:
+      type: object
+      description: |
+        Signed as `canonicalize(this)` (RFC 8785 JCS) — field order in this
+        document is illustrative only, canonicalization does not depend on it.
+        Every field below is **required to be present** (`expires_at` and
+        `registry_ref` included) even where its value is `null` — a missing
+        key is an invalid bundle, `null` is a valid, currently-supported value.
+      required: [policies, sequence, issued_at, expires_at, env, profile, registry_ref]
+      properties:
+        policies:
+          type: array
+          minItems: 1
+          description: Unchanged from the extension's existing `policy-set-v2.json` / `ResolvedBundle` shape — no client-side translation needed. Reject duplicate `id`s.
+          items:
+            type: object
+            required: [id, policy, manifest]
+            properties:
+              id: { type: string, minLength: 1, description: Must equal `manifest.id`. }
+              policy: { type: string, description: Cedar source }
+              manifest:
+                description: >-
+                  Opaque (ManifestV2, TBD by the future policy-ir package) —
+                  same deferral the core's own `PolicySet` type makes. In
+                  practice always at least id + schema_version: 2 + a
+                  trigger; an empty object is invalid.
+        sequence:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+          description: Monotonic. The `version` query param pins to this. A rollback republishes prior content under a new (higher) sequence — content is never mutated in place. Safe-integer range (1..2^53-1); a larger value needs a future string-based contract.
+        issued_at: { type: integer, description: Unix seconds }
+        expires_at:
+          type: integer
+          nullable: true
+          description: Unix seconds, or `null` meaning "publisher declared no expiry." When numeric, must be after `issued_at`. `null` does not mean the SDK treats the bundle as valid forever — the SDK enforces its own `maxBundleAgeSec` ceiling regardless (effective validity = `min(expires_at, issued_at + maxBundleAgeSec)`, a client-side config, not part of this contract).
+        env: { type: string, enum: [staging, production], description: Must exactly match the client's configured expected environment. }
+        profile:
+          type: string
+          description: Always "default" in v0.1 — any other value is a real 404 at the API, not a soft fallback. Reserved for v0.2 multi-profile support; tenant isolation is explicitly out of v0.1 scope, and this field alone is not a signed tenant binding.
+          default: default
+        registry_ref:
+          type: string
+          nullable: true
+          description: |
+            Always `null` in v0.1 — registryV2's index build doesn't yet emit
+            a root version/hash to reference, and null explicitly means "this
+            bundle pins no remote Registry state." A non-null value is a
+            distinct, recognized-but-unsupported case (`UNSUPPORTED_REGISTRY_REF`),
+            not a generic validation failure — reserved for when the SDK can
+            cross-check the decoders it JIT-installs against the Registry
+            Sync state a bundle was authored against.
+
+    AuditEvent:
+      type: object
+      required: [event_id, request_digest, verdict, policy_version, engine_version]
+      properties:
+        event_id: { type: string, description: Client-generated, dedup key. }
+        request_digest: { type: string, description: Hash of the evaluated request — never the raw calldata/signature payload. }
+        verdict: { type: string, enum: [allow, warn, deny] }
+        policy_version: { type: string }
+        engine_version: { type: string }
+        submitted_at: { type: integer, description: Unix seconds }
