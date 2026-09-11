@@ -1,9 +1,9 @@
 # Dambi: Decoder·정책 → Core → Adapters 개발 계획
 
 작성일: 2026-09-11. 기준: `main`의 `23eaaa6992f21fcd48ba6eb79762ec5db3ad6615`.
-DEC-02 시작 시 실제 Git 상태는 `feat/decoder`, HEAD `3066f0c` (`test(decoder): verify real approve decoding baseline`), 작업 트리 깨끗함이다. DEC-01 사용자 보고 빌드 대상 HEAD는 `23eaaa6992f21fcd48ba6eb79762ec5db3ad6615`이며, **Rust 소스 직접 빌드 후 연결 시험은 사용자 실행 보고 기준 30개 통과**라는 기존 기록을 유지한다. DEC-02 구현은 `26df736`에 커밋됐으며 **사용자 실행 보고 기준으로 통합 37개 통과·D1 검증 완료**다. 실패·취소·건너뛰기·todo는 모두 0이며 에이전트의 독립 재실행 결과는 아니다. **DEC-03도 사용자 실행 보고 기준 검증 완료**다. transfer 개별 21개와 통합 회귀 58개가 모두 통과했으며 두 실행 모두 실패·취소·건너뛰기·todo는 0이다. 04a는 사용자 제공 로그 기준 개별 47/47 통과(`duration_ms=801.277375`), 당시 통합 105/105 통과(`duration_ms=690.439291`)다. 두 실행 모두 suites·fail·cancelled·skipped·todo는 0이다. 실행 HEAD·시각·도구 버전·JS/WASM hash·새 빌드 로그는 미제공이며 과거 값으로 채우지 않는다. 04a 결과를 네 문서에 반영하고, 네 계약 답변에 따라 별도 v4 full-input DTO·strict validator·emit 연결·Rust/Node 회귀 시험을 작성했다. 04b Native/WASM/Node 실행 검증은 사용자 대기이며 DEC-04 전체는 미완료다. DEC-05 이후와 SDK 전체 소스·빌드 독립화는 미완료다.
+DEC-02 시작 시 실제 Git 상태는 `feat/decoder`, HEAD `3066f0c` (`test(decoder): verify real approve decoding baseline`), 작업 트리 깨끗함이다. DEC-01 사용자 보고 빌드 대상 HEAD는 `23eaaa6992f21fcd48ba6eb79762ec5db3ad6615`이며, **Rust 소스 직접 빌드 후 연결 시험은 사용자 실행 보고 기준 30개 통과**라는 기존 기록을 유지한다. DEC-02 구현은 `26df736`에 커밋됐으며 **사용자 실행 보고 기준으로 통합 37개 통과·D1 검증 완료**다. 실패·취소·건너뛰기·todo는 모두 0이며 에이전트의 독립 재실행 결과는 아니다. **DEC-03도 사용자 실행 보고 기준 검증 완료**다. transfer 개별 21개와 통합 회귀 58개가 모두 통과했으며 두 실행 모두 실패·취소·건너뛰기·todo는 0이다. 04a는 사용자 제공 로그 기준 개별 47/47 통과(`duration_ms=801.277375`), 당시 통합 105/105 통과(`duration_ms=690.439291`)다. 두 실행 모두 suites·fail·cancelled·skipped·todo는 0이다. 04a 당시 실행 HEAD·시각·도구 버전·JS/WASM hash·새 빌드 로그는 미제공이며 과거 값으로 채우지 않는다. 04a 결과를 네 문서에 반영하고, 네 계약 답변에 따라 별도 v4 full-input DTO·strict validator·emit 연결·Rust/Node 회귀 시험을 작성했다. 04b 사용자 실행의 저장 로그를 직접 확인했다. Native 181개와 새 WASM 빌드, Node strict 168개·기존 typed 47개·통합 273개가 모두 통과하여 **DEC-04 전체 검증 완료**다. 에이전트가 빌드·시험을 재실행한 결과는 아니다. DEC-05 이후와 SDK 전체 소스·빌드 독립화는 미완료다.
 
-DEC-03 착수 시 실제 상태는 `feat/decoder`, HEAD `26df736b4d8f0073cfefccf70f68d3b243b016b5`이며 README와 두 계획서의 DEC-02 검증 완료 미커밋 변경 3개를 보존했다. DEC-04 착수 시 실제 브랜치는 `feat/decoder`, HEAD는 `b10271365ce06a944b5672d833545db42b243881`(DEC-03 커밋), 작업 트리는 깨끗했다. 시작 HEAD를 새 시험 실행 HEAD로 사용하지 않는다. 이번 DEC-04 작업에는 사용자 실행 제한이 아래 일반 진행 지침보다 우선한다. 작성자는 코드·시험·문서 작성과 정적 검토까지만 진행하며 빌드·시험·의존성 설치 및 Git add·commit·push·merge·reset·브랜치 변경을 실행하지 않는다. DEC 시험은 내부에서 Registry를 빌드하므로 직접 실행하지 않는다. 기존 사용자 실행 기록, 필요한 경우의 준비·직접 WASM 빌드와 typed permit/통합 시험·04a와 추후 04b를 분리한 명시적 파일 커밋 안내는 [README](../../fixtures/decoder-policy/README.md), 사례·한계는 [coverage](../../fixtures/decoder-policy/coverage.md)를 따른다. 04a 결과를 네 문서에 반영하고, 네 계약 답변에 따라 별도 v4 full-input DTO·strict validator·emit 연결·Rust/Node 회귀 시험을 작성했다. 04b Native/WASM/Node 실행 검증은 사용자 대기이며 DEC-04 전체는 미완료다. DEC-05로 자동 진행하지 않는다.
+DEC-03 착수 시 실제 상태는 `feat/decoder`, HEAD `26df736b4d8f0073cfefccf70f68d3b243b016b5`이며 README와 두 계획서의 DEC-02 검증 완료 미커밋 변경 3개를 보존했다. DEC-04 착수 시 실제 브랜치는 `feat/decoder`, HEAD는 `b10271365ce06a944b5672d833545db42b243881`(DEC-03 커밋), 작업 트리는 깨끗했다. 시작 HEAD를 새 시험 실행 HEAD로 사용하지 않는다. 이번 DEC-04 작업에는 사용자 실행 제한이 아래 일반 진행 지침보다 우선한다. 작성자는 코드·시험·문서 작성과 정적 검토까지만 진행하며 빌드·시험·의존성 설치 및 Git add·commit·push·merge·reset·브랜치 변경을 실행하지 않는다. DEC 시험은 내부에서 Registry를 빌드하므로 직접 실행하지 않는다. 기존 사용자 실행 기록, 필요한 경우의 준비·직접 WASM 빌드와 typed permit/통합 시험·04a/04b 분리 커밋 기록과 명시적 문서 커밋 안내는 [README](../../fixtures/decoder-policy/README.md), 사례·한계는 [coverage](../../fixtures/decoder-policy/coverage.md)를 따른다. 04a 결과를 네 문서에 반영하고, 네 계약 답변에 따라 별도 v4 full-input DTO·strict validator·emit 연결·Rust/Node 회귀 시험을 작성했다. 04b 사용자 실행의 저장 로그를 직접 확인했다. Native 181개와 새 WASM 빌드, Node strict 168개·기존 typed 47개·통합 273개가 모두 통과하여 **DEC-04 전체 검증 완료**다. 에이전트가 빌드·시험을 재실행한 결과는 아니다. DEC-05로 자동 진행하지 않는다.
 
 ## 1. 목표와 진행 방식
 
@@ -161,13 +161,13 @@ selector 문자열의 길이·hex가 현재 DTO에서 검증되지 않아 malfor
 
 #### DEC-04a / DEC-04b — EIP-2612 기준선과 전체 typed 계약의 분리
 
-04a는 사용자 제공 로그 기준 개별 47/47 통과(`duration_ms=801.277375`), 당시 통합 105/105 통과(`duration_ms=690.439291`)다. 두 실행 모두 suites·fail·cancelled·skipped·todo는 0이다. 실행 HEAD·시각·도구 버전·JS/WASM hash·새 빌드 로그는 미제공이며 과거 값으로 채우지 않는다. 04a 결과를 네 문서에 반영하고, 네 계약 답변에 따라 별도 v4 full-input DTO·strict validator·emit 연결·Rust/Node 회귀 시험을 작성했다. 04b Native/WASM/Node 실행 검증은 사용자 대기이며 DEC-04 전체는 미완료다.
+04a는 사용자 제공 로그 기준 개별 47/47 통과(`duration_ms=801.277375`), 당시 통합 105/105 통과(`duration_ms=690.439291`)다. 두 실행 모두 suites·fail·cancelled·skipped·todo는 0이다. 04a 당시 실행 HEAD·시각·도구 버전·JS/WASM hash·새 빌드 로그는 미제공이며 과거 값으로 채우지 않는다. 04a 결과를 네 문서에 반영하고, 네 계약 답변에 따라 별도 v4 full-input DTO·strict validator·emit 연결·Rust/Node 회귀 시험을 작성했다. 04b 사용자 실행의 저장 로그를 직접 확인했다. Native 181개와 새 WASM 빌드, Node strict 168개·기존 typed 47개·통합 273개가 모두 통과하여 **DEC-04 전체 검증 완료**다. 에이전트가 빌드·시험을 재실행한 결과는 아니다.
 
 | 단계 | 작성·실행 상태 |
 | --- | --- |
 | 04a | 실제 `standard/erc20/permit@1.0.0` source → strict Registry → typed index/JCS → 실제 v3 WASM → Action/meta/error 연결. 47/47 및 당시 통합 105/105 사용자 통과 |
-| 04b | 별도 v4 full-input DTO/export·순수 validator·실제 emit·shared Rust/Node 회귀 작성. Native 시험·새 WASM 빌드·Node strict/통합 사용자 검증 대기 |
-| DEC-04 / D2 전체 | 미완료. 04b까지 실행 검증한 뒤 완료 여부 판단 |
+| 04b | 별도 v4 full-input DTO/export·순수 validator·실제 emit·shared Rust/Node 회귀 작성. Native 181개·새 WASM 빌드·Node strict 168개/기존 typed 47개/통합 273개 사용자 통과 |
+| DEC-04 / D2 전체 | **DEC-04 검증 완료.** D2 전체는 다른 decoder 단계가 남아 미완료 |
 
 실제 원본은 chain 1, mainnet USDC `0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48`, selector `0xd505accf`, primary type `Permit`, name `USD Coin`이다. source 바이트 SHA-256 `0x9e7337ae3ce7e1a80851652e39b2ac4fb264b5e8caf00a4c93193c6b93c76eb3`과 resolved JCS digest를 구분한다. 네 체인으로 확장하지 않는다. helper의 approve-only 4 callkey/typed 없음, approve+transfer 8 callkey/typed 없음·기존 반환 계약을 보존한다. approve+permit 선택은 5 callkey/1 typed/0 selector이며 04a 사용자 실행에서 검사했다. typed index에서 해소한 실제 inline bundle을 설치하며 permit calldata 성공으로 typed 검증을 대신하지 않는다.
 
@@ -184,11 +184,28 @@ worker 기본/transaction·선택적 정책 평가·typed v3 동작을 유지하
 
 04a의 owner/nonce/domain_name 검증 공백은 legacy observation 통과 기록이며 올바른 전체 EIP-712 입력 계약이 아니다. signed nonce와 Action nonce LiveField(value `0x0`, `nonces(address)`/`erc20_permit_nonce`, TTL 12, synced_at=제출 시각)는 구분한다. 후자는 실제 체인 조회 결과가 아니다. v3에서 deadline `"18446744073709551616"`의 body 포화/meta 0 차이는 정적 분석이며 실행 재현하지 않았다. strict는 안전 범위를 벗어난 값을 emit 이전에 거절하고 body/meta deadline 일치도 확인한다.
 
-04b 변경 파일은 WASM `src/{dto,declarative_exports,lib,typed_data_validation}.rs`, 신규 `tests/declarative_v3_typed_data_strict.rs`, strict Node cases/test·worker·npm 명령과 네 문서다. Node strict 요청 163개+구조 5개=168개, 기존 105개를 보존한 통합 정의 273개를 작성했으며 실행 통과 수가 아니다. Native는 같은 fixture와 raw JSON·다른 설치 계약·내부 emit 결함·v3 호환 회귀를 검사한다. 오류 코드·입출력 예시는 [상세 계획](decoder-design-plan.md#dec-04--eip-2612와-typed-입력-계약--전체-계획-d2)을 따른다.
+04b 변경 파일은 WASM `src/{dto,declarative_exports,lib,typed_data_validation}.rs`, 신규 `tests/declarative_v3_typed_data_strict.rs`, strict Node cases/test·worker·npm 명령과 네 문서다. Node strict 요청 163개+구조 5개=168개, 기존 105개를 보존한 통합 정의 273개를 작성했고 저장된 사용자 로그에서 각각 168/168·273/273 통과했다. Native는 같은 fixture와 raw JSON·다른 설치 계약·내부 emit 결함·v3 호환 회귀를 검사한다. 오류 코드·입출력 예시는 [상세 계획](decoder-design-plan.md#dec-04--eip-2612와-typed-입력-계약--전체-계획-d2)을 따른다.
 
-04b 정적 검토: 수정/관련 JS 4개 `node --check`, 설치된 Rust formatter의 새 코드 형식·5개 Rust 파일 구문 확인, 문서 shell 블록 8개 `bash -n`, JSON·고정 수량·주소·원본 7개 hash 대조, 기존 v3 함수의 바이트 동일성 및 04a patch 경계를 확인했다. `git diff --check`와 신규 파일 공백 검사도 문제없다. Rust 타입 검사·컴파일·Registry/WASM/Node 실행 시험은 수행하지 않았다.
+04b 정적 검토: 수정/관련 JS 4개 `node --check`, 설치된 Rust formatter의 새 코드 형식·5개 Rust 파일 구문 확인, 문서 shell 블록 8개 `bash -n`, JSON·고정 수량·주소·원본 7개 hash 대조, 기존 v3 함수의 바이트 동일성 및 04a patch 경계를 확인했다. `git diff --check`와 신규 파일 공백 검사도 문제없다. 이는 구현 당시 에이전트의 정적 검토 기록이다. 에이전트는 Rust 컴파일·Registry/WASM/Node 시험을 직접 실행하지 않았으며, 후속 사용자 실행 로그의 성공은 아래 별도 기록으로 확인했다.
 
-미응답 계약 질문은 없다. 실행 제한에 따라 사용자가 Native 회귀 → **새 WASM 직접 빌드** → strict 개별·기존 typed 개별·전체 Node 시험을 실행한다. 04b 재개 시 04a 10개 파일이 미커밋이어서 수정 전 patch를 보존했다. [README](../../fixtures/decoder-policy/README.md)의 명시적 파일/patch 명령으로 04a와 04b를 별도 커밋하며 생성물을 제외한다. 새 결과는 네 문서에 함께 반영한다. DEC-05, selector 개선, Permit2/multicall/Core/API/RPC, 정책·서명 검증, 소스 이관·CI로 확대하지 않는다.
+미응답 계약 질문은 없다. 사용자 Native 회귀 → 새 WASM 직접 빌드 → strict 개별·기존 typed 개별·전체 Node 시험의 성공을 저장 로그로 확인했다. 04a `593ea16`과 04b `e487805`로 분리 커밋됐고 생성물은 제외했다. 이번 검증 결과는 네 문서에 함께 반영했다. DEC-05, selector 개선, Permit2/multicall/Core/API/RPC, 정책·서명 검증, 소스 이관·CI로 확대하지 않는다.
+
+사용자 실행 로그 `/private/tmp/dambi-dec04b-verify.OepBZF/`를 읽어 다음 결과를 확인했다. 에이전트의 재실행이 아니다.
+
+| 검증 | 실제 통과 | 실행 시간 |
+| --- | --- | --- |
+| Native strict / typed install / route / helpers | 7 / 7 / 138 / 29개 (합계 181개) | 0.05 / 0.01 / 0.07 / 0.01s |
+| Node strict | 168/168 | 943.529416ms |
+| Node 기존 typed | 47/47 | 514.873041ms |
+| Node 통합 | 273/273 | 901.401958ms |
+
+각 Native 실패·ignored·measured는 0이다. helpers의 66개 filtered out은 지정한 모듈 외 시험이며 통과 수에 넣지 않는다. Node 세 실행은 suites·fail·cancelled·skipped·todo 모두 0이다. `timeline.log`의 Native 시작은 `2026-09-11T10:09:50Z`, 새 WASM 빌드는 `10:10:27Z–10:11:21Z`, Node는 `10:11:21Z–10:11:24Z`이고 세 그룹 모두 exit=0이다. 개별 시험별 timestamp는 기록되지 않았다.
+
+실행 HEAD는 전후 `b10271365ce06a944b5672d833545db42b243881`이며 DEC-04 미커밋 변경을 포함한 worktree에서 검증했다. 이후 04a `593ea166421b3cff7bdc6f2fa0704143f64bd389`와 04b `e487805bdb86451a6c9688f7b2dcce399cc13892`로 분리 커밋됐다. 전후 tracked patch·Git 상태가 같고, 로그에 기록한 입력 24개는 현재 파일과 `e487805`의 Git blob에 모두 일치한다. 추적된 11개 경로 patch도 해당 커밋 diff와 일치한다. 현재 JS/WASM 2개 hash도 기록값과 같으며 로그의 사후 검사는 입력 24개·산출물 2개 모두 OK다. 실행 HEAD를 현재 커밋으로 대체하지 않는다.
+
+실제 도구는 Rust/Cargo 1.95.0, wasm-pack 0.14.0, Node v25.9.0, npm 11.12.1이며 `CARGO_TARGET_DIR=/tmp/dambi-dec04b-verify.OepBZF/target`, release opt-level=z를 사용했다. 상세 빌드 명령·두 산출물 SHA-256·비차단 빌드 안내는 [README](../../fixtures/decoder-policy/README.md#dec-04b-실행-기록--저장-로그-확인dec-04-완료)의 별도 실행 기록에 보존한다. **04a/04b 구현·분리 커밋·사용자 실행 검증을 완료하여 DEC-04 완료**로 기록한다. D2 전체·SDK 전체 독립화는 미완료이며 DEC-05로 자동 진행하지 않는다. 이번 네 문서 갱신에 재시험은 필요하지 않다.
+
+
 
 ### D3. 정책 콘텐츠와 manifest 정리
 
@@ -322,4 +339,4 @@ Decoder 인계 조건을 충족하면 검토된 decoder 이력을 Core에 통합
 
 DEC-01의 과거 기록은 별도로 유지한다. 당시 Rust 소스 재빌드 후 연결 시험은 사용자 제공 로그 기준 30개 통과, 실패·취소·건너뛰기 각 0개이며 작성자가 직접 실행한 결과가 아니다. 사용자 제공 실행 전후 Git 상태에서 HEAD는 `23eaaa6992f21fcd48ba6eb79762ec5db3ad6615`로 같고 Rust 소스·빌드 설정 변경은 표시되지 않았다. 도구 조회 결과는 Rust/Cargo 1.95.0, wasm-pack 0.14.0, Node 25.9.0, npm 11.12.1이다. 빌드 성공 표식 `build_success_utc=2026-09-11T06:57:10Z`, WASM SHA-256과 재시험 로그를 [README](../../fixtures/decoder-policy/README.md)에 기록했다. 재시험은 `2026-09-11T06:57:40Z` 시작, `2026-09-11T06:57:42Z` 성공 표식, `duration_ms=1290.958958`이며 최초 시험 30개 통과(`duration_ms=2050.144875`)와 별도 실행이다.
 
-DEC-01 당시 미제공 세부 기록은 그대로 유지한다. DEC-02의 실제 실행 시점 HEAD·도구 버전·시각·원본 hash 값 등 사용자 요약에 없는 값도 임의로 채우거나 DEC-01에서 복사하지 않는다. 이 세부 기록을 채우기 위해 빌드·시험을 다시 요구하지 않는다. DEC-03 착수 시 남아 있던 DEC-02 검증 완료 문서 변경 3개도 보존했다. 이번 사용자 실행 로그를 README·coverage·두 계획서에 실제 반영했으며 DEC-03 실행의 미제공 hash·시각·HEAD·도구 버전·재빌드 로그는 채우지 않는다. 착수 HEAD는 실행 시점 HEAD의 증거가 아니며 세부 기록의 미제공은 DEC-03 검증 완료를 막지 않는다. 에이전트는 빌드·시험·의존성 설치·Git 변경 명령을 실행하지 않았다. 04a 결과를 네 문서에 반영하고, 네 계약 답변에 따라 별도 v4 full-input DTO·strict validator·emit 연결·Rust/Node 회귀 시험을 작성했다. 04b Native/WASM/Node 실행 검증은 사용자 대기이며 DEC-04 전체는 미완료다. DEC-05로 자동 진행하지 않는다. D1 완료 범위는 approve 디코딩·소비자 정책 연결까지다. 소스 이관, Core 재구현과 SDK 전체 소스·빌드 독립화는 미완료다.
+DEC-01 당시 미제공 세부 기록은 그대로 유지한다. DEC-02의 실제 실행 시점 HEAD·도구 버전·시각·원본 hash 값 등 사용자 요약에 없는 값도 임의로 채우거나 DEC-01에서 복사하지 않는다. 이 세부 기록을 채우기 위해 빌드·시험을 다시 요구하지 않는다. DEC-03 착수 시 남아 있던 DEC-02 검증 완료 문서 변경 3개도 보존했다. 이번 사용자 실행 로그를 README·coverage·두 계획서에 실제 반영했으며 DEC-03 실행의 미제공 hash·시각·HEAD·도구 버전·재빌드 로그는 채우지 않는다. 착수 HEAD는 실행 시점 HEAD의 증거가 아니며 세부 기록의 미제공은 DEC-03 검증 완료를 막지 않는다. 에이전트는 빌드·시험·의존성 설치·Git 변경 명령을 실행하지 않았다. 04a 결과를 네 문서에 반영하고, 네 계약 답변에 따라 별도 v4 full-input DTO·strict validator·emit 연결·Rust/Node 회귀 시험을 작성했다. 04b 사용자 실행의 저장 로그를 직접 확인했다. Native 181개와 새 WASM 빌드, Node strict 168개·기존 typed 47개·통합 273개가 모두 통과하여 **DEC-04 전체 검증 완료**다. 에이전트가 빌드·시험을 재실행한 결과는 아니다. DEC-05로 자동 진행하지 않는다. D1 완료 범위는 approve 디코딩·소비자 정책 연결까지다. 소스 이관, Core 재구현과 SDK 전체 소스·빌드 독립화는 미완료다.
