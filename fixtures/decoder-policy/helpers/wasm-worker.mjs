@@ -15,8 +15,35 @@ const installations = scenario.bundles.map((bundle) => {
   assert.equal(result.data.decoder_id, bundle.id);
   return result;
 });
-const results = scenario.requests.map(({ id, input }) => ({
-  id,
-  result: JSON.parse(wasm.declarative_route_request_v3_json(JSON.stringify(input))),
-}));
+const results = scenario.requests.map(({ id, input }) => {
+  const result = JSON.parse(wasm.declarative_route_request_v3_json(JSON.stringify(input)));
+  // Preserve DEC-01's input/output contract when no policy bundle is supplied.
+  if (scenario.policyBundle === undefined) return { id, result };
+
+  assert.equal(result.ok, true, `Decode before policy evaluation failed: ${id}: ${JSON.stringify(result)}`);
+  assert.equal(result.error, null);
+  assert.equal(result.data.actions.length, 1);
+  const decoded = result.data.actions[0];
+  // Forward the actual decoded Action; never reconstruct its token, spender,
+  // amount or meta from fixture expectations. Tx routing comes from the request.
+  const evaluationInput = {
+    action: decoded.body,
+    meta: decoded.meta,
+    tx: {
+      chain_id: `eip155:${input.chain_id}`,
+      from: input.submitter,
+      to: input.to,
+    },
+  };
+  const plan = JSON.parse(wasm.plan_action_rpc_v2_json(JSON.stringify({
+    ...evaluationInput,
+    manifests: [scenario.policyBundle.manifest],
+  })));
+  const evaluation = JSON.parse(wasm.evaluate_action_v2_json(JSON.stringify({
+    ...evaluationInput,
+    bundles: [scenario.policyBundle],
+    results: {},
+  })));
+  return { id, result, plan, evaluation };
+});
 process.stdout.write(JSON.stringify({ installations, results }));
