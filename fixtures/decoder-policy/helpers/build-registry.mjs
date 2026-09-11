@@ -36,9 +36,10 @@ async function copyPinnedFile(root, selected) {
   return JSON.parse(bytes.toString("utf8"));
 }
 
-// Existing callers remain approve-only; DEC-03 explicitly adds transfer.
-export async function buildRegistry(selection, { includeTransfer = false } = {}) {
+// Existing callers remain approve-only; later fixtures explicitly opt in.
+export async function buildRegistry(selection, { includeTransfer = false, includePermit = false } = {}) {
   assert.equal(typeof includeTransfer, "boolean");
+  assert.equal(typeof includePermit, "boolean");
   const tsx = join(registryRoot, "node_modules/.bin/tsx");
   await access(tsx).catch(() => {
     throw new Error("Registry dependencies missing; run npm ci --prefix registryV2 first.");
@@ -57,6 +58,31 @@ export async function buildRegistry(selection, { includeTransfer = false } = {})
       assert.equal(transferSource.match.selector, "0xa9059cbb");
       assert.equal(transferSource.match.chain_to_addresses_source, "tokens:erc20");
       assert.deepEqual(transferSource.match.chain_ids, source.match.chain_ids);
+    }
+    let permitSource;
+    if (includePermit) {
+      permitSource = await copyPinnedFile(root, selection.permit_manifest);
+      assert.equal(permitSource.id, "standard/erc20/permit@1.0.0");
+      assert.equal(permitSource.match.selector, "0xd505accf");
+      assert.equal(permitSource.match.chain_to_addresses_source, undefined);
+      assert.equal(permitSource.match.chain_ids, undefined);
+      assert.deepEqual(permitSource.match.chain_to_addresses, {
+        "1": ["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"],
+      });
+      assert.deepEqual(permitSource.match.typed_data, {
+        domain_name: "USD Coin",
+        verifying_contract: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        primary_type: "Permit",
+        types: {
+          Permit: [
+            { name: "owner", type: "address" },
+            { name: "spender", type: "address" },
+            { name: "value", type: "uint256" },
+            { name: "nonce", type: "uint256" },
+            { name: "deadline", type: "uint256" },
+          ],
+        },
+      });
     }
     assert.equal(selection.tokens.length, 4, "DEC-01 pins one token per chain");
     const tokens = [];
@@ -79,9 +105,13 @@ export async function buildRegistry(selection, { includeTransfer = false } = {})
         maxBuffer: 4 * 1024 * 1024,
       });
     } catch (error) {
-      throw new Error(`${includeTransfer ? "DEC-03" : "DEC-01"} Registry build failed; all output is discarded.\n${error.stderr ?? ""}\n${error.message}`, { cause: error });
+      throw new Error(`${includePermit ? "DEC-04a" : includeTransfer ? "DEC-03" : "DEC-01"} Registry build failed; all output is discarded.\n${error.stderr ?? ""}\n${error.message}`, { cause: error });
     }
-    return { root, source, tokens, cleanup, ...(includeTransfer ? { transferSource } : {}) };
+    return {
+      root, source, tokens, cleanup,
+      ...(includeTransfer ? { transferSource } : {}),
+      ...(includePermit ? { permitSource } : {}),
+    };
   } catch (error) {
     await cleanup();
     throw error;

@@ -1,9 +1,9 @@
 # Dambi: Decoder·정책 → Core → Adapters 개발 계획
 
 작성일: 2026-09-11. 기준: `main`의 `23eaaa6992f21fcd48ba6eb79762ec5db3ad6615`.
-DEC-02 시작 시 실제 Git 상태는 `feat/decoder`, HEAD `3066f0c` (`test(decoder): verify real approve decoding baseline`), 작업 트리 깨끗함이다. DEC-01 사용자 보고 빌드 대상 HEAD는 `23eaaa6992f21fcd48ba6eb79762ec5db3ad6615`이며, **Rust 소스 직접 빌드 후 연결 시험은 사용자 실행 보고 기준 30개 통과**라는 기존 기록을 유지한다. DEC-02 구현은 `26df736`에 커밋됐으며 **사용자 실행 보고 기준으로 통합 37개 통과·D1 검증 완료**다. 실패·취소·건너뛰기·todo는 모두 0이며 에이전트의 독립 재실행 결과는 아니다. **DEC-03도 사용자 실행 보고 기준 검증 완료**다. transfer 개별 21개와 통합 회귀 58개가 모두 통과했으며 두 실행 모두 실패·취소·건너뛰기·todo는 0이다. DEC-04 이후는 미착수이며 SDK 전체 소스·빌드 독립화는 미완료다.
+DEC-02 시작 시 실제 Git 상태는 `feat/decoder`, HEAD `3066f0c` (`test(decoder): verify real approve decoding baseline`), 작업 트리 깨끗함이다. DEC-01 사용자 보고 빌드 대상 HEAD는 `23eaaa6992f21fcd48ba6eb79762ec5db3ad6615`이며, **Rust 소스 직접 빌드 후 연결 시험은 사용자 실행 보고 기준 30개 통과**라는 기존 기록을 유지한다. DEC-02 구현은 `26df736`에 커밋됐으며 **사용자 실행 보고 기준으로 통합 37개 통과·D1 검증 완료**다. 실패·취소·건너뛰기·todo는 모두 0이며 에이전트의 독립 재실행 결과는 아니다. **DEC-03도 사용자 실행 보고 기준 검증 완료**다. transfer 개별 21개와 통합 회귀 58개가 모두 통과했으며 두 실행 모두 실패·취소·건너뛰기·todo는 0이다. 현재 DEC-04a 기준 시험 작성·정적 검토와 DEC-04b 설계·계약 답변 반영을 진행했다. 네 계약 답변을 모두 수신해 기존 v3 유지 + 별도 full v4 export, strict deadline 안전 정수 초과 거절, owner/requested_signer 요청 일관성·대리 submitter 허용·실제 서명 미검증, domain 제약·오류 우선순위를 확정했다. 04a 실행 결과만 대기 중이며 04b Rust/Node 구현·검증은 미착수다. DEC-04 전체는 미완료다. DEC-05 이후와 SDK 전체 소스·빌드 독립화는 미완료다.
 
-DEC-03 착수 시 실제 상태는 `feat/decoder`, HEAD `26df736b4d8f0073cfefccf70f68d3b243b016b5`이며 README와 두 계획서의 DEC-02 검증 완료 미커밋 변경 3개를 보존했다. 이번 DEC-03 작업에는 사용자 실행 제한이 아래 일반 진행 지침보다 우선한다. 작성자는 코드·시험·문서 작성과 정적 검토까지만 진행하며 빌드·시험·의존성 설치 및 Git add·commit·push·merge·reset·브랜치 변경을 실행하지 않는다. DEC 시험은 내부에서 Registry를 빌드하므로 직접 실행하지 않는다. 기존 사용자 실행 기록, 필요한 경우의 준비·직접 WASM 빌드와 transfer/통합 시험·명시적 9개 파일 커밋 명령은 [README](../../fixtures/decoder-policy/README.md), 사례·한계는 [coverage](../../fixtures/decoder-policy/coverage.md)를 따른다. DEC-04로 자동 진행하지 않는다.
+DEC-03 착수 시 실제 상태는 `feat/decoder`, HEAD `26df736b4d8f0073cfefccf70f68d3b243b016b5`이며 README와 두 계획서의 DEC-02 검증 완료 미커밋 변경 3개를 보존했다. DEC-04 착수 시 실제 브랜치는 `feat/decoder`, HEAD는 `b10271365ce06a944b5672d833545db42b243881`(DEC-03 커밋), 작업 트리는 깨끗했다. 시작 HEAD를 새 시험 실행 HEAD로 사용하지 않는다. 이번 DEC-04 작업에는 사용자 실행 제한이 아래 일반 진행 지침보다 우선한다. 작성자는 코드·시험·문서 작성과 정적 검토까지만 진행하며 빌드·시험·의존성 설치 및 Git add·commit·push·merge·reset·브랜치 변경을 실행하지 않는다. DEC 시험은 내부에서 Registry를 빌드하므로 직접 실행하지 않는다. 기존 사용자 실행 기록, 필요한 경우의 준비·직접 WASM 빌드와 typed permit/통합 시험·04a와 추후 04b를 분리한 명시적 파일 커밋 안내는 [README](../../fixtures/decoder-policy/README.md), 사례·한계는 [coverage](../../fixtures/decoder-policy/coverage.md)를 따른다. 이번은 04a 시험 작성과 04b 설계·계약 답변 반영까지 진행했다. 네 계약 답변은 모두 받았으며 04b Rust/Node 구현은 04a 사용자 실행 결과를 받은 뒤 이어간다. DEC-05로 자동 진행하지 않는다.
 
 ## 1. 목표와 진행 방식
 
@@ -96,7 +96,7 @@ DEC-01 구현 파일:
 
 - `fixtures/decoder-policy/README.md`, `registry-selection.json`, `approve.cases.json`, `approve.test.mjs`.
 - 최소 helper `fixtures/decoder-policy/helpers/build-registry.mjs`, `wasm-worker.mjs`.
-- 루트 `package.json`의 시험 스크립트. DEC-01 검증 당시 `decoder:test`는 `approve.test.mjs`만, DEC-02에서는 기존 두 파일의 37개를 실행했다. 현재 DEC-03 변경은 기존 두 파일을 유지하고 transfer를 추가하며 기존 개별 명령 `decoder:test:approve`, `decoder:test:approve-policy`도 유지한다. 시험 내부에서 임시 Registry를 실제로 빌드한다.
+- 루트 `package.json`의 시험 스크립트. DEC-01 검증 당시 `decoder:test`는 `approve.test.mjs`만, DEC-02에서는 기존 두 파일의 37개를 실행했다. DEC-03 변경은 기존 두 파일을 유지하고 transfer를 추가했으며 이번 DEC-04a는 기존 세 파일/58개를 유지하고 typed permit 파일만 추가한다. 기존 개별 명령 `decoder:test:approve`, `decoder:test:approve-policy`도 유지한다. 시험 내부에서 임시 Registry를 실제로 빌드한다.
 
 DEC-01은 실제 `registryV2/manifests/standard/erc20/approve@1.0.0.json`과 선언된 1·10·8453·42161 네 체인의 실제 USDC token 파일을 하나씩 선택한다. 원본 chain 범위를 줄이지 않는다. 임시 Registry와 `BUILD_INDEX_REGISTRY_ROOT`로 **실제 build-index를 `--strict-callkeys`로 실행**하고 실패 시 일부 산출물도 입력으로 사용하지 않는다. 산출물의 chain·주소·selector 범위와 resolved bundle의 JCS digest까지 확인한다. 이는 선택한 token 기준 시험이며 전체 SDK 커버리지는 아니다. DEC-02는 같은 builder와 실제 WASM 디코딩 경로를 재사용해 Day-1 정책 하나를 연결한다. CI 개편은 이번에 포함하지 않는다.
 
@@ -133,9 +133,9 @@ DEC-02 코드 작성 범위:
 
 ### D2. 디코더 계약과 요청 종류별 커버리지
 
-**현재 DEC-03: 사용자 실행 보고 기준 검증 완료.** 신규 `transfer.cases.json`, `transfer.test.mjs`, `coverage.md`와 selection/helper·npm 시험 명령·README·두 계획서를 작성 또는 수정했다. 실제 transfer source `standard/erc20/transfer@1.0.0` (`0xa9059cbb`)를 approve와 같은 strict builder → index·resolved bundle JCS digest → 실제 WASM 설치 → 원문 calldata → decoder ID·Action 경로에 연결하고 사용자 실행으로 검증했다. 기존 approve/token 경로·바이트 hash와 네 체인 `1/10/8453/42161` 범위를 보존하고 transfer 원본 바이트 hash만 추가한다.
+**DEC-03 기록: 사용자 실행 보고 기준 검증 완료.** 신규 `transfer.cases.json`, `transfer.test.mjs`, `coverage.md`와 selection/helper·npm 시험 명령·README·두 계획서를 작성 또는 수정했다. 실제 transfer source `standard/erc20/transfer@1.0.0` (`0xa9059cbb`)를 approve와 같은 strict builder → index·resolved bundle JCS digest → 실제 WASM 설치 → 원문 calldata → decoder ID·Action 경로에 연결하고 사용자 실행으로 검증했다. 기존 approve/token 경로·바이트 hash와 네 체인 `1/10/8453/42161` 범위를 보존하고 transfer 원본 바이트 hash만 추가한다.
 
-`buildRegistry(selection)`은 기존 approve 전용 동작과 `{ root, source, tokens, cleanup }` 반환을 유지한다. DEC-03에서만 `{ includeTransfer: true }`를 전달해 transfer 원본을 함께 복사하고 `transferSource`를 반환한다. 기존 DEC-01은 정확히 4개 callkey를 계속 요구하고 DEC-03은 정확히 8개 callkey와 selector별 bundle ID·JCS digest, 주소 확장을 제외한 원본 필드 보존을 검사한다. 실패 시 임시 산출물 폐기와 실제 `--strict-callkeys` 경로는 유지한다. 기존 approve fixture·두 시험 파일·다중 bundle 설치 WASM worker는 수정하지 않는다.
+`buildRegistry(selection)`은 기존 approve 전용 동작과 `{ root, source, tokens, cleanup }` 반환을 유지한다. DEC-03에서만 `{ includeTransfer: true }`를 전달해 transfer 원본을 함께 복사하고 `transferSource`를 반환한다. 기존 DEC-01은 정확히 4개 callkey를 계속 요구하고 DEC-03은 정확히 8개 callkey와 selector별 bundle ID·JCS digest, 주소 확장을 제외한 원본 필드 보존을 검사한다. 실패 시 임시 산출물 폐기와 실제 `--strict-callkeys` 경로는 유지한다. DEC-03 당시에는 기존 approve fixture·두 시험 파일·다중 bundle 설치 WASM worker를 수정하지 않았다.
 
 작성한 요청은 정상 7개와 오류 11개다. 네 체인의 0·일반 `1,000,000`·`2^256-1`, token/recipient/submitter 대소문자 정규화, zero recipient, 1바이트·32바이트 trailing 허용을 포함한다. 정상 형식의 미등록 조합과 calldata hex 오류, 필수 selector 누락·잘못된 calldata 타입, selector-only·잘린 ABI word, 등록 approve/transfer 조회 selector와 calldata selector의 양방향 불일치를 구분한다. token contract·recipient·submitter를 서로 다르게 두고 실제 Rust의 body/meta, `spender` 부재, `is_router_egress: false` 기본값 생략, `BigInt`·U256 문자열을 비교한다. gas price의 Pyth source는 실제 외부 조회가 아닌 기존 stub이다.
 
@@ -148,7 +148,7 @@ DEC-02 코드 작성 범위:
 
 approve·transfer 공동 설치와 selector별 decoder ID·Action, 8개 callkey·JCS digest, 프로세스 격리 및 기존 37개 회귀가 통과해 DEC-03 완료 조건을 충족했다. 에이전트가 독립 재실행한 결과는 아니다. 이번 실행의 HEAD·시각·도구 버전·산출물 hash·재빌드 로그는 미제공이며 착수 HEAD나 이전 단계 기록으로 채우지 않는다. 이 세부 기록의 미제공은 DEC-03 검증 완료를 막지 않으며 이를 채우기 위한 재빌드·재시험은 요구하지 않는다.
 
-selector 문자열의 길이·hex가 현재 DTO에서 검증되지 않아 malformed가 lookup miss로 처리될 수 있다는 정적 한계를 문서화했다. 정상 미지원이나 실행으로 재현한 결함으로 표현하지 않는다. 이번 runtime 수정은 필요하지 않으며, 형식 검증을 도입하려면 오류 우선순위·빈 calldata native 분기·기존 호출자와 기대값 영향을 먼저 사용자에게 제시한다. 실제 raw JSON 문법 오류는 worker의 `JSON.stringify` 경로 때문에 이 fixture에서 직접 검증하지 않는다. transfer 정책 평가, typed permit, multicall, Core 공개 API, API/RPC, 서명 검증, 소스 이관, CI 개편은 이번 범위 밖이다. 아래 D2 전체 완료 조건은 DEC-03 검증 완료만으로 충족되지 않는다.
+selector 문자열의 길이·hex가 현재 DTO에서 검증되지 않아 malformed가 lookup miss로 처리될 수 있다는 정적 한계를 문서화했다. 정상 미지원이나 실행으로 재현한 결함으로 표현하지 않는다. 이번 runtime 수정은 필요하지 않으며, 형식 검증을 도입하려면 오류 우선순위·빈 calldata native 분기·기존 호출자와 기대값 영향을 먼저 사용자에게 제시한다. 실제 raw JSON 문법 오류는 worker의 `JSON.stringify` 경로 때문에 이 fixture에서 직접 검증하지 않는다. transfer 정책 평가, typed permit, multicall, Core 공개 API, API/RPC, 서명 검증, 소스 이관, CI 개편은 DEC-03 당시 범위 밖이었다. 아래 D2 전체 완료 조건은 DEC-03 검증 완료만으로 충족되지 않는다.
 
 - `registryV2`와 신규 `fixtures/decoder-policy/coverage.md`에 지원 chain·contract·selector·typed-data·하위 동작을 기록한다.
 - Action은 기존 Rust `ActionBody` 구조를 기준으로 한다. 새 독립 IR을 동시에 만들지 않는다.
@@ -158,6 +158,49 @@ selector 문자열의 길이·hex가 현재 DTO에서 검증되지 않아 malfor
 - `untyped_signature`, `venue_order`도 지원 현황과 추가 요구사항을 조사한다. 구현 필요 항목을 후속 단계에 남길 때 명시하며, 임의로 v0.1 지원 범위에서 삭제하지 않는다.
 
 완료 조건: 선언된 커버리지마다 정상·경계·오류 사례가 있고, 미검증 항목과 실행 가능한 항목이 구분된다. 단순 unknown 반환을 해당 요청 지원으로 세지 않는다.
+
+#### DEC-04a / DEC-04b — EIP-2612 기준선과 전체 typed 계약의 분리
+
+| 소단계 | 현재 작성 상태 | 실행 검증·완료 상태 |
+| --- | --- | --- |
+| DEC-04a | 실제 permit 원본을 연결하는 fixture·Node 시험, selection/helper/worker 최소 확장, 개별 시험 명령과 문서 작성·정적 대조 | Registry 빌드·WASM/Node·Rust 시험 미실행. 사용자 결과 대기이며 신규 통과 수를 기록하지 않음 |
+| DEC-04b | [상세 계획의 DEC-04](decoder-design-plan.md#dec-04--eip-2612와-typed-입력-계약--전체-계획-d2)에 full 입력 JSON·검증 순서·오류·호환 영향·변경 파일과 네 계약 답변 반영 | 네 계약 답변 모두 수신·반영. 04a 실행 결과만 대기. Rust/Node 구현·검증 미착수 |
+| DEC-04 전체 / D2 전체 | 04a와 04b를 한 번에 합치지 않음 | **미완료.** 04b까지 구현·검증하기 전 완료로 표시하지 않음 |
+
+**04a 연결 범위:** 실제 `registryV2/manifests/standard/erc20/permit@1.0.0.json`의 ID `standard/erc20/permit@1.0.0`, chain 1, USDC `0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48`, selector `0xd505accf`, primary type `Permit`, name `USD Coin`을 유지한다. 원본 바이트 SHA-256은 `0x9e7337ae3ce7e1a80851652e39b2ac4fb264b5e8caf00a4c93193c6b93c76eb3`이며 resolved bundle JCS digest와 다르다. 이 원본은 mainnet 주소를 직접 선언하므로 approve/transfer처럼 네 체인에 확장하지 않는다.
+
+`buildRegistry(selection, { includePermit: true })`는 approve + permit을 빌드하도록 선택하고 기존 반환값에 `permitSource`만 추가한다. 기본 호출의 approve 4개 callkey/typed index 없음, `{ includeTransfer: true }`의 8개 callkey/typed index 없음과 `transferSource` 반환 계약을 보존한다. 새 구성은 **5개 callkey(approve 4 + permit 1), typed index 1개, selector index 0개**를 요구하도록 작성했다. 이는 실제 builder 소스의 정적 예상이며 생성·실행 확인은 대기다. permit의 calldata와 typed index 모두 inline인 기존 형식을 유지하고, typed index에서 bundle을 해소한 뒤 JCS digest 검증을 거쳐 실제 WASM에 설치한다. 원본 복사·strict builder·임시 경로·실패 정리를 유지한다.
+
+worker는 명시적 `{ id, kind: "typed", input }` 요청만 `declarative_route_typed_data_v3_json`으로 보낸다. 생략/`transaction`은 기존 transaction 경로이며 DEC-02의 선택적 정책 평가도 유지한다. 별도 JS decoder/mock을 만들지 않고 설치 상태별 별도 Node 프로세스를 사용한다. typed 정상·오류 시험을 permit calldata 성공으로 대신하지 않는다.
+
+현재 DTO의 필수 필드는 chain_id/verifying_contract/primary_type/message/submitter/submitted_at이고 domain_name/witness_type은 선택적이다. 04a는 0·일반·uint256 MAX, 주소 정규화·token/spender/submitter 구분, 등록되지 않은 정상 형식 요청, DTO 누락/타입/주소 오류, emit 필수 spender/value/deadline 오류 및 실제 Rust Action/meta·기본값 생략을 검사하도록 작성한다. 수량 기대값은 문자열/BigInt로 독립 검산한다. 작성 정의는 요청 44개(정상 5, 매칭 실패 4, 입력 오류 17, emit 오류 11, 한계 관찰 7)와 구조 검사 3개이며 실행 통과 수가 아니다. 정확한 case 목록은 [coverage](../../fixtures/decoder-policy/coverage.md)를 따른다.
+
+**현재 한계와 strict 요구를 구분한다.** owner/nonce처럼 emit이 안 읽는 필드의 누락·오류 및 다른/없는 domain_name이 성공할 수 있다는 사례는 `legacy_observation`이고 올바른 EIP-712 정상 사례가 아니다. 전체 types/version/salt는 기존 DTO에 없으며 domain_name은 요청 표시값이다. `message.nonce`는 signed 값이고 `Action.body.nonce`는 live_inputs가 만든 외부 조회용 stub(value `0x0`, source `nonces(address)`/`erc20_permit_nonce`, TTL 12, synced_at=제출 시각)이다. 체인 조회나 서명/nonce 유효성 검증을 수행한 것으로 표시하지 않는다. owner와 submitter의 관계, deadline 만료/실행 가능성, 최종 정책 판정은 04a에서 추가하지 않는다.
+
+**04b 입력·주체 계약 확정:** 기존 v3 축약 DTO를 유지하고 별도 v4 full-input export를 추가한다. `requested_signer`는 요청자가 제공한 서명 대상 지갑 주소이며 서명 복구로 확인한 주소가 아니다. strict ERC-2612 Permit에서는 정규화 owner와 requested_signer의 일치를 **요청 일관성 조건**으로 검사하고 불일치를 명시적 오류로 반환한다. submitter는 별도 제출 주체로서 owner와 달라도 허용한다. 각 주소의 원문을 유지하고 일치해도 실제 서명은 미검증 상태로 표시한다.
+
+`DeclarativeRouteTypedDataV4InputDto`/`declarative_route_typed_data_v4_json`의 구체적 필드 배치는 설계 제안이다. requested_signer, 선택적 submitter(생략 시 requested_signer 사용은 기존 세부 제안), submitted_at, typed_data의 object/원본 JSON 문자열, 선택적 외부 routing을 명시한다. 출력의 strict 전용 request.original에는 원본 domain/types/primaryType/message와 requested_signer/submitter를 포함한 제출 문맥 및 외부 routing의 원문 값·각 필드 존재 여부, request.routing에는 정규화된 조회값, request.validated에는 owner/requested_signer/submitter 및 signed_nonce/deadline의 정확한 문자열을 보존한다. 실제 서명 미검증 표시 위치는 `data.request.validation.signature_verification: "not_performed"`를 제안하며 필드명은 사용자 확정 의미와 구분한다. 공통 Action.body.nonce를 signed nonce로 덮어쓰거나 strict 실패·미지원 결과를 v3로 자동 재시도하지 않는다.
+
+**검증 순서·지원 경계도 사용자 확정:** 기본 입력 형식/routing-domain 충돌 → typed lookup → 지원 manifest의 types/domain/message 검증 → owner/requested_signer 요청 일관성·deadline 표현 범위 → emit이다. 지원 manifest가 선언한 name/chain/contract/types를 대조하며 JSON 객체 키 순서는 무관하고 types의 필드 배열 순서는 유지한다. version/salt는 원본 보존과 형식 검사만 수행하며 선언되지 않은 기대값을 추가하지 않는다. 기본 형식과 충돌 검사를 통과한 **미등록 contract+malformed owner는 미지원이 우선**이다. 이는 지원 범위 밖이므로 상세 검증하지 않았다는 의미이며 검증 성공이 아니다. 지원하는 Permit은 상세 검증을 모두 수행하고 불일치·형식 오류를 명시적으로 반환한다. 미지원의 `no_typed_data_mapper`, malformed의 `invalid_typed_data`, routing/domain 충돌 코드, owner/requested_signer 불일치의 `typed_requested_signer_mismatch`(path=`typed_data.message.owner`, 대조 필드=`requested_signer`), 내부 emit 실패의 `typed_interpretation_failed`는 구체적 오류 이름의 설계 제안이다.
+
+**시간 판단은 정적 검토뿐이다.** 축약 정상 입력에서 deadline만 `"18446744073709551616"`으로 바꾸면 action_builder의 decimal→u64 변환은 `u64::MAX`로 포화될 수 있고 typed meta의 `message_u64`는 실패 후 0을 선택할 수 있다. 재현 실행은 하지 않았으며 성공 기대값으로 고정하지 않는다. 공통 Time은 u64/JSON number이고 JS 안전 정수 범위는 별개다. **둘째 질문 A도 사용자 확정:** raw uint256을 보존하고 기존 Action/meta 형식을 유지하며 strict deadline의 성공 투영 범위를 `0..9007199254740991`로 제한한다. 초과는 명시적 오류로 거절한다. strict 전용 문자열 시간 wire는 선택하지 않았으며 공통 Time 일괄 변경도 없다. 오류 코드 이름과 submitted_at의 세부 범위는 설계 제안으로 남으며 deadline 답변의 확정 범위에 포함하지 않는다.
+
+| 결정 묶음 | 사용자 확정 내용 | 구현 설계·호환 영향 |
+| --- | --- | --- |
+| full 입력·진입점 — **A 확정** | 사용자 선택: 기존 v3 축약 DTO 유지 + 별도 full v4 export. original/routing/validated 세부 구조는 설계 제안 | v3 mode/version union은 선택하지 않음 |
+| deadline 표현·정밀도 — **A 확정** | 사용자 선택: raw uint256/기존 Action/meta 형식 보존, strict deadline의 `2^53-1` 초과 명시적 오류 거절 | strict 전용 lossless 문자열 시간 결과는 선택하지 않음. 오류 코드 이름·submitted_at 세부는 제안 |
+| owner/requested_signer/submitter — **확정** | requested_signer는 서명 대상 지갑. strict ERC-2612에서 정규화 owner와 요청 일관성 검사·불일치 명시적 오류. submitter는 별도이며 달라도 허용 | 각 주소 원문 보존, 일치해도 실제 서명 미검증 표시. 오류 이름·표시 필드 배치는 제안 |
+| domain/오류 우선순위 — **확정** | 기본 형식/충돌 → lookup → 지원 manifest의 types/domain/message → 요청 일관성·deadline 표현 → emit. 선언 name/chain/contract/types 대조, version/salt는 원본 보존·형식 검사 | 미등록 contract+malformed owner는 상세 검증 없이 미지원 우선이며 검증 성공이 아님. v3 유지, strict 실패·미지원의 v3 자동 fallback 금지 |
+
+네 계약 답변을 모두 수신해 반영했고 04a 사용자 실행 결과만 대기 중이다. 구체적 오류 이름·출력 필드 배치·submitted_at 세부 범위는 확정된 의미와 구분한 구현 설계 제안이며 미응답 계약 질문으로 취급하지 않는다. 04b Rust/Node 구현·검증은 미착수이며 04a 결과를 받은 뒤 별도 변경으로 진행한다.
+
+04b 회귀 계획에는 지원 Permit의 owner/requested_signer 불일치 오류, 같은 주소의 대소문자 차이 정규화와 각 원문 보존, 다른 submitter의 성공·보존, 성공 시 실제 서명 미검증 표시, 미등록 contract+malformed owner의 미지원 우선과 같은 malformed owner의 지원 Permit 오류, 미선언 version/salt의 유효한 값 변경 허용·형식 오류 거절, strict 실패·미지원의 v3 자동 호출 없음 및 기존 v3 단독 호출 유지가 포함된다. 이 회귀는 [상세 계획의 오류 예시](decoder-design-plan.md#04b--검증-순서오류의-구체적인-차이)에 작성한 예정 항목이며 시험 코드는 아직 구현하지 않았다.
+
+실제 `sig-routing.ts`·관련 mocked 시험·`wasm-bridge.ts`·`orchestrator.ts`를 대조했다. 기존 TS는 JSON 문자열/객체, 양의 safe chain/주소 lowercase, colon 등 type 이름 보존 및 witness 추출을 수행하고 일부 malformed는 null, 설치/route 장애는 상위 라우터에서 throw한다. bridge는 full types/version/salt를 버린 축약 snake_case DTO만 보낸다. 이 기존 제품 의미를 바꾸지 않으며 Node 시험에서 Chrome runtime을 import하지 않는다. 상세 계획에 실제 소비 함수·시험·원문/정규화 예시·오류 최소 입력을 남겼다.
+
+04b 수정 예정 파일은 WASM `src/{dto,declarative_exports,lib}.rs`, 신규 `tests/declarative_v3_typed_data_strict.rs`, 필요한 strict Node fixture/worker/npm 명령과 네 문서다. 권장안에서는 공통 Action/Time와 mapper의 포화 변환을 바꾸지 않고 검증된 값만 emit에 전달한다. Native 시험은 새 strict integration test, 기존 `declarative_v3_typed_data_install`과 `declarative_v3_route`, 수정한 lib helper를 대상으로 한다. 공통 mapper를 실제 수정하면 `cargo test --locked -p mappers --lib declarative::action_builder::tests`를 추가한다. 파일별 전체 명령과 변경 영향은 상세 계획에 있다.
+
+04a에서 Rust/빌드 입력은 바꾸지 않았으므로 기존 검증된 같은 빌드의 JS/WASM 쌍이 유지됐다면 재사용할 수 있다. 04b Rust 변경 후에는 Native 시험 → **새 WASM 직접 빌드** → 새 JS/WASM 쌍으로 strict 개별·전체 Node 회귀 순서를 지킨다. 빌드·시험·설치·Git 변경 명령은 사용자가 실행한다. 04a 기준선+04b 설계 커밋과 추후 04b 구현 커밋은 분리하고 생성물은 제외한다. 실행 결과를 받으면 README·coverage·두 계획서에 동시에 반영하며 미제공 hash/실행 HEAD/시각은 과거 기록으로 채우지 않는다. DEC-05, selector 개선, Permit2/multicall, Core/API/RPC, 정책/서명 검증, 소스 이관·CI는 이번에 구현하지 않는다.
 
 ### D3. 정책 콘텐츠와 manifest 정리
 
@@ -291,4 +334,4 @@ Decoder 인계 조건을 충족하면 검토된 decoder 이력을 Core에 통합
 
 DEC-01의 과거 기록은 별도로 유지한다. 당시 Rust 소스 재빌드 후 연결 시험은 사용자 제공 로그 기준 30개 통과, 실패·취소·건너뛰기 각 0개이며 작성자가 직접 실행한 결과가 아니다. 사용자 제공 실행 전후 Git 상태에서 HEAD는 `23eaaa6992f21fcd48ba6eb79762ec5db3ad6615`로 같고 Rust 소스·빌드 설정 변경은 표시되지 않았다. 도구 조회 결과는 Rust/Cargo 1.95.0, wasm-pack 0.14.0, Node 25.9.0, npm 11.12.1이다. 빌드 성공 표식 `build_success_utc=2026-09-11T06:57:10Z`, WASM SHA-256과 재시험 로그를 [README](../../fixtures/decoder-policy/README.md)에 기록했다. 재시험은 `2026-09-11T06:57:40Z` 시작, `2026-09-11T06:57:42Z` 성공 표식, `duration_ms=1290.958958`이며 최초 시험 30개 통과(`duration_ms=2050.144875`)와 별도 실행이다.
 
-DEC-01 당시 미제공 세부 기록은 그대로 유지한다. DEC-02의 실제 실행 시점 HEAD·도구 버전·시각·원본 hash 값 등 사용자 요약에 없는 값도 임의로 채우거나 DEC-01에서 복사하지 않는다. 이 세부 기록을 채우기 위해 빌드·시험을 다시 요구하지 않는다. DEC-03 착수 시 남아 있던 DEC-02 검증 완료 문서 변경 3개도 보존했다. 이번 사용자 실행 로그를 README·coverage·두 계획서에 실제 반영했으며 DEC-03 실행의 미제공 hash·시각·HEAD·도구 버전·재빌드 로그는 채우지 않는다. 착수 HEAD는 실행 시점 HEAD의 증거가 아니며 세부 기록의 미제공은 DEC-03 검증 완료를 막지 않는다. 에이전트는 빌드·시험·의존성 설치·Git 변경 명령을 실행하지 않았다. DEC-04는 미착수이며 자동 진행하지 않는다. D1 완료 범위는 approve 디코딩·소비자 정책 연결까지다. 소스 이관, Core 재구현과 SDK 전체 소스·빌드 독립화는 미완료다.
+DEC-01 당시 미제공 세부 기록은 그대로 유지한다. DEC-02의 실제 실행 시점 HEAD·도구 버전·시각·원본 hash 값 등 사용자 요약에 없는 값도 임의로 채우거나 DEC-01에서 복사하지 않는다. 이 세부 기록을 채우기 위해 빌드·시험을 다시 요구하지 않는다. DEC-03 착수 시 남아 있던 DEC-02 검증 완료 문서 변경 3개도 보존했다. 이번 사용자 실행 로그를 README·coverage·두 계획서에 실제 반영했으며 DEC-03 실행의 미제공 hash·시각·HEAD·도구 버전·재빌드 로그는 채우지 않는다. 착수 HEAD는 실행 시점 HEAD의 증거가 아니며 세부 기록의 미제공은 DEC-03 검증 완료를 막지 않는다. 에이전트는 빌드·시험·의존성 설치·Git 변경 명령을 실행하지 않았다. DEC-04a 작성·정적 검토와 04b 설계·네 계약 답변 반영을 진행했다. 네 답변을 모두 수신했고 04a 실행 결과만 대기 중이다. 04b Rust/Node 구현·검증은 미착수이며 DEC-04 전체는 미완료다. DEC-05로 자동 진행하지 않는다. D1 완료 범위는 approve 디코딩·소비자 정책 연결까지다. 소스 이관, Core 재구현과 SDK 전체 소스·빌드 독립화는 미완료다.

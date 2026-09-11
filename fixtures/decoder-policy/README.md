@@ -1,6 +1,6 @@
-# DEC-01/02/03: 실제 ERC-20 approve·transfer 기준 시험
+# DEC-01/02/03/04a: 실제 ERC-20 approve·transfer·typed permit 기준 시험
 
-이 디렉터리는 SDK 이관 전의 **DEC-01/02/03 기준 시험(baseline)** 이다. 실제 Registry source를 실제 builder로 확장하고 기존 WASM에 설치한 뒤, 고정된 원문 approve·transfer calldata를 Action까지 해석한다. DEC-02는 approve 디코딩 결과를 기존 planner/evaluator에 전달해 실제 Cedar 정책 하나를 평가한다. **DEC-01/02는 사용자 실행 보고 기준 검증 완료**이며 통합 37개(30 + 7) 통과, 실패·취소·건너뛰기·todo 모두 0이다. **DEC-03도 사용자 실행 보고 기준 검증 완료**다. 제공된 터미널 로그에서 transfer 개별 21개와 통합 회귀 58개가 모두 통과했으며 실패·취소·건너뛰기·todo는 모두 0이다. DEC-04는 미착수다.
+이 디렉터리는 SDK 이관 전의 **DEC-01/02/03/04a 기준 시험(baseline)** 이다. 실제 Registry source를 실제 builder로 확장하고 기존 WASM에 설치한 뒤, 고정된 원문 approve·transfer calldata와 typed permit 요청을 Action까지 해석한다. DEC-02는 approve 디코딩 결과를 기존 planner/evaluator에 전달해 실제 Cedar 정책 하나를 평가한다. **DEC-01/02는 사용자 실행 보고 기준 검증 완료**이며 통합 37개(30 + 7) 통과, 실패·취소·건너뛰기·todo 모두 0이다. **DEC-03도 사용자 실행 보고 기준 검증 완료**다. 제공된 터미널 로그에서 transfer 개별 21개와 통합 회귀 58개가 모두 통과했으며 실패·취소·건너뛰기·todo는 모두 0이다. DEC-04a는 시험 코드 작성·정적 검토 단계이며 실행 검증은 대기 중이다. DEC-04b 설계의 네 계약 항목은 사용자 답변으로 모두 확정했다. 04a 실행 결과가 대기 중이며 04b 구현·실행 검증은 아직 진행하지 않았다. **DEC-04 전체는 미완료**다.
 
 DEC-01 구현 및 연결 시험은 **사용자 실행 보고 기준으로 30개 통과**했다. 실패·취소·건너뛰기는 모두 0개다. 최초 시험에 이어 현재 Rust 소스에서 직접 WASM을 빌드한 뒤 실행한 시험도 같은 결과로 통과했다. 실제 Registry builder → resolved bundle digest 확인 → 실제 WASM 설치·approve 디코딩 경로가 시험되었다. 두 결과 모두 사용자가 제공한 출력이며, 문서를 정리한 에이전트가 실행한 결과가 아니다.
 
@@ -61,10 +61,11 @@ DEC-01 문서 정리 시점에 Git을 읽어 확인한 브랜치는 `feat/decode
 | `approve-policy.test.mjs` | DEC-01의 원문 입력을 재사용해 7개 실제 approve 정책 판정 및 planner/평가 DTO 검사 |
 | `transfer.cases.json` | 네 체인의 고정 transfer calldata와 독립적인 기대 Action·오류 18개 |
 | `transfer.test.mjs` | 18개 요청 및 3개 구조 검사. 두 실제 manifest의 8개 callkey, JCS digest, 교대 디코딩·설치 격리 검사 |
-| `coverage.md` | DEC-01/02의 검증 완료 범위, DEC-03의 사용자 실행 검증 범위, selector 형식 검사의 정적 한계 |
+| `typed-permit.cases.json`, `typed-permit.test.mjs` | 실제 USDC 원본의 typed index·WASM 경로, 축약 DTO의 정상·오류 및 알려진 검증 한계 관찰 |
+| `coverage.md` | 기존 58개 사용자 통과 기록, DEC-04a 작성/미실행 범위, DEC-04b 계약 판단 항목 |
 | `helpers/build-registry.mjs` | 원본 복사, 실제 builder 실행, inline/`3-ref` 해소 및 JCS digest 검사 |
 | `helpers/wasm-worker.mjs` | 별도 Node 프로세스에서 실제 WASM 초기화·bundle 설치·요청 디코딩. 선택적 `policyBundle`이 있을 때 실제 planner/evaluator까지 연결 |
-| 루트 `package.json` | `decoder:test`로 DEC-01/02/03 모두 실행, 기존 개별 명령과 `decoder:test:transfer` 제공 |
+| 루트 `package.json` | `decoder:test`는 기존 세 시험 파일·58개 사례를 유지하고 typed permit 파일 추가. `decoder:test:typed-permit` 개별 명령 제공 |
 
 ```text
 registryV2/manifests/standard/erc20/approve@1.0.0.json
@@ -216,7 +217,62 @@ worker는 실제 디코딩 결과에서 `action: decoded.body`, `meta: decoded.m
 
 현재 순서에서 등록된 조회 selector와 calldata selector의 불일치는 `decode_failed`, 정상 형식의 미등록 조회 selector는 ABI 해석 전에 `no_declarative_v3_mapper`다. selector 문자열 자체의 길이·hex 오류가 miss로 처리될 수 있는 점은 **정적 검토에서 확인한 한계이며 이번 실행으로 재현한 결함이 아니다.** 정상 미지원 사례로 표현하지 않고 [coverage의 판단 항목](coverage.md#selector-문자열-형식-검사의-한계와-판단-항목)에 최소 입력·관련 코드·변경 영향을 남겼다. 이번 fixture는 기존 오류 분류와 trailing-byte 허용을 유지하며 Rust·manifest 수정은 포함하지 않는다.
 
-transfer 정책 평가, typed permit, multicall, Core 공개 API, API/RPC 어댑터, 서명 검증, 소스 이관, CI 개편은 이번 범위 밖이다. DEC-04는 시작하지 않았으며 기존 경로/WASM을 이용한 이 기준 시험은 SDK 전체 소스·빌드 독립화 완료를 뜻하지 않는다.
+DEC-03에서는 transfer 정책 평가·typed permit·multicall·Core/API/RPC·서명 검증·소스 이관·CI를 추가하지 않았다. DEC-04a는 아래 별도 단계로 진행하며, 기존 경로/WASM을 이용한 기준 시험은 SDK 전체 소스·빌드 독립화 완료를 뜻하지 않는다.
+
+## DEC-04a 작성 범위와 DEC-04b 경계
+
+착수 시 읽기 전용 Git 조회: 브랜치 `feat/decoder`, HEAD `b10271365ce06a944b5672d833545db42b243881`(DEC-03), 작업 트리 깨끗함. 이는 이번 시험 실행 HEAD가 아니다.
+
+| 단계 | 작성 상태 | 실행 검증 상태 |
+| --- | --- | --- |
+| DEC-01/02/03 | 기존 구현 유지 | 과거 사용자 통합 58개 통과 기록 유지 |
+| DEC-04a | 실제 원본 연결 fixture·시험·최소 helper/worker·명령 작성 | 사용자 실행 결과 대기. 빌드·Node/Rust 시험 미실행 |
+| DEC-04b | [상세 설계안](../../docs/sdk-migration/decoder-design-plan.md#dec-04--eip-2612와-typed-입력-계약--전체-계획-d2) 작성 | 네 계약 답변 수신·반영 완료, 04a 결과 대기. Rust 실행부 구현·검증 전 |
+| DEC-04 전체 | 미완료 | 04b 구현·검증 전에는 완료로 표시하지 않음 |
+
+원본은 `registryV2/manifests/standard/erc20/permit@1.0.0.json`, 바이트 SHA-256은 `0x9e7337ae3ce7e1a80851652e39b2ac4fb264b5e8caf00a4c93193c6b93c76eb3`다. 원본이 직접 선언한 chain `1`, USDC `0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48`, selector `0xd505accf`, typed primary type `Permit`, domain name `USD Coin`, 필드 배열 `owner/address → spender/address → value/uint256 → nonce/uint256 → deadline/uint256`를 그대로 사용한다. 네 체인 token 확장은 approve에만 적용된다.
+
+`buildRegistry(selection, { includePermit: true })`로 **approve + permit**을 선택한다. 기존 반환값에 `permitSource`만 추가하며 transfer는 선택하지 않는다. 기본 `buildRegistry(selection)`은 approve/4 callkey/typed index 없음, `{ includeTransfer: true }`는 approve+transfer/8 callkey/typed index 없음이라는 기존 계약을 유지한다. 통합 명령에서 기존 세 파일은 수정 없이 이 계약을 계속 검사한다.
+
+```text
+실제 approve + permit 원본 → 원본 바이트 hash 검사 → 임시 strict Registry build
+  → callkey 5개 / typed 1개 / by-selector 0개를 정확히 검사
+  → typed index 1__0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48__Permit.json
+  → inline bundle 해소 + resolved bundle 전체 JCS digest 확인
+  → 실제 WASM 설치 → kind: typed → declarative_route_typed_data_v3_json
+  → decoder ID / Action body / offchain_sig meta / error 검사
+```
+
+index 개수·inline 형식은 builder 코드에서 확인한 시험 요구값이며 실제 산출물은 사용자 실행 시 대조한다. permit은 calldata index도 만들지만 typed 시험의 설치 bundle은 **typed index에서 해소**한다. permit calldata와 typed index의 bundle/digest 일치도 비교하고 inline을 억지로 `3-ref`로 바꾸지 않는다. `permit()` calldata 성공을 typed 서명 경로 검증으로 대체하지 않는다. source hash와 resolved JCS digest는 별개이며 후자의 실행값은 미제공이다.
+
+worker는 요청별 `kind: "typed"` 분기만 추가한다. 생략/`"transaction"`은 기존 transaction export로 보내고 DEC-02 `policyBundle` 동작을 보존한다. 설치된/미설치/approve-only 상태는 별도 Node 프로세스로 구분한다. Chrome runtime import·JS 디코더·WASM mock은 없다.
+
+정적 확인에서는 원본 7개 바이트 hash 대조, JSON 파싱·fixture 수량/주소 검산, 수정한 JS 세 파일의 `node --check`, 사용자 명령 블록의 `bash -n`, `git diff --check`를 수행했다. 모두 문제없었다. `--check`/`-n`은 구문 검사만 하므로 fixture·Registry builder·WASM을 실행하지 않는다. 기존 세 시험 파일·fixture, Rust·빌드 입력과 원본 manifest의 Git diff는 없다.
+
+새 시험 정의는 요청 44개(정상 5, routing miss 4, DTO 오류 17, emit 오류 11, legacy observation 7)와 구조 검사 3개, 합계 **47개 작성**이다. 실행 통과 수가 아니다. 정상 수량·오류와 관찰 사례의 정확한 ID는 [fixture](typed-permit.cases.json)에 고정한다.
+
+기준 시험은 축약 DTO의 `chain_id`, `verifying_contract`, `primary_type`, `message`, `submitter`, `submitted_at`과 선택적 `domain_name`, `witness_type`을 사용한다. `domain_name`은 Rust `Option<String>`이며 누락/null이 허용된다. 정상 수량 0·1,000,000·uint256 MAX는 고정 문자열과 `BigInt`로 독립 검산한다. token contract·spender·submitter를 구분하고 정확한 body/meta와 기본값 생략 규칙을 검사한다.
+
+`message.nonce`는 원본 서명 요청의 값이며 `Action.body.nonce`와 다르다. 후자는 manifest의 `live_inputs.nonce`를 바탕으로 실행부가 만든 `value: "0x0"`, onchain_view source, TTL 12, 제출 시각의 stub이다. 실제 체인 조회·nonce 유효성 확인을 뜻하지 않는다. Action에 owner가 없다는 점도 owner 검증 완료의 증거가 아니다. owner와 submitter의 동일성 규칙은 추가하지 않는다.
+
+owner/nonce의 누락·형식 오류와 domain name 제약 누락은 정상 EIP-712 사례가 아닌 **현재 축약 경로의 검증 한계 관찰**로 분리한다. 전체 `types`, domain version/salt 검증이 없으므로 “유효한 EIP-712 요청 검증 완료”라고 표시하지 않는다. deadline 범위 초과의 body/meta 불일치는 **정적 검토만** 했고 성공 기대값으로 고정하지 않았다. 최소 입력·소스·영향은 [coverage](coverage.md)의 DEC-04 항목과 설계안에 기록한다.
+
+**04b의 네 계약 항목은 사용자 답변으로 모두 확정했다.**
+
+| 항목 | 확정한 계약 |
+| --- | --- |
+| 진입점·호환성 | 기존 v3 축약 DTO 유지 + 별도 v4 full-input export 추가 |
+| deadline 표현 | 원본 uint256 보존. strict에서는 JS 안전 정수 상한 `9007199254740991` 초과를 명시적 오류로 거절. 기존 Action/meta와 공통 Time 형식 유지 |
+| 요청 주체 | `requested_signer`는 서명 대상 지갑. 정규화한 owner와 requested_signer의 일치를 **요청 일관성 조건**으로 검사하고 불일치하면 명시적 오류 반환. submitter는 별도 제출 주체로 보존하며 owner와 달라도 허용해 대리 제출 지원 |
+| domain·오류 순서 | 기본 입력 형식·routing/domain 충돌 → lookup → 지원 manifest의 types/domain/message → owner/requested_signer 일관성·deadline 표현 범위 → emit |
+
+각 주소의 원본을 유지하고 정규화 값은 별도로 둔다. 주소 일치 여부와 무관하게 **실제 서명은 미검증 상태**임을 strict 결과에 명시한다. 이는 서명 복구·암호학적 검증을 추가하는 결정이 아니다. manifest가 선언한 name/chain/contract/types를 대조하고 version/salt는 원본 보존과 형식 검사만 수행하며 미선언 기대값을 추가하지 않는다.
+
+미등록 contract와 잘못된 owner가 함께 있으면 **미지원이 우선**이다. 이 결과는 검증 성공이 아니라 **지원 범위 밖이므로 상세 검증하지 않았음**을 뜻한다. 지원하는 Permit은 상세 검증을 모두 수행하고 형식 오류·불일치를 명시적으로 반환한다. strict 실패와 미지원 모두 v3로 자동 재시도하지 않는다. 이 순서와 결과 의미는 04b 계약 및 회귀 시험 항목으로 고정한다.
+
+예정 회귀에는 owner/requested_signer의 정규화 후 일치·불일치, owner와 다른 submitter 허용, 실제 서명 미검증 표시, 미등록 contract+잘못된 owner의 미지원 우선 및 v3 자동 재시도 부재를 포함한다. 정확한 DTO 보조 필드·오류 코드 이름과 파일 배치는 [상세 설계](../../docs/sdk-migration/decoder-design-plan.md#dec-04--eip-2612와-typed-입력-계약--전체-계획-d2)의 구현안으로 정리한다.
+
+**현재 남은 입력은 04a 시험 결과다.** 이번에는 Rust·공통 Time을 변경하지 않는다. 사용자 실행 결과를 문서에 반영한 뒤 합의된 04b를 별도 변경으로 구현한다. 정책 판정·암호 검증·Permit2·multicall·Core·어댑터·이관·CI·DEC-05는 이번 범위에 포함하지 않는다.
 
 ## 남아 있는 임시 경로 의존
 
@@ -227,7 +283,7 @@ transfer 정책 평가, typed permit, multicall, Core 공개 API, API/RPC 어댑
 | `registryV2/manifests/`, `registryV2/tokens/`, `registryV2/scripts/build-index.ts` | `buildRegistry`, `approve.test.mjs`의 실제 주소 확장·index 검사 | Decoder 원본/빌드 소유권은 유지하며, SDK 배포 입력은 D4 고정 snapshot으로 명시. DEC-07 인계 및 C5 독립 빌드에서 경로 목록 확인 |
 | `registryV2/node_modules/{tsx,canonicalize}` | 실제 TypeScript builder 실행과 `resolveIndexBundle`의 JCS | 현재 Registry lockfile로 설치. D4/C5에서 SDK 소스·빌드 입력으로 필요한 부분을 명시하고 이전 설치물 재사용 제거 |
 | `crates/adapters/mappers/src/declarative/fn_whitelist.json` | 실제 builder가 스크립트 위치 기준으로 읽는 `$fn` 허용 목록. approve가 `$fn`을 쓰지 않아도 파일을 읽음 | SDK 소유 `crates/adapters/mappers/`의 공유 원본으로 포함, DEC-07 인계·C5 독립 소스 빌드에서 검증 |
-| `crates/policy-engine-wasm/src/declarative_exports.rs`, `crates/policy-engine-wasm/pkg/` | worker의 두 실제 WASM export와 생성 JS/WASM import | `crates/dambi-core/src/decode/`, `crates/dambi-core-wasm/`, SDK WASM/glue. C2a·C2b 이관 후 C5에 runner/build 경로 교체 |
+| `crates/policy-engine-wasm/src/declarative_exports.rs`, `crates/policy-engine-wasm/pkg/` | worker의 install·transaction·typed WASM export와 생성 JS/WASM import | `crates/dambi-core/src/decode/`, `crates/dambi-core-wasm/`, SDK WASM/glue. C2a·C2b 이관 후 C5에 runner/build 경로 교체 |
 | `browser-extension/default-bundles/day1-safety/policies/unlimited-approval-deny/` | `approve-policy.test.mjs`가 읽는 실제 Cedar/manifest. 이관 전 기준 시험의 임시 입력 | D3에서 `policy-bundles/day1-safety/` 및 공유 fixture로 이관한 뒤 시험 입력 경로 교체. 최종 SDK 의존 구조가 아님 |
 | `crates/policy-engine-wasm/src/action_eval_exports.rs`, `src/dto.rs` | worker가 호출하는 실제 planner/evaluator 및 판정 계약 | C2a·C2b·C5에서 SDK 실행부/WASM 경계로 이관하며 DEC-02 회귀 사례 유지 |
 | `crates/adapters/abi-resolver/src/{bridge,decode}.rs`, `crates/adapters/mappers/src/declarative/{args_json,action_builder}.rs` | WASM 내부 ABI 해석·수량 변환·Action 생성 | SDK 소유 decoder 의존으로 재사용. C2a·C2b·C5에서 기존 WASM wrapper에 대한 의존 제거 |
@@ -237,9 +293,9 @@ transfer 정책 평가, typed permit, multicall, Core 공개 API, API/RPC 어댑
 
 ## 사용자가 직접 실행할 준비·빌드·시험 명령
 
-아래 명령은 **사용자 실행용이며 에이전트는 실행하지 않았다.** DEC-01/02의 과거 37개 통과 기록은 유지한다. DEC-03 추가 후 transfer 개별 21개와 통합 회귀 58개 통과를 사용자 로그로 확인했다. 아래 명령은 향후 재현용이며 이번 문서 갱신을 위해 다시 실행할 필요는 없다.
+아래 명령은 **사용자 실행용이며 에이전트는 실행하지 않았다.** 기존 DEC-01/02/03 통합 58개 통과 기록은 보존한다. DEC-04a 개별·통합 실행 결과는 아직 제공되지 않았고 예상 통과 수를 기록하지 않는다. 새 결과를 받으면 README·coverage·두 계획서에 함께 반영한다.
 
-이번 변경은 fixture·Node 시험·Registry 선택 helper·문서·npm 시험 명령뿐이다. Rust 소스, Cargo manifest/lockfile, toolchain, schema 및 WASM 빌드 설정은 바꾸지 않았으므로 **DEC-02에서 검증한 같은 빌드의 JS/WASM 쌍이 그대로 있으면 재사용할 수 있다.** transfer ABI는 설치한 실제 bundle에서 읽으므로 새 manifest를 시험에 선택하는 것만으로 WASM 재빌드가 필요하지 않다. 기존 사용자 검증 산출물과의 일치를 확인할 수 없거나 파일이 없거나 Rust/빌드 입력이 달라졌다면 아래 직접 빌드를 선택한다. 파일 hash만 새로 계산하는 것은 과거 소스 빌드의 출처를 독립 증명하지 않는다.
+이번 변경은 fixture·Node 시험·Registry 선택 helper·문서·npm 시험 명령뿐이다. Rust 소스, Cargo manifest/lockfile, toolchain, schema 및 WASM 빌드 설정은 바꾸지 않았으므로 **DEC-02에서 검증한 같은 빌드의 JS/WASM 쌍이 그대로 있으면 재사용할 수 있다.** typed route는 기존 export를 사용하므로 새 manifest를 시험에 선택하는 것만으로 WASM 재빌드가 필요하지 않다. 착수 시 JS/WASM 파일 존재와 JS glue의 `declarative_route_typed_data_v3_json` export를 읽기 전용으로 확인했다. 이 확인은 같은 빌드 출처나 이번 시험의 통과를 독립 증명하지 않는다. 기존 사용자 검증 산출물과의 일치를 확인할 수 없거나 파일이 없거나 Rust/빌드 입력이 달라졌다면 아래 직접 빌드를 선택한다. 파일 hash만 새로 계산하는 것은 과거 소스 빌드의 출처를 독립 증명하지 않는다.
 
 ### 준비 — 필요한 항목만
 
@@ -267,14 +323,14 @@ npm ci --prefix registryV2
 root release LTO=`fat`·codegen-units=`1`, WASM crate의 `package.metadata.wasm-pack.profile.release.wasm-opt`, `CARGO_PROFILE_RELEASE_OPT_LEVEL=z`를 사용한다. 생성 위치는 worker가 읽는 `crates/policy-engine-wasm/pkg/`다. 새 임시 `CARGO_TARGET_DIR`와 빌드 로그는 저장소 밖에 두고 기존 `target`을 삭제하지 않는다. 아래 블록이 실패하면 기존 `pkg`로 후속 시험을 진행하지 않는다.
 
 ```sh
-bash <<'DEC03_BUILD'
+bash <<'DEC04A_BUILD'
 set -euo pipefail
 cd /Users/spu/SDKdambi/DAMBI
-dec03_build_dir="$(mktemp -d /tmp/dambi-dec03-build.XXXXXX)"
+dec04a_build_dir="$(mktemp -d /tmp/dambi-dec04a-build.XXXXXX)"
 export RUSTUP_TOOLCHAIN=1.95.0
-export CARGO_TARGET_DIR="$dec03_build_dir/target"
+export CARGO_TARGET_DIR="$dec04a_build_dir/target"
 export CARGO_PROFILE_RELEASE_OPT_LEVEL=z
-printf 'DEC-03 build logs and target: %s\n' "$dec03_build_dir"
+printf 'DEC-04a build logs and target: %s\n' "$dec04a_build_dir"
 {
   git rev-parse HEAD || exit $?
   git status --short --untracked-files=all || exit $?
@@ -284,36 +340,36 @@ printf 'DEC-03 build logs and target: %s\n' "$dec03_build_dir"
   wasm-pack --version || exit $?
   printf 'RUSTUP_TOOLCHAIN=%s\nCARGO_TARGET_DIR=%s\nCARGO_PROFILE_RELEASE_OPT_LEVEL=%s\n' \
     "$RUSTUP_TOOLCHAIN" "$CARGO_TARGET_DIR" "$CARGO_PROFILE_RELEASE_OPT_LEVEL"
-} 2>&1 | tee "$dec03_build_dir/source-and-tools.log"
-git diff HEAD -- > "$dec03_build_dir/tracked-before.patch"
-date -u '+build_start_utc=%Y-%m-%dT%H:%M:%SZ' | tee "$dec03_build_dir/timeline.log"
+} 2>&1 | tee "$dec04a_build_dir/source-and-tools.log"
+git diff HEAD -- > "$dec04a_build_dir/tracked-before.patch"
+date -u '+build_start_utc=%Y-%m-%dT%H:%M:%SZ' | tee "$dec04a_build_dir/timeline.log"
 wasm-pack build crates/policy-engine-wasm \
   --target web --release --out-dir pkg --out-name policy_engine_wasm \
-  2>&1 | tee "$dec03_build_dir/build.log"
-printf 'build_exit=0\n' | tee -a "$dec03_build_dir/timeline.log"
-date -u '+build_end_utc=%Y-%m-%dT%H:%M:%SZ' | tee -a "$dec03_build_dir/timeline.log"
+  2>&1 | tee "$dec04a_build_dir/build.log"
+printf 'build_exit=0\n' | tee -a "$dec04a_build_dir/timeline.log"
+date -u '+build_end_utc=%Y-%m-%dT%H:%M:%SZ' | tee -a "$dec04a_build_dir/timeline.log"
 shasum -a 256 crates/policy-engine-wasm/pkg/policy_engine_wasm.js \
   crates/policy-engine-wasm/pkg/policy_engine_wasm_bg.wasm \
-  | tee "$dec03_build_dir/artifacts.sha256"
-git diff HEAD -- > "$dec03_build_dir/tracked-after.patch"
-git status --short --untracked-files=all | tee "$dec03_build_dir/source-after.log"
-DEC03_BUILD
+  | tee "$dec04a_build_dir/artifacts.sha256"
+git diff HEAD -- > "$dec04a_build_dir/tracked-after.patch"
+git status --short --untracked-files=all | tee "$dec04a_build_dir/source-after.log"
+DEC04A_BUILD
 ```
 
 `scripts/wasm-build.sh`는 빌드 외에 license/NOTICE와 산출물을 확장 폴더에 복사하고 기존 public WASM을 정리하므로 사용하지 않는다. 직접 빌드에서 license/NOTICE 준비 문제가 실제로 나타나면 해당 단계만 보완한다. JS glue와 WASM은 같은 빌드에서 생성된 쌍을 사용한다.
 
-### DEC-03과 통합 회귀 시험
+### DEC-04a와 통합 회귀 시험
 
 **두 npm 시험 명령 모두 내부에서 실제 Registry builder를 실행한다.** Registry 입력·출력은 임시 디렉터리이고 WASM은 사전에 준비한 파일을 사용한다. 파일·의존성이 없거나 digest·설치·디코딩·정책 기대값이 다르면 건너뛰지 않고 실패한다. 소스·fixture·정책·`pkg`를 실행 중 다른 작업에서 수정하지 않는다.
 
 아래는 zsh에서도 붙여 넣을 수 있는 Bash 블록이다. `set -euo pipefail`로 시험이나 로그 기록 실패 시 중단하며 성공 표식은 해당 명령이 성공한 뒤에만 쓴다.
 
 ```sh
-bash <<'DEC03_VERIFY'
+bash <<'DEC04A_VERIFY'
 set -euo pipefail
 cd /Users/spu/SDKdambi/DAMBI
-dec03_log_dir="$(mktemp -d /tmp/dambi-dec03-verify.XXXXXX)"
-printf 'DEC-03 test logs: %s\n' "$dec03_log_dir"
+dec04a_log_dir="$(mktemp -d /tmp/dambi-dec04a-verify.XXXXXX)"
+printf 'DEC-04a test logs: %s\n' "$dec04a_log_dir"
 {
   date -u '+source_check_utc=%Y-%m-%dT%H:%M:%SZ' || exit $?
   git branch --show-current || exit $?
@@ -321,76 +377,145 @@ printf 'DEC-03 test logs: %s\n' "$dec03_log_dir"
   git status --short --untracked-files=all || exit $?
   node --version || exit $?
   npm --version || exit $?
-} 2>&1 | tee "$dec03_log_dir/source-and-tools.log"
-git diff HEAD -- > "$dec03_log_dir/tracked-before.patch"
+} 2>&1 | tee "$dec04a_log_dir/source-and-tools.log"
+git diff HEAD -- > "$dec04a_log_dir/tracked-before.patch"
 shasum -a 256 crates/policy-engine-wasm/pkg/policy_engine_wasm.js \
   crates/policy-engine-wasm/pkg/policy_engine_wasm_bg.wasm \
-  | tee "$dec03_log_dir/artifacts.sha256"
+  | tee "$dec04a_log_dir/artifacts.sha256"
 shasum -a 256 package.json fixtures/decoder-policy/registry-selection.json \
   fixtures/decoder-policy/approve.cases.json fixtures/decoder-policy/approve.test.mjs \
   fixtures/decoder-policy/approve-policy.test.mjs \
   fixtures/decoder-policy/transfer.cases.json fixtures/decoder-policy/transfer.test.mjs \
+  fixtures/decoder-policy/typed-permit.cases.json fixtures/decoder-policy/typed-permit.test.mjs \
+  registryV2/manifests/standard/erc20/permit@1.0.0.json \
   fixtures/decoder-policy/helpers/build-registry.mjs fixtures/decoder-policy/helpers/wasm-worker.mjs \
   browser-extension/default-bundles/day1-safety/policies/unlimited-approval-deny/policy.cedar \
   browser-extension/default-bundles/day1-safety/policies/unlimited-approval-deny/manifest.json \
-  | tee "$dec03_log_dir/test-inputs.sha256"
-date -u '+transfer_start_utc=%Y-%m-%dT%H:%M:%SZ' | tee "$dec03_log_dir/timeline.log"
-npm run decoder:test:transfer 2>&1 | tee "$dec03_log_dir/transfer.log"
-printf 'transfer_exit=0\n' | tee -a "$dec03_log_dir/timeline.log"
-date -u '+transfer_end_utc=%Y-%m-%dT%H:%M:%SZ' | tee -a "$dec03_log_dir/timeline.log"
-date -u '+integrated_start_utc=%Y-%m-%dT%H:%M:%SZ' | tee -a "$dec03_log_dir/timeline.log"
-npm run decoder:test 2>&1 | tee "$dec03_log_dir/integrated.log"
-printf 'integrated_exit=0\n' | tee -a "$dec03_log_dir/timeline.log"
-date -u '+integrated_end_utc=%Y-%m-%dT%H:%M:%SZ' | tee -a "$dec03_log_dir/timeline.log"
-shasum -a 256 -c "$dec03_log_dir/artifacts.sha256" | tee "$dec03_log_dir/artifacts-after.log"
-shasum -a 256 -c "$dec03_log_dir/test-inputs.sha256" | tee "$dec03_log_dir/test-inputs-after.log"
-git rev-parse HEAD | tee "$dec03_log_dir/head-after.log"
-git status --short --untracked-files=all | tee "$dec03_log_dir/source-after.log"
-git diff HEAD -- > "$dec03_log_dir/tracked-after.patch"
-printf 'Review results in %s\n' "$dec03_log_dir"
-DEC03_VERIFY
+  | tee "$dec04a_log_dir/test-inputs.sha256"
+date -u '+typed_permit_start_utc=%Y-%m-%dT%H:%M:%SZ' | tee "$dec04a_log_dir/timeline.log"
+npm run decoder:test:typed-permit 2>&1 | tee "$dec04a_log_dir/typed-permit.log"
+printf 'typed_permit_exit=0\n' | tee -a "$dec04a_log_dir/timeline.log"
+date -u '+typed_permit_end_utc=%Y-%m-%dT%H:%M:%SZ' | tee -a "$dec04a_log_dir/timeline.log"
+date -u '+integrated_start_utc=%Y-%m-%dT%H:%M:%SZ' | tee -a "$dec04a_log_dir/timeline.log"
+npm run decoder:test 2>&1 | tee "$dec04a_log_dir/integrated.log"
+printf 'integrated_exit=0\n' | tee -a "$dec04a_log_dir/timeline.log"
+date -u '+integrated_end_utc=%Y-%m-%dT%H:%M:%SZ' | tee -a "$dec04a_log_dir/timeline.log"
+shasum -a 256 -c "$dec04a_log_dir/artifacts.sha256" | tee "$dec04a_log_dir/artifacts-after.log"
+shasum -a 256 -c "$dec04a_log_dir/test-inputs.sha256" | tee "$dec04a_log_dir/test-inputs-after.log"
+git rev-parse HEAD | tee "$dec04a_log_dir/head-after.log"
+git status --short --untracked-files=all | tee "$dec04a_log_dir/source-after.log"
+git diff HEAD -- > "$dec04a_log_dir/tracked-after.patch"
+printf 'Review results in %s\n' "$dec04a_log_dir"
+DEC04A_VERIFY
 ```
 
-사용자가 제공한 실제 실행 결과는 **transfer 21개·통합 58개 모두 통과**다. 실패·취소·건너뛰기·todo는 두 실행 모두 0이며 상세 수치와 실행 시간은 위 DEC-03 기록에 남겼다. 통합 명령은 기존 두 approve 시험 파일을 유지하고 transfer 시험 파일을 추가한다. 개별 기존 명령 `npm run decoder:test:approve`, `npm run decoder:test:approve-policy`도 유지한다. DEC-01 과거 기록의 `decoder:test`는 당시 approve 30개만, DEC-02 기록에서는 37개만 실행했다.
+DEC-03 당시 사용자 제공 결과는 transfer 21개·통합 58개 통과였다. 현재 통합 명령은 기존 세 파일을 그대로 유지하고 `typed-permit.test.mjs`를 추가한다. 기존 개별 명령도 유지한다. **변경 후 통합·typed permit의 통과 수와 실행 메타데이터는 사용자 결과 대기**이며 과거 결과를 새 실행 기록으로 복사하지 않는다.
 
-이번 사용자 실행 결과를 **README·coverage·두 계획서에 실제로 반영했다.** 향후 추가 실행 결과도 네 문서에 함께 갱신한다. 제공된 시험별 전체/통과/실패/취소/건너뛰기/todo, 명령·시각·종료 코드, 실행 HEAD·전후 변경, 도구 버전, JS/WASM hash를 새 실행 기록에 반영한다. 미제공 값은 확인 대기로 남기고 착수 HEAD나 과거 실행 값을 복사하지 않는다. 재사용했다면 재빌드로 기록하지 않는다. 추적 diff에는 미추적 파일이 없으므로 시험 입력 hash와 Git 상태도 함께 검토한다. 실행 중 입력·산출물이 바뀌었다면 동일 소스·산출물 검증 완료로 처리하지 않는다. 임시 로그 자체는 커밋하지 않는다.
+기존 DEC-01/02/03 사용자 실행 결과는 **README·coverage·두 계획서에 반영된 상태로 보존한다.** 향후 추가 실행 결과도 네 문서에 함께 갱신한다. 제공된 시험별 전체/통과/실패/취소/건너뛰기/todo, 명령·시각·종료 코드, 실행 HEAD·전후 변경, 도구 버전, JS/WASM hash를 새 실행 기록에 반영한다. 미제공 값은 확인 대기로 남기고 착수 HEAD나 과거 실행 값을 복사하지 않는다. 재사용했다면 재빌드로 기록하지 않는다. 추적 diff에는 미추적 파일이 없으므로 시험 입력 hash와 Git 상태도 함께 검토한다. 실행 중 입력·산출물이 바뀌었다면 동일 소스·산출물 검증 완료로 처리하지 않는다. 임시 로그 자체는 커밋하지 않는다.
 
 ## 로컬 커밋과 검증 기록 갱신
 
-DEC-01 구현 커밋은 `3066f0c`, DEC-02 구현 커밋은 `26df736`이다. DEC-03 착수 시에는 README·두 계획서의 DEC-02 검증 완료 미커밋 변경 3개가 있었으며 그대로 보존했다. 최종 diff는 이 기존 문서 변경과 이번 DEC-03 변경을 함께 포함한다. 이번 변경 대상은 기존 파일 6개와 신규 파일 3개, 총 9개다. 사용자 시험 결과를 받아 문서 4개의 실행 상태를 검증 완료로 갱신했다. 아래 명령은 사용자가 최종 diff를 검토하고 직접 커밋할 때 사용한다.
+DEC-01 `3066f0c`, DEC-02 `26df736`, DEC-03 `b102713`의 기존 기록을 보존한다. 아래는 **사용자 전용 명령이며 에이전트는 실행하지 않는다.** 04a fixture와 04b 설계안을 이번 커밋에 담고, 04b 실행부 구현은 04a 결과를 받은 뒤 위 합의 계약에 따라 별도 커밋으로 나눈다. 새 Markdown 파일은 만들지 않았다. 기존 `coverage.md`는 `*.md` ignore 규칙에도 이미 추적 중임을 `git ls-files`로 확인했으므로 이번에는 `git add -f`가 필요하지 않다.
 
-아래 Git 변경 명령은 **사용자가 직접 실행할 안내이며 에이전트는 실행하지 않는다.** 기존 루트 `.gitignore`의 `*.md` 규칙 때문에 신규 `coverage.md`는 일반 `git status`의 미추적 목록에 나타나지 않는다. 실제 작성한 파일을 `cat`으로 검토하고 그 파일 하나에만 `git add -f`를 사용한다. `.gitignore` 자체는 변경하지 않는다.
+### DEC-04a 검토·커밋
 
 ```sh
-bash <<'DEC03_COMMIT'
+bash <<'DEC04A_COMMIT'
 set -euo pipefail
 cd /Users/spu/SDKdambi/DAMBI
-git status --short
+git status --short --untracked-files=all
 git diff --check
 git diff -- package.json fixtures/decoder-policy/registry-selection.json \
-  fixtures/decoder-policy/helpers/build-registry.mjs fixtures/decoder-policy/README.md \
-  docs/sdk-migration/decoder-design-plan.md docs/sdk-migration/decoder-core-adapters-plan.md
-# 미추적 파일은 git diff에 표시되지 않으므로 별도로 검토:
-cat fixtures/decoder-policy/transfer.cases.json
-cat fixtures/decoder-policy/transfer.test.mjs
-cat fixtures/decoder-policy/coverage.md
-# 기존 staged 변경 확인:
-git diff --cached --name-only
-git add -- package.json fixtures/decoder-policy/registry-selection.json \
-  fixtures/decoder-policy/helpers/build-registry.mjs \
-  fixtures/decoder-policy/transfer.cases.json fixtures/decoder-policy/transfer.test.mjs \
-  fixtures/decoder-policy/README.md \
-  docs/sdk-migration/decoder-design-plan.md docs/sdk-migration/decoder-core-adapters-plan.md
-git add -f -- fixtures/decoder-policy/coverage.md
-git diff --cached --check
-git diff --cached --stat
-git commit --only -m "test(decoder): verify real transfer decoding alongside approve" -- \
-  package.json fixtures/decoder-policy/registry-selection.json \
-  fixtures/decoder-policy/helpers/build-registry.mjs \
-  fixtures/decoder-policy/transfer.cases.json fixtures/decoder-policy/transfer.test.mjs \
+  fixtures/decoder-policy/helpers/build-registry.mjs fixtures/decoder-policy/helpers/wasm-worker.mjs \
   fixtures/decoder-policy/README.md fixtures/decoder-policy/coverage.md \
   docs/sdk-migration/decoder-design-plan.md docs/sdk-migration/decoder-core-adapters-plan.md
-DEC03_COMMIT
+# 신규 파일은 일반 git diff에 표시되지 않으므로 별도로 검토:
+cat fixtures/decoder-policy/typed-permit.cases.json
+cat fixtures/decoder-policy/typed-permit.test.mjs
+git diff --cached --name-only
+git add -- package.json fixtures/decoder-policy/registry-selection.json \
+  fixtures/decoder-policy/helpers/build-registry.mjs fixtures/decoder-policy/helpers/wasm-worker.mjs \
+  fixtures/decoder-policy/typed-permit.cases.json fixtures/decoder-policy/typed-permit.test.mjs \
+  fixtures/decoder-policy/README.md fixtures/decoder-policy/coverage.md \
+  docs/sdk-migration/decoder-design-plan.md docs/sdk-migration/decoder-core-adapters-plan.md
+git diff --cached --check
+git diff --cached --stat
+git commit --only -m "test(decoder): add real typed permit baseline and strict input design" -- \
+  package.json fixtures/decoder-policy/registry-selection.json \
+  fixtures/decoder-policy/helpers/build-registry.mjs fixtures/decoder-policy/helpers/wasm-worker.mjs \
+  fixtures/decoder-policy/typed-permit.cases.json fixtures/decoder-policy/typed-permit.test.mjs \
+  fixtures/decoder-policy/README.md fixtures/decoder-policy/coverage.md \
+  docs/sdk-migration/decoder-design-plan.md docs/sdk-migration/decoder-core-adapters-plan.md
+DEC04A_COMMIT
 ```
 
-생성된 WASM·`pkg`·`dist`·`target`·`node_modules`·Registry 생성물·임시 로그는 커밋 대상에서 제외한다. `git commit --only`에도 같은 9개 파일을 명시했다. 실행 전 새 사용자 변경이 섞이지 않았는지 내용을 검토한다. 이번 에이전트 작업에서는 빌드·시험·설치·스테이징·커밋·push를 실행하지 않으며 DEC-04로 진행하지 않는다.
+생성 WASM·`pkg`·`dist`·`target`·`node_modules`·Registry 생성물·임시 로그를 제외한 10개 파일만 명시한다. 원본 manifest와 기존 세 시험 파일도 커밋 변경 목록에 넣지 않는다. 시험 결과와 미제공 메타데이터는 문서 네 곳에 함께 반영한 뒤 검토한다.
+
+### DEC-04b 후속 명령 — 04a 결과 반영·04b 구현 이후에만
+
+네 계약 항목은 합의됐지만 아직 04b 실행부와 새 Rust 시험 파일은 작성하지 않았다. 아래는 04a 결과를 반영하고 합의된 계약의 파일을 구현한 뒤의 순서이며 **지금 실행할 명령이 아니다.** 파일 목록은 실제 구현 변경 목록에 맞춰 다시 제공한다.
+
+```sh
+bash <<'DEC04B_VERIFY_AFTER_IMPLEMENTATION'
+set -euo pipefail
+cd /Users/spu/SDKdambi/DAMBI
+export RUSTUP_TOOLCHAIN=1.95.0
+dec04b_build_dir="$(mktemp -d /tmp/dambi-dec04b-build.XXXXXX)"
+export CARGO_TARGET_DIR="$dec04b_build_dir/target"
+export CARGO_PROFILE_RELEASE_OPT_LEVEL=z
+# 1. 합의된 strict 구현의 Native 회귀(새 파일 구현 후):
+cargo +1.95.0 test --locked -p policy-engine-wasm --test declarative_v3_typed_data_strict
+cargo +1.95.0 test --locked -p policy-engine-wasm --test declarative_v3_typed_data_install
+cargo +1.95.0 test --locked -p policy-engine-wasm --test declarative_v3_route
+# 공통 Action builder를 실제 변경했다면 해당 회귀도 추가:
+# cargo +1.95.0 test --locked -p mappers --lib declarative::action_builder::tests
+# 2. Rust 변경 후 새 JS/WASM을 생성한다. 실패하면 set -euo pipefail로 중단:
+wasm-pack build crates/policy-engine-wasm \
+  --target web --release --out-dir pkg --out-name policy_engine_wasm \
+  2>&1 | tee "$dec04b_build_dir/build.log"
+shasum -a 256 crates/policy-engine-wasm/pkg/policy_engine_wasm.js \
+  crates/policy-engine-wasm/pkg/policy_engine_wasm_bg.wasm \
+  | tee "$dec04b_build_dir/artifacts.sha256"
+# 3. 새 빌드의 JS/WASM으로(04b에서 strict 개별 스크립트 추가 예정):
+npm run decoder:test:typed-permit-strict
+npm run decoder:test:typed-permit
+npm run decoder:test
+# 4. 결과 문서 반영·검토 후 04a와 별도 커밋(실제 파일 목록으로 다시 안내).
+DEC04B_VERIFY_AFTER_IMPLEMENTATION
+```
+
+다음은 위 합의 계약의 예정 파일 배치로 **04b 구현·시험·결과 문서 반영까지 끝난 뒤에만** 사용할 별도 커밋 예시다. 현재 새 strict 파일과 npm 스크립트는 존재하지 않는다. 실제 구현 변경 목록이 달라지거나 validator를 별도 파일로 분리하면 실제 명시 목록으로 다시 안내한다. 04a 파일 변경을 이 커밋에 다시 합치지 않는다.
+
+```sh
+bash <<'DEC04B_COMMIT_AFTER_IMPLEMENTATION'
+set -euo pipefail
+cd /Users/spu/SDKdambi/DAMBI
+dec04b_files=(
+  crates/policy-engine-wasm/src/dto.rs
+  crates/policy-engine-wasm/src/declarative_exports.rs
+  crates/policy-engine-wasm/src/lib.rs
+  crates/policy-engine-wasm/tests/declarative_v3_typed_data_strict.rs
+  fixtures/decoder-policy/typed-permit-strict.cases.json
+  fixtures/decoder-policy/typed-permit-strict.test.mjs
+  fixtures/decoder-policy/helpers/wasm-worker.mjs
+  package.json
+  fixtures/decoder-policy/README.md
+  fixtures/decoder-policy/coverage.md
+  docs/sdk-migration/decoder-design-plan.md
+  docs/sdk-migration/decoder-core-adapters-plan.md
+)
+git status --short --untracked-files=all
+git diff --check
+git diff -- "${dec04b_files[@]}"
+cat fixtures/decoder-policy/typed-permit-strict.cases.json
+cat fixtures/decoder-policy/typed-permit-strict.test.mjs
+cat crates/policy-engine-wasm/tests/declarative_v3_typed_data_strict.rs
+git diff --cached --name-only
+git add -- "${dec04b_files[@]}"
+git diff --cached --check
+git diff --cached --stat
+git commit --only -m "feat(decoder): validate full typed permit inputs" -- "${dec04b_files[@]}"
+DEC04B_COMMIT_AFTER_IMPLEMENTATION
+```
+
+생성물은 이 예정 목록에서도 제외한다. 공통 `Time`이나 기존 확장 소비자를 함께 바꾸는 명령은 포함하지 않으며 push는 실행하지 않는다.

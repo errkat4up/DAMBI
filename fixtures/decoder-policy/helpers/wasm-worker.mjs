@@ -15,8 +15,15 @@ const installations = scenario.bundles.map((bundle) => {
   assert.equal(result.data.decoder_id, bundle.id);
   return result;
 });
-const results = scenario.requests.map(({ id, input }) => {
-  const result = JSON.parse(wasm.declarative_route_request_v3_json(JSON.stringify(input)));
+const results = scenario.requests.map(({ id, kind = "transaction", input }) => {
+  assert.ok(kind === "transaction" || kind === "typed", `Unknown request kind: ${kind}`);
+  if (scenario.policyBundle !== undefined) {
+    assert.equal(kind, "transaction", "DEC-02 policy evaluation requires a transaction request");
+  }
+  const route = kind === "typed"
+    ? wasm.declarative_route_typed_data_v3_json
+    : wasm.declarative_route_request_v3_json;
+  const result = JSON.parse(route(JSON.stringify(input)));
   // Preserve DEC-01's input/output contract when no policy bundle is supplied.
   if (scenario.policyBundle === undefined) return { id, result };
 

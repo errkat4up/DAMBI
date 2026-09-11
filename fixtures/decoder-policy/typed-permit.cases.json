@@ -1,0 +1,345 @@
+{
+  "registry_source": "manifests/standard/erc20/permit@1.0.0.json",
+  "scope": "DEC-04a legacy abbreviated DTO through the real USDC typed route; not full EIP-712 validity or signature verification",
+  "case_input_rules": "Clone defaults, apply input overrides, merge message_patch, then remove each dot-separated omit path. No calldata is supplied.",
+  "observation_scope": "legacy_observation expectations characterize current gaps only. They are not valid full typed requests or the proposed strict SDK contract; execution is pending user results.",
+  "nonce_scope": "message.nonce is the signed request value. Action.body.nonce is a zero-initialized external-read LiveField from manifest live_inputs, not an RPC result; owner is not in Action body.",
+  "defaults": {
+    "chain_id": 1,
+    "verifying_contract": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    "primary_type": "Permit",
+    "domain_name": "USD Coin",
+    "message": {
+      "owner": "0xaaaabbbbccccddddeeeeffff0000111122223333",
+      "spender": "0x111122223333444455556666777788889999abcd",
+      "value": "1000000",
+      "nonce": "7",
+      "deadline": "1738002000"
+    },
+    "submitter": "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+    "submitted_at": 1700000000
+  },
+  "expected_permit": {
+    "decoder_id": "standard/erc20/permit@1.0.0",
+    "body": {
+      "domain": "token",
+      "action": "erc20_permit",
+      "token": {
+        "key": {
+          "standard": "erc20",
+          "chain": "eip155:1",
+          "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        }
+      },
+      "spender": "0x111122223333444455556666777788889999abcd",
+      "amount": "0xf4240",
+      "deadline": 1738002000,
+      "nonce": {
+        "value": "0x0",
+        "source": {
+          "kind": "onchain_view",
+          "chain": "eip155:1",
+          "contract": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+          "function": "nonces(address)",
+          "decoder_id": "erc20_permit_nonce"
+        },
+        "synced_at": 1700000000,
+        "ttl": 12
+      }
+    },
+    "meta": {
+      "submitted_at": 1700000000,
+      "submitter": "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+      "nature": {
+        "kind": "offchain_sig",
+        "domain": {
+          "name": "USD Coin",
+          "chain_id": 1,
+          "verifying_contract": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        },
+        "deadline": 1738002000
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "value-normal",
+      "group": "normal",
+      "input": {},
+      "expected": { "amount": "0xf4240" }
+    },
+    {
+      "id": "value-zero",
+      "group": "normal",
+      "message_patch": { "value": "0" },
+      "expected": { "amount": "0x0" }
+    },
+    {
+      "id": "value-uint256-max",
+      "group": "normal",
+      "message_patch": { "value": "115792089237316195423570985008687907853269984665640564039457584007913129639935" },
+      "expected": { "amount": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }
+    },
+    {
+      "id": "mixed-case-addresses",
+      "group": "normal",
+      "input": {
+        "verifying_contract": "0xA0b86991c6218b36c1D19d4a2e9Eb0cE3606eB48",
+        "submitter": "0xAbcdefABcdefAbCdEfAbCdEfAbCdEfAbCdEfABcD"
+      },
+      "message_patch": {
+        "owner": "0xAaaaBbBbccccDDDDeeeeffff0000111122223333",
+        "spender": "0x111122223333444455556666777788889999aBcD"
+      },
+      "expected": { "amount": "0xf4240" }
+    },
+    {
+      "id": "deadline-safe-number-and-null-witness",
+      "group": "normal",
+      "input": { "witness_type": null },
+      "message_patch": { "deadline": 1738002000 },
+      "expected": { "amount": "0xf4240" }
+    },
+    {
+      "id": "unregistered-chain",
+      "group": "routing_miss",
+      "input": { "chain_id": 10 },
+      "expected": { "error_kind": "no_typed_data_mapper" }
+    },
+    {
+      "id": "unregistered-contract",
+      "group": "routing_miss",
+      "input": { "verifying_contract": "0x9999888877776666555544443333222211110000" },
+      "expected": { "error_kind": "no_typed_data_mapper" }
+    },
+    {
+      "id": "unregistered-primary-type",
+      "group": "routing_miss",
+      "input": { "primary_type": "PermitOther" },
+      "expected": { "error_kind": "no_typed_data_mapper" }
+    },
+    {
+      "id": "unregistered-witness-type",
+      "group": "routing_miss",
+      "input": { "witness_type": "OrderWitness" },
+      "expected": { "error_kind": "no_typed_data_mapper" }
+    },
+    {
+      "id": "missing-chain-id",
+      "group": "input_error",
+      "omit": ["chain_id"],
+      "expected": { "error_kind": "invalid_input_json" }
+    },
+    {
+      "id": "missing-verifying-contract",
+      "group": "input_error",
+      "omit": ["verifying_contract"],
+      "expected": { "error_kind": "invalid_input_json" }
+    },
+    {
+      "id": "missing-primary-type",
+      "group": "input_error",
+      "omit": ["primary_type"],
+      "expected": { "error_kind": "invalid_input_json" }
+    },
+    {
+      "id": "missing-message",
+      "group": "input_error",
+      "omit": ["message"],
+      "expected": { "error_kind": "invalid_input_json" }
+    },
+    {
+      "id": "missing-submitter",
+      "group": "input_error",
+      "omit": ["submitter"],
+      "expected": { "error_kind": "invalid_input_json" }
+    },
+    {
+      "id": "missing-submitted-at",
+      "group": "input_error",
+      "omit": ["submitted_at"],
+      "expected": { "error_kind": "invalid_input_json" }
+    },
+    {
+      "id": "invalid-chain-id-type",
+      "group": "input_error",
+      "input": { "chain_id": "1" },
+      "expected": { "error_kind": "invalid_input_json" }
+    },
+    {
+      "id": "invalid-verifying-contract-type",
+      "group": "input_error",
+      "input": { "verifying_contract": 42 },
+      "expected": { "error_kind": "invalid_input_json" }
+    },
+    {
+      "id": "invalid-primary-type-type",
+      "group": "input_error",
+      "input": { "primary_type": 42 },
+      "expected": { "error_kind": "invalid_input_json" }
+    },
+    {
+      "id": "invalid-domain-name-type",
+      "group": "input_error",
+      "input": { "domain_name": 42 },
+      "expected": { "error_kind": "invalid_input_json" }
+    },
+    {
+      "id": "invalid-submitter-type",
+      "group": "input_error",
+      "input": { "submitter": 42 },
+      "expected": { "error_kind": "invalid_input_json" }
+    },
+    {
+      "id": "invalid-submitted-at-type",
+      "group": "input_error",
+      "input": { "submitted_at": "1700000000" },
+      "expected": { "error_kind": "invalid_input_json" }
+    },
+    {
+      "id": "invalid-witness-type-type",
+      "group": "input_error",
+      "input": { "witness_type": 42 },
+      "expected": { "error_kind": "invalid_input_json" }
+    },
+    {
+      "id": "invalid-verifying-contract-address",
+      "group": "input_error",
+      "input": { "verifying_contract": "0x1234" },
+      "expected": { "error_kind": "invalid_input_json" }
+    },
+    {
+      "id": "invalid-submitter-address",
+      "group": "input_error",
+      "input": { "submitter": "not-an-address" },
+      "expected": { "error_kind": "invalid_input_json" }
+    },
+    {
+      "id": "negative-chain-id",
+      "group": "input_error",
+      "input": { "chain_id": -1 },
+      "expected": { "error_kind": "invalid_input_json" }
+    },
+    {
+      "id": "negative-submitted-at",
+      "group": "input_error",
+      "input": { "submitted_at": -1 },
+      "expected": { "error_kind": "invalid_input_json" }
+    },
+    {
+      "id": "missing-spender",
+      "group": "emit_error",
+      "omit": ["message.spender"],
+      "expected": { "error_kind": "build_action_body_failed" }
+    },
+    {
+      "id": "missing-value",
+      "group": "emit_error",
+      "omit": ["message.value"],
+      "expected": { "error_kind": "build_action_body_failed" }
+    },
+    {
+      "id": "missing-deadline",
+      "group": "emit_error",
+      "omit": ["message.deadline"],
+      "expected": { "error_kind": "build_action_body_failed" }
+    },
+    {
+      "id": "invalid-spender-address",
+      "group": "emit_error",
+      "message_patch": { "spender": "0x1234" },
+      "expected": { "error_kind": "build_action_body_failed" }
+    },
+    {
+      "id": "invalid-spender-type",
+      "group": "emit_error",
+      "message_patch": { "spender": false },
+      "expected": { "error_kind": "build_action_body_failed" }
+    },
+    {
+      "id": "invalid-value-format",
+      "group": "emit_error",
+      "message_patch": { "value": "not-a-uint" },
+      "expected": { "error_kind": "build_action_body_failed" }
+    },
+    {
+      "id": "invalid-value-type",
+      "group": "emit_error",
+      "message_patch": { "value": false },
+      "expected": { "error_kind": "build_action_body_failed" }
+    },
+    {
+      "id": "value-uint256-overflow",
+      "group": "emit_error",
+      "message_patch": { "value": "115792089237316195423570985008687907853269984665640564039457584007913129639936" },
+      "expected": { "error_kind": "build_action_body_failed" }
+    },
+    {
+      "id": "invalid-deadline-format",
+      "group": "emit_error",
+      "message_patch": { "deadline": "not-a-time" },
+      "expected": { "error_kind": "build_action_body_failed" }
+    },
+    {
+      "id": "invalid-deadline-type",
+      "group": "emit_error",
+      "message_patch": { "deadline": false },
+      "expected": { "error_kind": "build_action_body_failed" }
+    },
+    {
+      "id": "message-array",
+      "group": "emit_error",
+      "input": { "message": [] },
+      "expected": { "error_kind": "build_action_body_failed" }
+    },
+    {
+      "id": "legacy-missing-owner",
+      "group": "legacy_observation",
+      "omit": ["message.owner"],
+      "strict_requirement": "Require and validate the manifest-declared owner address before emit; no owner/submitter equality rule is asserted here.",
+      "expected": { "legacy_success": true, "amount": "0xf4240" }
+    },
+    {
+      "id": "legacy-invalid-owner",
+      "group": "legacy_observation",
+      "message_patch": { "owner": "not-an-address" },
+      "strict_requirement": "Reject malformed owner; current emit does not reference or validate this field.",
+      "expected": { "legacy_success": true, "amount": "0xf4240" }
+    },
+    {
+      "id": "legacy-missing-signed-nonce",
+      "group": "legacy_observation",
+      "omit": ["message.nonce"],
+      "strict_requirement": "Require signed message.nonce as uint256; keep it separate from the external-read LiveField.",
+      "expected": { "legacy_success": true, "amount": "0xf4240" }
+    },
+    {
+      "id": "legacy-invalid-signed-nonce",
+      "group": "legacy_observation",
+      "message_patch": { "nonce": "not-a-uint" },
+      "strict_requirement": "Reject malformed signed nonce; the zero LiveField does not validate or replace it.",
+      "expected": { "legacy_success": true, "amount": "0xf4240" }
+    },
+    {
+      "id": "legacy-domain-name-mismatch",
+      "group": "legacy_observation",
+      "input": { "domain_name": "Different token domain" },
+      "strict_requirement": "Compare the manifest-declared USD Coin domain constraint; preserve the original input and agree compatibility/error behavior in 04b.",
+      "expected": { "legacy_success": true, "amount": "0xf4240", "domain_name": "Different token domain" }
+    },
+    {
+      "id": "legacy-domain-name-omitted",
+      "group": "legacy_observation",
+      "omit": ["domain_name"],
+      "strict_requirement": "Preserve legacy Option default; full strict requests must satisfy declared domain constraints under the agreed 04b contract.",
+      "expected": { "legacy_success": true, "amount": "0xf4240", "domain_name": "" }
+    },
+    {
+      "id": "legacy-domain-name-null",
+      "group": "legacy_observation",
+      "input": { "domain_name": null },
+      "strict_requirement": "Preserve legacy Option null handling; it is not evidence that a full signed domain was validated.",
+      "expected": { "legacy_success": true, "amount": "0xf4240", "domain_name": "" }
+    }
+  ]
+}
