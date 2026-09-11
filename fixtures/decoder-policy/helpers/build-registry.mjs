@@ -36,7 +36,9 @@ async function copyPinnedFile(root, selected) {
   return JSON.parse(bytes.toString("utf8"));
 }
 
-export async function buildRegistry(selection) {
+// Existing callers remain approve-only; DEC-03 explicitly adds transfer.
+export async function buildRegistry(selection, { includeTransfer = false } = {}) {
+  assert.equal(typeof includeTransfer, "boolean");
   const tsx = join(registryRoot, "node_modules/.bin/tsx");
   await access(tsx).catch(() => {
     throw new Error("Registry dependencies missing; run npm ci --prefix registryV2 first.");
@@ -48,6 +50,14 @@ export async function buildRegistry(selection) {
     assert.equal(source.id, "standard/erc20/approve@1.0.0");
     assert.equal(source.match.chain_to_addresses_source, "tokens:erc20");
     assert.deepEqual(source.match.chain_ids, [1, 10, 8453, 42161]);
+    let transferSource;
+    if (includeTransfer) {
+      transferSource = await copyPinnedFile(root, selection.transfer_manifest);
+      assert.equal(transferSource.id, "standard/erc20/transfer@1.0.0");
+      assert.equal(transferSource.match.selector, "0xa9059cbb");
+      assert.equal(transferSource.match.chain_to_addresses_source, "tokens:erc20");
+      assert.deepEqual(transferSource.match.chain_ids, source.match.chain_ids);
+    }
     assert.equal(selection.tokens.length, 4, "DEC-01 pins one token per chain");
     const tokens = [];
     for (const selected of selection.tokens) {
@@ -69,9 +79,9 @@ export async function buildRegistry(selection) {
         maxBuffer: 4 * 1024 * 1024,
       });
     } catch (error) {
-      throw new Error(`DEC-01 Registry build failed; all output is discarded.\n${error.stderr ?? ""}\n${error.message}`, { cause: error });
+      throw new Error(`${includeTransfer ? "DEC-03" : "DEC-01"} Registry build failed; all output is discarded.\n${error.stderr ?? ""}\n${error.message}`, { cause: error });
     }
-    return { root, source, tokens, cleanup };
+    return { root, source, tokens, cleanup, ...(includeTransfer ? { transferSource } : {}) };
   } catch (error) {
     await cleanup();
     throw error;

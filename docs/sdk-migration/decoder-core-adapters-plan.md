@@ -1,9 +1,9 @@
 # Dambi: Decoder·정책 → Core → Adapters 개발 계획
 
 작성일: 2026-09-11. 기준: `main`의 `23eaaa6992f21fcd48ba6eb79762ec5db3ad6615`.
-DEC-02 시작 시 실제 Git 상태는 `feat/decoder`, HEAD `3066f0c` (`test(decoder): verify real approve decoding baseline`), 작업 트리 깨끗함이다. DEC-01 사용자 보고 빌드 대상 HEAD는 `23eaaa6992f21fcd48ba6eb79762ec5db3ad6615`이며, **Rust 소스 직접 빌드 후 연결 시험은 사용자 실행 보고 기준 30개 통과**라는 기존 기록을 유지한다. DEC-02는 **코드 작성 완료·실행 검증 대기**다. DEC-01 커밋 존재는 현재 WASM의 소스 일치나 작성자의 독립 재현을 증명하지 않는다. DEC-03 이후 구현 단계는 미착수이며 SDK 전체 소스·빌드 독립화는 미완료다.
+DEC-02 시작 시 실제 Git 상태는 `feat/decoder`, HEAD `3066f0c` (`test(decoder): verify real approve decoding baseline`), 작업 트리 깨끗함이다. DEC-01 사용자 보고 빌드 대상 HEAD는 `23eaaa6992f21fcd48ba6eb79762ec5db3ad6615`이며, **Rust 소스 직접 빌드 후 연결 시험은 사용자 실행 보고 기준 30개 통과**라는 기존 기록을 유지한다. DEC-02 구현은 `26df736`에 커밋됐으며 **사용자 실행 보고 기준으로 통합 37개 통과·D1 검증 완료**다. 실패·취소·건너뛰기·todo는 모두 0이며 에이전트의 독립 재실행 결과는 아니다. **DEC-03도 사용자 실행 보고 기준 검증 완료**다. transfer 개별 21개와 통합 회귀 58개가 모두 통과했으며 두 실행 모두 실패·취소·건너뛰기·todo는 0이다. DEC-04 이후는 미착수이며 SDK 전체 소스·빌드 독립화는 미완료다.
 
-이번 DEC-02 작업에는 사용자 실행 제한이 아래 일반 진행 지침보다 우선한다. 작성자는 코드·시험·문서 작성과 정적 검토까지만 진행하며 빌드·시험·의존성 설치 및 Git add·commit·push·merge·reset·브랜치 변경을 실행하지 않는다. DEC 시험은 내부에서 Registry를 빌드하므로 직접 실행하지 않는다. 기존 사용자 실행 결과와 확인 대기 항목, 사용자용 준비·실행·기록 명령은 [DEC-01/02 README](../../fixtures/decoder-policy/README.md)에 남긴다. DEC-03으로 자동 진행하지 않는다.
+DEC-03 착수 시 실제 상태는 `feat/decoder`, HEAD `26df736b4d8f0073cfefccf70f68d3b243b016b5`이며 README와 두 계획서의 DEC-02 검증 완료 미커밋 변경 3개를 보존했다. 이번 DEC-03 작업에는 사용자 실행 제한이 아래 일반 진행 지침보다 우선한다. 작성자는 코드·시험·문서 작성과 정적 검토까지만 진행하며 빌드·시험·의존성 설치 및 Git add·commit·push·merge·reset·브랜치 변경을 실행하지 않는다. DEC 시험은 내부에서 Registry를 빌드하므로 직접 실행하지 않는다. 기존 사용자 실행 기록, 필요한 경우의 준비·직접 WASM 빌드와 transfer/통합 시험·명시적 9개 파일 커밋 명령은 [README](../../fixtures/decoder-policy/README.md), 사례·한계는 [coverage](../../fixtures/decoder-policy/coverage.md)를 따른다. DEC-04로 자동 진행하지 않는다.
 
 ## 1. 목표와 진행 방식
 
@@ -80,7 +80,7 @@ API 서버 구현·운영은 API 담당 영역이다. 공통 crate를 이동한 
 
 ### D1. ERC-20 approve 한 경로의 기준 시험
 
-상세 계획에서 D1을 **DEC-01(approve 디코딩)**과 **DEC-02(소비자 정책 연결)**로 나눈다. DEC-01 구현 및 당시 Rust 소스 재빌드 후 연결 시험은 사용자 실행 보고 기준 30개 통과, 실패·취소·건너뛰기 각 0개다. 소스 → 직접 WASM 빌드 → hash 확인 → 실제 builder·digest·WASM 설치·디코딩 경로를 사용자 보고 기준으로 확인한 기록을 유지한다. DEC-02는 코드 작성 완료·실행 검증 대기이므로 D1 전체의 정책 평가 완료 조건까지 통과한 것은 아니다. 새 SDK 실행부나 네트워크 어댑터는 만들지 않는다.
+상세 계획에서 D1을 **DEC-01(approve 디코딩)**과 **DEC-02(소비자 정책 연결)**로 나눈다. DEC-01 구현 및 당시 Rust 소스 재빌드 후 연결 시험은 사용자 실행 보고 기준 30개 통과, 실패·취소·건너뛰기 각 0개다. 소스 → 직접 WASM 빌드 → hash 확인 → 실제 builder·digest·WASM 설치·디코딩 경로를 사용자 보고 기준으로 확인한 기록을 유지한다. DEC-02의 별도 사용자 실행 보고에서는 실제 WASM 빌드 완료와 통합 37개 통과를 확인했으므로 D1의 정책 평가 완료 조건도 충족했다. 새 SDK 실행부나 네트워크 어댑터는 만들지 않는다.
 
 ```text
 approve calldata
@@ -89,14 +89,14 @@ approve calldata
   → 기존 WASM에 decoder bundle 설치·라우팅
   → Action 및 token/spender/amount 검증 [DEC-01]
   → 기존 plan/evaluate에 실제 Cedar·manifest 전달
-  → 적용 정책 ID·severity·판정 검증 [DEC-02, 코드 작성 완료·실행 검증 대기]
+  → 적용 정책 ID·severity·판정 검증 [DEC-02, 사용자 실행 보고 기준 검증 완료]
 ```
 
 DEC-01 구현 파일:
 
 - `fixtures/decoder-policy/README.md`, `registry-selection.json`, `approve.cases.json`, `approve.test.mjs`.
 - 최소 helper `fixtures/decoder-policy/helpers/build-registry.mjs`, `wasm-worker.mjs`.
-- 루트 `package.json`의 시험 스크립트. DEC-01 검증 당시 `decoder:test`는 `approve.test.mjs`만 실행했다. DEC-02 변경 후 `decoder:test`는 DEC-01과 DEC-02를 모두 포함하며 개별 명령은 `decoder:test:approve`, `decoder:test:approve-policy`다. 시험 내부에서 임시 Registry를 실제로 빌드한다.
+- 루트 `package.json`의 시험 스크립트. DEC-01 검증 당시 `decoder:test`는 `approve.test.mjs`만, DEC-02에서는 기존 두 파일의 37개를 실행했다. 현재 DEC-03 변경은 기존 두 파일을 유지하고 transfer를 추가하며 기존 개별 명령 `decoder:test:approve`, `decoder:test:approve-policy`도 유지한다. 시험 내부에서 임시 Registry를 실제로 빌드한다.
 
 DEC-01은 실제 `registryV2/manifests/standard/erc20/approve@1.0.0.json`과 선언된 1·10·8453·42161 네 체인의 실제 USDC token 파일을 하나씩 선택한다. 원본 chain 범위를 줄이지 않는다. 임시 Registry와 `BUILD_INDEX_REGISTRY_ROOT`로 **실제 build-index를 `--strict-callkeys`로 실행**하고 실패 시 일부 산출물도 입력으로 사용하지 않는다. 산출물의 chain·주소·selector 범위와 resolved bundle의 JCS digest까지 확인한다. 이는 선택한 token 기준 시험이며 전체 SDK 커버리지는 아니다. DEC-02는 같은 builder와 실제 WASM 디코딩 경로를 재사용해 Day-1 정책 하나를 연결한다. CI 개편은 이번에 포함하지 않는다.
 
@@ -108,7 +108,7 @@ DEC-02 코드 작성 범위:
 - 추가한 사례는 승인량 `0`·일반 승인량·`2^256-2`의 일반 spender `pass`, `2^160-1`·`2^256-1`의 일반 spender `warn`, 두 MAX 수량의 정책상 Permit2 spender `pass`로 총 7개다. Permit2 주소는 정책 원문과 대조하고 기존 calldata의 spender word를 바꿔 실제 디코더를 다시 통과시킨다. 기대값은 독립적인 입력 분석과 정책 원문에 근거하며 실제 결과를 자동 저장하지 않는다.
 - 기존 정책 본문·manifest·severity 및 Rust 실행부는 변경하지 않는다. 확장 경로 정책은 **D3 이관 전 기준 시험의 임시 입력**이며 D3에서 공유 원본으로 전환한다. Core 공개 API, `createCore`, 외부 Fact/API/RPC·서명 검증, 디렉터리 이관과 SDK 독립 빌드는 이번 범위에 포함하지 않는다.
 
-작성된 시험 수는 DEC-01 30개와 DEC-02 7개, 합계 37개이며 **DEC-02 변경 후 실행한 결과가 아니다**. 사용자 실행과 기록 갱신이 완료되기 전까지 DEC-02와 D1 전체는 검증 완료로 표시하지 않는다. 기대와 다르면 정책·Rust 실행부로 범위를 넓히지 않고 관련 파일·최소 입력·코드상 동작·차이·선택지·영향·권장안을 제시한다. 실행 전 코드상 추정과 실제 재현은 구분한다.
+**사용자 실행 결과는 DEC-01 회귀 30개와 DEC-02 정책 7개, 합계 37개 통과**이며 실패·취소·건너뛰기·todo는 모두 0이다. `planned: []`, 빈 Fact 평가, 정확한 정책 ID·severity `warn`·origin `action` 검사를 포함한다. 실제 Rust WASM 컴파일·최적화·`pkg` 생성 완료와 현재 JS/WASM SHA-256의 실행 로그 일치도 사용자 보고로 확인했다. DEC-02와 D1은 사용자 실행 보고 기준 검증 완료이며 자세한 근거와 미제공 세부값은 [README](../../fixtures/decoder-policy/README.md)에 기록한다. 향후 회귀 시험에서 기대와 다르면 정책·Rust 실행부로 범위를 넓히지 않고 관련 파일·최소 입력·코드상 동작·차이·선택지·영향·권장안을 제시한다.
 
 우선 Node 내장 `node:test`와 기존 WASM 초기화 방식을 사용해 새 테스트 프레임워크 도입을 피한다. 필요한 WASM은 crate를 직접 빌드한다. `scripts/wasm-build.sh`는 extension 경로에 복사하는 부수 동작이 있으므로 신규 시험의 필수 경로로 두지 않는다.
 
@@ -132,6 +132,23 @@ DEC-02 코드 작성 범위:
 일반적인 악성 주소 목록, 실제 체인의 존재 여부, 계약 배포 여부, 사용자가 의도한 네트워크인지의 확인은 D1에 추가하지 않는다. 다른 decoder에는 주소 비종속 매칭도 있으므로 `(chain, to, selector)` 규칙을 모든 decoder에 강제하지 않는다. 각 manifest가 이미 선언한 매칭 방식을 기준으로 검증한다.
 
 ### D2. 디코더 계약과 요청 종류별 커버리지
+
+**현재 DEC-03: 사용자 실행 보고 기준 검증 완료.** 신규 `transfer.cases.json`, `transfer.test.mjs`, `coverage.md`와 selection/helper·npm 시험 명령·README·두 계획서를 작성 또는 수정했다. 실제 transfer source `standard/erc20/transfer@1.0.0` (`0xa9059cbb`)를 approve와 같은 strict builder → index·resolved bundle JCS digest → 실제 WASM 설치 → 원문 calldata → decoder ID·Action 경로에 연결하고 사용자 실행으로 검증했다. 기존 approve/token 경로·바이트 hash와 네 체인 `1/10/8453/42161` 범위를 보존하고 transfer 원본 바이트 hash만 추가한다.
+
+`buildRegistry(selection)`은 기존 approve 전용 동작과 `{ root, source, tokens, cleanup }` 반환을 유지한다. DEC-03에서만 `{ includeTransfer: true }`를 전달해 transfer 원본을 함께 복사하고 `transferSource`를 반환한다. 기존 DEC-01은 정확히 4개 callkey를 계속 요구하고 DEC-03은 정확히 8개 callkey와 selector별 bundle ID·JCS digest, 주소 확장을 제외한 원본 필드 보존을 검사한다. 실패 시 임시 산출물 폐기와 실제 `--strict-callkeys` 경로는 유지한다. 기존 approve fixture·두 시험 파일·다중 bundle 설치 WASM worker는 수정하지 않는다.
+
+작성한 요청은 정상 7개와 오류 11개다. 네 체인의 0·일반 `1,000,000`·`2^256-1`, token/recipient/submitter 대소문자 정규화, zero recipient, 1바이트·32바이트 trailing 허용을 포함한다. 정상 형식의 미등록 조합과 calldata hex 오류, 필수 selector 누락·잘못된 calldata 타입, selector-only·잘린 ABI word, 등록 approve/transfer 조회 selector와 calldata selector의 양방향 불일치를 구분한다. token contract·recipient·submitter를 서로 다르게 두고 실제 Rust의 body/meta, `spender` 부재, `is_router_egress: false` 기본값 생략, `BigInt`·U256 문자열을 비교한다. gas price의 Pyth source는 실제 외부 조회가 아닌 기존 stub이다.
+
+구조 검사 3개는 실제 두 source와 8개 callkey·digest, 고정 calldata word의 독립 검산, 같은 WASM 프로세스의 transfer/approve 교대 요청과 별도 approve-only 프로세스의 transfer miss다. **사용자 실행으로 DEC-03 21개와 통합 58개(기존 37 + 21)가 모두 통과**했다. 정확한 case ID와 기존 DEC-01의 공통 오류·DEC-02 정책 검사를 유지한 범위는 [coverage](../../fixtures/decoder-policy/coverage.md)를 따른다.
+
+| 사용자 실행 명령 | tests / pass | suites / fail / cancelled / skipped / todo | duration_ms |
+| --- | --- | --- | --- |
+| `npm run decoder:test:transfer` | 21 / 21 | 0 / 0 / 0 / 0 / 0 | 866.922333 |
+| `npm run decoder:test` | 58 / 58 | 0 / 0 / 0 / 0 / 0 | 635.086875 |
+
+approve·transfer 공동 설치와 selector별 decoder ID·Action, 8개 callkey·JCS digest, 프로세스 격리 및 기존 37개 회귀가 통과해 DEC-03 완료 조건을 충족했다. 에이전트가 독립 재실행한 결과는 아니다. 이번 실행의 HEAD·시각·도구 버전·산출물 hash·재빌드 로그는 미제공이며 착수 HEAD나 이전 단계 기록으로 채우지 않는다. 이 세부 기록의 미제공은 DEC-03 검증 완료를 막지 않으며 이를 채우기 위한 재빌드·재시험은 요구하지 않는다.
+
+selector 문자열의 길이·hex가 현재 DTO에서 검증되지 않아 malformed가 lookup miss로 처리될 수 있다는 정적 한계를 문서화했다. 정상 미지원이나 실행으로 재현한 결함으로 표현하지 않는다. 이번 runtime 수정은 필요하지 않으며, 형식 검증을 도입하려면 오류 우선순위·빈 calldata native 분기·기존 호출자와 기대값 영향을 먼저 사용자에게 제시한다. 실제 raw JSON 문법 오류는 worker의 `JSON.stringify` 경로 때문에 이 fixture에서 직접 검증하지 않는다. transfer 정책 평가, typed permit, multicall, Core 공개 API, API/RPC, 서명 검증, 소스 이관, CI 개편은 이번 범위 밖이다. 아래 D2 전체 완료 조건은 DEC-03 검증 완료만으로 충족되지 않는다.
 
 - `registryV2`와 신규 `fixtures/decoder-policy/coverage.md`에 지원 chain·contract·selector·typed-data·하위 동작을 기록한다.
 - Action은 기존 Rust `ActionBody` 구조를 기준으로 한다. 새 독립 IR을 동시에 만들지 않는다.
@@ -268,6 +285,10 @@ Decoder 인계 조건을 충족하면 검토된 decoder 이력을 Core에 통합
 5. 로컬 커밋과 push 여부.
 6. 이관 작업이면 제거한 기존 경로 의존과 아직 남은 임시 의존, 독립 빌드 검증 상태.
 
-**현재 DEC-02는 코드 작성 완료·실행 검증 대기다.** DEC-01 구현 및 당시 Rust 소스 재빌드 후 연결 시험은 사용자 제공 로그 기준 30개 통과, 실패·취소·건너뛰기 각 0개이며 작성자가 직접 실행한 결과가 아니다. 사용자 제공 실행 전후 Git 상태에서 HEAD는 `23eaaa6992f21fcd48ba6eb79762ec5db3ad6615`로 같고 Rust 소스·빌드 설정 변경은 표시되지 않았다. 도구 조회 결과는 Rust/Cargo 1.95.0, wasm-pack 0.14.0, Node 25.9.0, npm 11.12.1이다. 빌드 성공 표식 `build_success_utc=2026-09-11T06:57:10Z`, WASM SHA-256과 재시험 로그를 [README](../../fixtures/decoder-policy/README.md)에 기록했다. 재시험은 `2026-09-11T06:57:40Z` 시작, `2026-09-11T06:57:42Z` 성공 표식, `duration_ms=1290.958958`이며 최초 시험 30개 통과(`duration_ms=2050.144875`)와 별도 실행이다.
+**현재 DEC-02와 D1은 사용자 실행 보고 기준 검증 완료다.** 구현 커밋은 `26df736`이며 통합 37개(DEC-01 회귀 30개 + DEC-02 정책 7개)가 통과했다. 실패·취소·건너뛰기·todo는 모두 0이다. 사용자 보고로 실제 Rust WASM 빌드 완료와 현재 JS/WASM의 직접 계산 SHA-256이 실행 로그와 일치함을 확인했다. 이번 문서 갱신에서 원본 로그 재열람이나 hash 재계산은 하지 않았다.
 
-당시 소스 → 직접 WASM 빌드 → hash 확인 → 동일 경로의 WASM 연결 시험은 사용자 실행 보고 기준으로 확인한 기록을 유지한다. 빌드 시작 시각·상세 빌드 로그·전체 빌드 명령 출력·실제 임시 `CARGO_TARGET_DIR` 경로는 기록 보완 대기이며, 이를 채우기 위해 빌드·시험을 다시 요구하지 않는다. 작성자의 소스/WASM 독립 재현은 미확인이며 DEC-01 커밋 `3066f0c` 자체는 소스 일치의 증거가 아니다. 이번 DEC-02 작업에서 작성자는 빌드·시험·의존성 설치·Git add·commit을 실행하지 않았다. DEC-02 실행 검증과 기록 갱신은 대기 중이며 DEC-03으로 자동 진행하지 않는다. 소스 이관과 SDK 전체 소스·빌드 독립화도 미완료다. D1 전체 완료나 Core 재구현 착수로 확대해 해석하지 않는다.
+**현재 DEC-03은 사용자 실행 보고 기준 검증 완료다.** 요청 18개와 구조 검사 3개, 합계 21개를 작성했고 사용자 실행 로그에서 transfer 21/21 통과(`duration_ms=866.922333`), 통합 58/58 통과(`duration_ms=635.086875`)를 확인했다. 각 실행의 suites·fail·cancelled·skipped·todo는 모두 0이다. 공동 설치·8개 callkey·JCS digest·프로세스 격리와 기존 37개 회귀도 통과했다. 소스·Rust 직렬화/오류 순서·고정 calldata word를 읽어 정적 대조했고 기존 37개 시험/fixture/worker 및 Rust·빌드 입력을 유지했다. DEC-02에서 검증한 같은 빌드의 JS/WASM 쌍은 재사용할 수 있으며 이번 로그에 별도 재빌드 기록이 없다는 이유로 재빌드·재시험을 요구하지 않는다. 이 기준 시험은 기존 WASM과 임시 경로를 사용하며 SDK 독립 빌드 증거가 아니다.
+
+DEC-01의 과거 기록은 별도로 유지한다. 당시 Rust 소스 재빌드 후 연결 시험은 사용자 제공 로그 기준 30개 통과, 실패·취소·건너뛰기 각 0개이며 작성자가 직접 실행한 결과가 아니다. 사용자 제공 실행 전후 Git 상태에서 HEAD는 `23eaaa6992f21fcd48ba6eb79762ec5db3ad6615`로 같고 Rust 소스·빌드 설정 변경은 표시되지 않았다. 도구 조회 결과는 Rust/Cargo 1.95.0, wasm-pack 0.14.0, Node 25.9.0, npm 11.12.1이다. 빌드 성공 표식 `build_success_utc=2026-09-11T06:57:10Z`, WASM SHA-256과 재시험 로그를 [README](../../fixtures/decoder-policy/README.md)에 기록했다. 재시험은 `2026-09-11T06:57:40Z` 시작, `2026-09-11T06:57:42Z` 성공 표식, `duration_ms=1290.958958`이며 최초 시험 30개 통과(`duration_ms=2050.144875`)와 별도 실행이다.
+
+DEC-01 당시 미제공 세부 기록은 그대로 유지한다. DEC-02의 실제 실행 시점 HEAD·도구 버전·시각·원본 hash 값 등 사용자 요약에 없는 값도 임의로 채우거나 DEC-01에서 복사하지 않는다. 이 세부 기록을 채우기 위해 빌드·시험을 다시 요구하지 않는다. DEC-03 착수 시 남아 있던 DEC-02 검증 완료 문서 변경 3개도 보존했다. 이번 사용자 실행 로그를 README·coverage·두 계획서에 실제 반영했으며 DEC-03 실행의 미제공 hash·시각·HEAD·도구 버전·재빌드 로그는 채우지 않는다. 착수 HEAD는 실행 시점 HEAD의 증거가 아니며 세부 기록의 미제공은 DEC-03 검증 완료를 막지 않는다. 에이전트는 빌드·시험·의존성 설치·Git 변경 명령을 실행하지 않았다. DEC-04는 미착수이며 자동 진행하지 않는다. D1 완료 범위는 approve 디코딩·소비자 정책 연결까지다. 소스 이관, Core 재구현과 SDK 전체 소스·빌드 독립화는 미완료다.

@@ -3,6 +3,10 @@
     "path": "manifests/standard/erc20/approve@1.0.0.json",
     "sha256": "0x0a51874b0d42a209e61a79083821338b67c3968c27bda6eea48fc8a78ad5047e"
   },
+  "transfer_manifest": {
+    "path": "manifests/standard/erc20/transfer@1.0.0.json",
+    "sha256": "0x47e37a1ada72a9fee9e4b8077b7000f0b1198a0219fa513d3ccb74def70ee925"
+  },
   "tokens": [
     {
       "path": "tokens/1/0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.json",

@@ -1,0 +1,320 @@
+{
+  "registry_source": "manifests/standard/erc20/transfer@1.0.0.json",
+  "defaults": {
+    "submitter": "0x000000000000000000000000000000000000aaaa",
+    "submitted_at": 1700000000,
+    "value": "0",
+    "gas_limit": "200000",
+    "gas_price": "20000000000",
+    "nonce": 1
+  },
+  "cases": [
+    {
+      "id": "chain-1-normal",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0xa9059cbb",
+        "calldata": "0xa9059cbb000000000000000000000000111122223333444455556666777788889999abcd00000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "decoder_id": "standard/erc20/transfer@1.0.0",
+        "body": {
+          "domain": "token",
+          "action": "erc20_transfer",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:1",
+              "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            }
+          },
+          "recipient": "0x111122223333444455556666777788889999abcd",
+          "amount": "0xf4240"
+        }
+      }
+    },
+    {
+      "id": "chain-10-zero",
+      "input": {
+        "chain_id": 10,
+        "to": "0x0b2c639c533813f4aa9d7837caf62653d097ff85",
+        "selector": "0xa9059cbb",
+        "calldata": "0xa9059cbb000000000000000000000000111122223333444455556666777788889999abcd0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected": {
+        "decoder_id": "standard/erc20/transfer@1.0.0",
+        "body": {
+          "domain": "token",
+          "action": "erc20_transfer",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:10",
+              "address": "0x0b2c639c533813f4aa9d7837caf62653d097ff85"
+            }
+          },
+          "recipient": "0x111122223333444455556666777788889999abcd",
+          "amount": "0x0"
+        }
+      }
+    },
+    {
+      "id": "chain-8453-uint256-max",
+      "input": {
+        "chain_id": 8453,
+        "to": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+        "selector": "0xa9059cbb",
+        "calldata": "0xa9059cbb000000000000000000000000111122223333444455556666777788889999abcdffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": {
+        "decoder_id": "standard/erc20/transfer@1.0.0",
+        "body": {
+          "domain": "token",
+          "action": "erc20_transfer",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:8453",
+              "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+            }
+          },
+          "recipient": "0x111122223333444455556666777788889999abcd",
+          "amount": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        }
+      }
+    },
+    {
+      "id": "chain-42161-mixed-case",
+      "input": {
+        "chain_id": 42161,
+        "to": "0xAf88d065E77c8cC2239327C5EdB3A432268E5831",
+        "selector": "0xa9059cbb",
+        "calldata": "0xa9059cbb000000000000000000000000111122223333444455556666777788889999AbCd00000000000000000000000000000000000000000000000000000000000f4240",
+        "submitter": "0x000000000000000000000000000000000000AaAa"
+      },
+      "expected": {
+        "decoder_id": "standard/erc20/transfer@1.0.0",
+        "body": {
+          "domain": "token",
+          "action": "erc20_transfer",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:42161",
+              "address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831"
+            }
+          },
+          "recipient": "0x111122223333444455556666777788889999abcd",
+          "amount": "0xf4240"
+        }
+      }
+    },
+    {
+      "id": "zero-recipient",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0xa9059cbb",
+        "calldata": "0xa9059cbb000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "decoder_id": "standard/erc20/transfer@1.0.0",
+        "body": {
+          "domain": "token",
+          "action": "erc20_transfer",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:1",
+              "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            }
+          },
+          "recipient": "0x0000000000000000000000000000000000000000",
+          "amount": "0xf4240"
+        }
+      }
+    },
+    {
+      "id": "trailing-one-byte",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0xa9059cbb",
+        "calldata": "0xa9059cbb000000000000000000000000111122223333444455556666777788889999abcd00000000000000000000000000000000000000000000000000000000000f4240ab"
+      },
+      "expected": {
+        "decoder_id": "standard/erc20/transfer@1.0.0",
+        "body": {
+          "domain": "token",
+          "action": "erc20_transfer",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:1",
+              "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            }
+          },
+          "recipient": "0x111122223333444455556666777788889999abcd",
+          "amount": "0xf4240"
+        }
+      }
+    },
+    {
+      "id": "trailing-full-word",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0xa9059cbb",
+        "calldata": "0xa9059cbb000000000000000000000000111122223333444455556666777788889999abcd00000000000000000000000000000000000000000000000000000000000f4240deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+      },
+      "expected": {
+        "decoder_id": "standard/erc20/transfer@1.0.0",
+        "body": {
+          "domain": "token",
+          "action": "erc20_transfer",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:1",
+              "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            }
+          },
+          "recipient": "0x111122223333444455556666777788889999abcd",
+          "amount": "0xf4240"
+        }
+      }
+    },
+    {
+      "id": "unregistered-token",
+      "input": {
+        "chain_id": 1,
+        "to": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+        "selector": "0xa9059cbb",
+        "calldata": "0xa9059cbb000000000000000000000000111122223333444455556666777788889999abcd00000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "error_kind": "no_declarative_v3_mapper"
+      }
+    },
+    {
+      "id": "unregistered-chain",
+      "input": {
+        "chain_id": 137,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0xa9059cbb",
+        "calldata": "0xa9059cbb000000000000000000000000111122223333444455556666777788889999abcd00000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "error_kind": "no_declarative_v3_mapper"
+      }
+    },
+    {
+      "id": "unregistered-selector-with-transfer-calldata",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0xdeadbeef",
+        "calldata": "0xa9059cbb000000000000000000000000111122223333444455556666777788889999abcd00000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "error_kind": "no_declarative_v3_mapper"
+      }
+    },
+    {
+      "id": "invalid-calldata-hex",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0xa9059cbb",
+        "calldata": "0xa9059cbb000000000000000000000000111122223333444455556666777788889999abcd00000000000000000000000000000000000000000000000000000000000f424g"
+      },
+      "expected": {
+        "error_kind": "invalid_calldata"
+      }
+    },
+    {
+      "id": "missing-selector",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "calldata": "0xa9059cbb000000000000000000000000111122223333444455556666777788889999abcd00000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "invalid-calldata-type",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0xa9059cbb",
+        "calldata": 42
+      },
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "selector-only",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0xa9059cbb",
+        "calldata": "0xa9059cbb"
+      },
+      "expected": {
+        "error_kind": "decode_failed"
+      }
+    },
+    {
+      "id": "partial-recipient-word",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0xa9059cbb",
+        "calldata": "0xa9059cbb000000000000000000000000111122223333444455556666777788889999ab"
+      },
+      "expected": {
+        "error_kind": "decode_failed"
+      }
+    },
+    {
+      "id": "partial-amount-word",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0xa9059cbb",
+        "calldata": "0xa9059cbb000000000000000000000000111122223333444455556666777788889999abcd00000000000000000000000000000000000000000000000000000000000f42"
+      },
+      "expected": {
+        "error_kind": "decode_failed"
+      }
+    },
+    {
+      "id": "transfer-lookup-approve-calldata",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0xa9059cbb",
+        "calldata": "0x095ea7b3000000000000000000000000111122223333444455556666777788889999abcd00000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "error_kind": "decode_failed"
+      }
+    },
+    {
+      "id": "approve-lookup-transfer-calldata",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0x095ea7b3",
+        "calldata": "0xa9059cbb000000000000000000000000111122223333444455556666777788889999abcd00000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "error_kind": "decode_failed"
+      }
+    }
+  ]
+}

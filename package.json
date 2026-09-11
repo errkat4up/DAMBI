@@ -10,9 +10,10 @@
     "core:typecheck": "yarn workspace @dambi/core typecheck",
     "core:build": "yarn workspace @dambi/core build",
     "core:pack": "yarn workspace @dambi/core pack:check",
-    "decoder:test": "node --test fixtures/decoder-policy/approve.test.mjs fixtures/decoder-policy/approve-policy.test.mjs",
+    "decoder:test": "node --test fixtures/decoder-policy/approve.test.mjs fixtures/decoder-policy/approve-policy.test.mjs fixtures/decoder-policy/transfer.test.mjs",
     "decoder:test:approve": "node --test fixtures/decoder-policy/approve.test.mjs",
-    "decoder:test:approve-policy": "node --test fixtures/decoder-policy/approve-policy.test.mjs"
+    "decoder:test:approve-policy": "node --test fixtures/decoder-policy/approve-policy.test.mjs",
+    "decoder:test:transfer": "node --test fixtures/decoder-policy/transfer.test.mjs"
   },
   "workspaces": [
     "packages/*"
