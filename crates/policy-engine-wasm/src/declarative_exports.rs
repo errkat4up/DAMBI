@@ -29,10 +29,13 @@ use wasm_bindgen::prelude::*;
 
 use crate::dto::{
     DeclarativeInstallResultDto, DeclarativeRouteRequestV3InputDto,
-    DeclarativeRouteRequestV3ResultDto, DeclarativeRouteTypedDataV3InputDto, EngineErrorDto,
-    Envelope,
+    DeclarativeRouteRequestV3ResultDto, DeclarativeRouteTypedDataV3InputDto,
+    DeclarativeRouteTypedDataV4InputDto, DeclarativeRouteTypedDataV4ResultDto, EngineErrorDto,
+    Envelope, TypedDataRequestV4Dto, TypedDataRoutingV4Dto, TypedDataValidatedV4Dto,
+    TypedDataValidationV4Dto,
 };
 use crate::exports::check_input_size;
+use crate::typed_data_validation::{self, TypedDataError};
 
 // v3 action tree imports. Namespaced under `v3_action` for readability.
 use policy_state::live_field::{DataSource, LiveField, OracleProvider};
@@ -1506,6 +1509,182 @@ pub fn declarative_route_typed_data_v3_json(input_json: String) -> String {
     match result {
         Ok(dto) => Envelope::ok(dto).to_json(),
         Err(error) => Envelope::<()>::err(error.kind, error.message).to_json(),
+    }
+}
+
+/// Full-input strict Permit route (DEC-04b), separate from the legacy v3 DTO.
+///
+/// Input: `{typed_data: {domain, types, primaryType, message}, requested_signer,
+/// submitter?, submitted_at, routing?}`. `typed_data` may also be a JSON string.
+/// Basic syntax/routing conflicts precede lookup; detailed validation only
+/// runs for the supported manifest. A miss is not validation success. Neither
+/// errors nor misses retry v3. No signatures or on-chain nonce values are checked.
+#[wasm_bindgen]
+pub fn declarative_route_typed_data_v4_json(input_json: String) -> String {
+    let result = (|| -> Result<DeclarativeRouteTypedDataV4ResultDto, TypedDataError> {
+        check_input_size(&input_json, "declarative_route_typed_data_v4_json")
+            .map_err(|error| TypedDataError::new(error.kind, error.message, None))?;
+        let input: DeclarativeRouteTypedDataV4InputDto = serde_json::from_str(&input_json)
+            .map_err(|error| {
+                TypedDataError::new(
+                    "invalid_input_json",
+                    format!("invalid input json: {error}"),
+                    None,
+                )
+            })?;
+        let input = typed_data_validation::prepare(input.0)?;
+        let key = TypedDataBridgeKey {
+            chain_id: input.chain_id,
+            verifying_contract: input.verifying_contract.clone(),
+            primary_type: input.primary_type.clone(),
+            witness_type: input.witness_type.clone(),
+        };
+        let (bundle_id, bundle_value) = DECLARATIVE_V3_STATE
+            .with(|state| {
+                let state = state.borrow();
+                state.typed_data_bridge.get(&key).and_then(|bundle_id| {
+                    state.bundles.get(bundle_id).cloned().map(|bundle| (bundle_id.clone(), bundle))
+                })
+            })
+            .ok_or_else(|| TypedDataError::new(
+                "no_typed_data_mapper",
+                "no installed typed-data mapper for this routing key; detailed validation not performed",
+                None,
+            ))?;
+        // Other installed typed contracts keep their existing v3 behavior;
+        // strict support is deliberately limited to the selected real source.
+        if bundle_id != "standard/erc20/permit@1.0.0" {
+            return Err(TypedDataError::new(
+                "unsupported_typed_data_contract",
+                "installed typed-data contract is outside strict Permit support; detailed validation not performed",
+                None,
+            ));
+        }
+        let validated = typed_data_validation::validate_manifest(&input, &bundle_value)?;
+        let emit = bundle_value.get("emit").ok_or_else(|| {
+            TypedDataError::new("invalid_bundle", "missing emit", Some("emit".into()))
+        })?;
+        if emit.get("strategy").and_then(serde_json::Value::as_str) != Some("single_emit") {
+            return Err(TypedDataError::new(
+                "invalid_bundle",
+                "strict Permit requires single_emit",
+                Some("emit.strategy".into()),
+            ));
+        }
+        let body_template = emit
+            .get("body")
+            .filter(|body| body.is_object())
+            .ok_or_else(|| {
+                TypedDataError::new(
+                    "invalid_bundle",
+                    "missing emit.body object",
+                    Some("emit.body".into()),
+                )
+            })?;
+        let verifying_contract = parse_v3_address(&input.verifying_contract, "verifying_contract")
+            .map_err(|error| {
+                TypedDataError::new("typed_interpretation_failed", error.message, None)
+            })?;
+        let submitter = parse_v3_address(&input.submitter, "submitter").map_err(|error| {
+            TypedDataError::new("typed_interpretation_failed", error.message, None)
+        })?;
+        let chain = V3ChainId::new(format!("eip155:{}", input.chain_id));
+        let submitted_at = V3Time::from_unix(input.submitted_at);
+        let deadline = V3Time::from_unix(validated.deadline_seconds);
+        let args_json = build_typed_data_args_json(
+            bundle_value.pointer("/abi_fragment/abi"),
+            &input.primary_type,
+            &validated.message,
+            Some(body_template),
+        );
+        let ctx = V3MapContext {
+            chain,
+            tx_to: verifying_contract,
+            tx_from: submitter,
+            value: V3U256::ZERO,
+            submitted_at,
+            args_json: &args_json,
+            raw_calldata: "",
+            resolved: BTreeMap::new(),
+            derived: BTreeMap::new(),
+            inputs: None,
+        };
+        // Use the actual manifest emitter and its live_inputs nonce stub.
+        // A signed nonce is preserved separately and never substituted for it.
+        let body =
+            build_action_body(&ctx, body_template, emit.get("live_inputs")).map_err(|error| {
+                TypedDataError::new(
+                    "typed_interpretation_failed",
+                    format!("decoder {bundle_id}: {error}"),
+                    Some("emit.body".into()),
+                )
+            })?;
+        match &body {
+            v3_action::ActionBody::Token(v3_action::TokenAction::Erc20Permit(permit))
+                if permit.deadline == deadline => {}
+            _ => return Err(TypedDataError::new(
+                "typed_interpretation_failed",
+                format!("decoder {bundle_id}: manifest did not emit an ERC-20 Permit with the validated deadline"),
+                Some("emit.body".into()),
+            )),
+        }
+        // All domain fields were checked before emission. Only the output
+        // projection is normalized; the complete original remains in request.
+        let domain = &input.typed_data["domain"];
+        let meta = v3_action::ActionMeta {
+            submitted_at,
+            submitter,
+            nature: v3_action::ActionNature::OffchainSig {
+                domain: v3_action::Eip712Domain {
+                    name: domain["name"].as_str().unwrap_or_default().to_owned(),
+                    version: domain
+                        .get("version")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned),
+                    chain_id: Some(input.chain_id),
+                    verifying_contract: Some(verifying_contract),
+                    salt: domain
+                        .get("salt")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned),
+                },
+                deadline,
+                nonce_key: None,
+            },
+        };
+        Ok(DeclarativeRouteTypedDataV4ResultDto {
+            actions: vec![v3_action::Action { meta, body }],
+            decoder_id: bundle_id,
+            request: TypedDataRequestV4Dto {
+                original: input.original,
+                routing: TypedDataRoutingV4Dto {
+                    chain_id: input.chain_id,
+                    verifying_contract: input.verifying_contract,
+                    primary_type: input.primary_type,
+                    witness_type: input.witness_type,
+                },
+                validated: TypedDataValidatedV4Dto {
+                    owner: validated.owner,
+                    requested_signer: input.requested_signer,
+                    submitter: input.submitter,
+                    signed_nonce: validated.signed_nonce,
+                    deadline_seconds: validated.deadline_seconds.to_string(),
+                },
+                validation: TypedDataValidationV4Dto {
+                    signature_verification: "not_performed",
+                },
+            },
+        })
+    })();
+    match result {
+        Ok(dto) => Envelope::ok(dto).to_json(),
+        Err(error) => {
+            let mut detail = serde_json::json!({"kind": error.kind, "message": error.message});
+            if let Some(path) = error.path {
+                detail["path"] = serde_json::Value::String(path);
+            }
+            serde_json::json!({"ok": false, "data": null, "error": detail}).to_string()
+        }
     }
 }
 

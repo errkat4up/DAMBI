@@ -25,6 +25,7 @@ mod metamorpho_underlying;
 mod policy_request_exports;
 mod sim_step_exports;
 mod trigger_exports;
+mod typed_data_validation;
 
 use wasm_bindgen::prelude::*;
 
@@ -43,7 +44,7 @@ pub use cedar_exports::{
 };
 pub use declarative_exports::{
     declarative_install_v3_json, declarative_route_request_v3_json,
-    declarative_route_typed_data_v3_json,
+    declarative_route_typed_data_v3_json, declarative_route_typed_data_v4_json,
 };
 pub use exports::{
     field_catalog_json, get_alias_table_json, install_policies_json, preview_custom_schema_json,

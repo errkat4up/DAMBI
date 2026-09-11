@@ -16,13 +16,18 @@ const installations = scenario.bundles.map((bundle) => {
   return result;
 });
 const results = scenario.requests.map(({ id, kind = "transaction", input }) => {
-  assert.ok(kind === "transaction" || kind === "typed", `Unknown request kind: ${kind}`);
+  assert.ok(["transaction", "typed", "typed_strict"].includes(kind), `Unknown request kind: ${kind}`);
   if (scenario.policyBundle !== undefined) {
     assert.equal(kind, "transaction", "DEC-02 policy evaluation requires a transaction request");
   }
-  const route = kind === "typed"
-    ? wasm.declarative_route_typed_data_v3_json
-    : wasm.declarative_route_request_v3_json;
+  const route = kind === "typed_strict"
+    ? wasm.declarative_route_typed_data_v4_json
+    : kind === "typed"
+      ? wasm.declarative_route_typed_data_v3_json
+      : wasm.declarative_route_request_v3_json;
+  assert.equal(typeof route, "function", `Missing WASM export for ${kind}; rebuild the paired JS/WASM from the current Rust source.`);
+  // Each request invokes exactly its selected export. Strict failure or miss
+  // is returned directly and never retried through the abbreviated v3 route.
   const result = JSON.parse(route(JSON.stringify(input)));
   // Preserve DEC-01's input/output contract when no policy bundle is supplied.
   if (scenario.policyBundle === undefined) return { id, result };

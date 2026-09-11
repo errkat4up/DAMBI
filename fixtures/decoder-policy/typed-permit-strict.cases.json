@@ -1,0 +1,2026 @@
+{
+  "registry_source": "manifests/standard/erc20/permit@1.0.0.json",
+  "scope": "DEC-04b full-input v4 validation against the unchanged real USDC v3 Registry manifest; signature verification, expiry, RPC nonce and policy verdicts are not performed.",
+  "case_input_rules": "Clone defaults, set dot-separated paths (creating absent objects), remove omit paths; optionally reverse object key insertion order; optionally JSON-stringify typed_data with two-space indentation.",
+  "nonce_scope": "message.nonce is the signed request value. Action.body.nonce is a zero-initialized external-read LiveField from manifest live_inputs, not an RPC result; owner is not in Action body.",
+  "defaults": {
+    "requested_signer": "0xaaaabbbbccccddddeeeeffff0000111122223333",
+    "submitter": "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+    "submitted_at": 1700000000,
+    "typed_data": {
+      "domain": {
+        "name": "USD Coin",
+        "chainId": "0x1",
+        "verifyingContract": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+      },
+      "types": {
+        "Permit": [
+          {
+            "name": "owner",
+            "type": "address"
+          },
+          {
+            "name": "spender",
+            "type": "address"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256"
+          },
+          {
+            "name": "deadline",
+            "type": "uint256"
+          }
+        ]
+      },
+      "primaryType": "Permit",
+      "message": {
+        "owner": "0xaaaabbbbccccddddeeeeffff0000111122223333",
+        "spender": "0x111122223333444455556666777788889999abcd",
+        "value": "1000000",
+        "nonce": "7",
+        "deadline": "1738002000"
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "full-normal",
+      "group": "normal",
+      "expected": {}
+    },
+    {
+      "id": "full-json-string",
+      "group": "normal",
+      "typed_data_encoding": "json",
+      "expected": {}
+    },
+    {
+      "id": "full-object-key-order",
+      "group": "normal",
+      "reverse_object_keys": true,
+      "expected": {}
+    },
+    {
+      "id": "full-zero-quantities",
+      "group": "normal",
+      "set": {
+        "typed_data.message.value": "0",
+        "typed_data.message.nonce": "0",
+        "typed_data.message.deadline": "0"
+      },
+      "expected": {
+        "amount": "0x0",
+        "signed_nonce": "0"
+      }
+    },
+    {
+      "id": "value-and-nonce-uint256-max",
+      "group": "normal",
+      "set": {
+        "typed_data.message.value": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+        "typed_data.message.nonce": "115792089237316195423570985008687907853269984665640564039457584007913129639935"
+      },
+      "expected": {
+        "amount": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "signed_nonce": "115792089237316195423570985008687907853269984665640564039457584007913129639935"
+      }
+    },
+    {
+      "id": "safe-json-integers",
+      "group": "normal",
+      "set": {
+        "typed_data.domain.chainId": 1,
+        "typed_data.message.value": 1000000,
+        "typed_data.message.nonce": 7,
+        "typed_data.message.deadline": 1738002000
+      },
+      "expected": {}
+    },
+    {
+      "id": "hex-uint256-and-chain",
+      "group": "normal",
+      "set": {
+        "typed_data.domain.chainId": "0x01",
+        "typed_data.message.value": "0x0f4240",
+        "typed_data.message.nonce": "0x07",
+        "typed_data.message.deadline": "0x6797ce50"
+      },
+      "expected": {}
+    },
+    {
+      "id": "decimal-leading-zeros",
+      "group": "normal",
+      "set": {
+        "typed_data.domain.chainId": "001",
+        "typed_data.message.value": "01000000",
+        "typed_data.message.nonce": "0007",
+        "typed_data.message.deadline": "01738002000"
+      },
+      "expected": {}
+    },
+    {
+      "id": "submitter-omitted",
+      "group": "normal",
+      "omit": [
+        "submitter"
+      ],
+      "expected": {}
+    },
+    {
+      "id": "owner-signer-case-normalized",
+      "group": "normal",
+      "set": {
+        "requested_signer": "0xAAAAbbbbCCCCddddEEEEffff0000111122223333",
+        "typed_data.message.owner": "0xaaaaBBBBccccDDDDeeeeffff0000111122223333",
+        "typed_data.domain.verifyingContract": "0xA0b86991c6218b36c1D19d4a2e9Eb0cE3606eB48",
+        "submitter": "0xAbcdefABcdefAbCdEfAbCdEfAbCdEfAbCdEfABcD",
+        "typed_data.message.spender": "0x111122223333444455556666777788889999AbCd"
+      },
+      "expected": {}
+    },
+    {
+      "id": "matching-routing-raw-preserved",
+      "group": "normal",
+      "set": {
+        "routing": {
+          "chain_id": "0x01",
+          "verifying_contract": "0xA0b86991c6218b36c1D19d4a2e9Eb0cE3606eB48",
+          "primary_type": "Permit"
+        }
+      },
+      "expected": {}
+    },
+    {
+      "id": "partial-routing",
+      "group": "normal",
+      "set": {
+        "routing": {
+          "primary_type": "Permit"
+        }
+      },
+      "expected": {}
+    },
+    {
+      "id": "domain-version-salt-preserved",
+      "group": "normal",
+      "set": {
+        "typed_data.domain.version": "example-version",
+        "typed_data.domain.salt": "0x0000000000000000000000000000000000000000000000000000000000000001"
+      },
+      "expected": {}
+    },
+    {
+      "id": "domain-version-salt-other-values",
+      "group": "normal",
+      "set": {
+        "typed_data.domain.version": "another-version",
+        "typed_data.domain.salt": "0xABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB"
+      },
+      "typed_data_encoding": "json",
+      "expected": {}
+    },
+    {
+      "id": "domain-declaration-preserved",
+      "group": "normal",
+      "set": {
+        "typed_data.domain.version": "1",
+        "typed_data.domain.salt": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "typed_data.types.EIP712Domain": [
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "version",
+            "type": "string"
+          },
+          {
+            "name": "chainId",
+            "type": "uint256"
+          },
+          {
+            "name": "verifyingContract",
+            "type": "address"
+          },
+          {
+            "name": "salt",
+            "type": "bytes32"
+          }
+        ]
+      },
+      "expected": {}
+    },
+    {
+      "id": "deadline-js-safe-max",
+      "group": "normal",
+      "set": {
+        "typed_data.message.deadline": "9007199254740991"
+      },
+      "expected": {}
+    },
+    {
+      "id": "deadline-js-safe-max-number",
+      "group": "normal",
+      "set": {
+        "typed_data.message.deadline": 9007199254740991
+      },
+      "expected": {}
+    },
+    {
+      "id": "submitted-at-zero",
+      "group": "normal",
+      "set": {
+        "submitted_at": 0
+      },
+      "expected": {}
+    },
+    {
+      "id": "submitted-at-js-safe-max",
+      "group": "normal",
+      "set": {
+        "submitted_at": 9007199254740991
+      },
+      "expected": {}
+    },
+    {
+      "id": "requested_signer-missing",
+      "group": "input_error",
+      "omit": [
+        "requested_signer"
+      ],
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "requested_signer"
+      }
+    },
+    {
+      "id": "submitted_at-missing",
+      "group": "input_error",
+      "omit": [
+        "submitted_at"
+      ],
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "submitted_at"
+      }
+    },
+    {
+      "id": "typed_data-missing",
+      "group": "input_error",
+      "omit": [
+        "typed_data"
+      ],
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data"
+      }
+    },
+    {
+      "id": "typed-domain-missing",
+      "group": "input_error",
+      "omit": [
+        "typed_data.domain"
+      ],
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain"
+      }
+    },
+    {
+      "id": "typed-types-missing",
+      "group": "input_error",
+      "omit": [
+        "typed_data.types"
+      ],
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.types"
+      }
+    },
+    {
+      "id": "typed-primaryType-missing",
+      "group": "input_error",
+      "omit": [
+        "typed_data.primaryType"
+      ],
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.primaryType"
+      }
+    },
+    {
+      "id": "typed-message-missing",
+      "group": "input_error",
+      "omit": [
+        "typed_data.message"
+      ],
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message"
+      }
+    },
+    {
+      "id": "domain-name-missing",
+      "group": "input_error",
+      "omit": [
+        "typed_data.domain.name"
+      ],
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.name"
+      }
+    },
+    {
+      "id": "domain-chainId-missing",
+      "group": "input_error",
+      "omit": [
+        "typed_data.domain.chainId"
+      ],
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.chainId"
+      }
+    },
+    {
+      "id": "domain-verifyingContract-missing",
+      "group": "input_error",
+      "omit": [
+        "typed_data.domain.verifyingContract"
+      ],
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.verifyingContract"
+      }
+    },
+    {
+      "id": "owner-missing",
+      "group": "message_error",
+      "omit": [
+        "typed_data.message.owner"
+      ],
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.owner"
+      }
+    },
+    {
+      "id": "owner-null",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.owner": null
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.owner"
+      }
+    },
+    {
+      "id": "owner-wrong-type",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.owner": {}
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.owner"
+      }
+    },
+    {
+      "id": "spender-missing",
+      "group": "message_error",
+      "omit": [
+        "typed_data.message.spender"
+      ],
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.spender"
+      }
+    },
+    {
+      "id": "spender-null",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.spender": null
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.spender"
+      }
+    },
+    {
+      "id": "spender-wrong-type",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.spender": {}
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.spender"
+      }
+    },
+    {
+      "id": "value-missing",
+      "group": "message_error",
+      "omit": [
+        "typed_data.message.value"
+      ],
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.value"
+      }
+    },
+    {
+      "id": "value-null",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.value": null
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.value"
+      }
+    },
+    {
+      "id": "value-wrong-type",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.value": {}
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.value"
+      }
+    },
+    {
+      "id": "nonce-missing",
+      "group": "message_error",
+      "omit": [
+        "typed_data.message.nonce"
+      ],
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.nonce"
+      }
+    },
+    {
+      "id": "nonce-null",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.nonce": null
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.nonce"
+      }
+    },
+    {
+      "id": "nonce-wrong-type",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.nonce": {}
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.nonce"
+      }
+    },
+    {
+      "id": "deadline-missing",
+      "group": "message_error",
+      "omit": [
+        "typed_data.message.deadline"
+      ],
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.deadline"
+      }
+    },
+    {
+      "id": "deadline-null",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.deadline": null
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.deadline"
+      }
+    },
+    {
+      "id": "deadline-wrong-type",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.deadline": {}
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.deadline"
+      }
+    },
+    {
+      "id": "requested_signer-null",
+      "group": "input_error",
+      "set": {
+        "requested_signer": null
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "requested_signer"
+      }
+    },
+    {
+      "id": "requested_signer-number",
+      "group": "input_error",
+      "set": {
+        "requested_signer": 42
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "requested_signer"
+      }
+    },
+    {
+      "id": "requested_signer-malformed",
+      "group": "input_error",
+      "set": {
+        "requested_signer": "0x1234"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "requested_signer"
+      }
+    },
+    {
+      "id": "submitter-null",
+      "group": "input_error",
+      "set": {
+        "submitter": null
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "submitter"
+      }
+    },
+    {
+      "id": "submitter-number",
+      "group": "input_error",
+      "set": {
+        "submitter": 42
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "submitter"
+      }
+    },
+    {
+      "id": "submitter-malformed",
+      "group": "input_error",
+      "set": {
+        "submitter": "0x1234"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "submitter"
+      }
+    },
+    {
+      "id": "submitted-at-null",
+      "group": "input_error",
+      "set": {
+        "submitted_at": null
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "submitted_at"
+      }
+    },
+    {
+      "id": "submitted-at-string",
+      "group": "input_error",
+      "set": {
+        "submitted_at": "1700000000"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "submitted_at"
+      }
+    },
+    {
+      "id": "submitted-at-negative",
+      "group": "input_error",
+      "set": {
+        "submitted_at": -1
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "submitted_at"
+      }
+    },
+    {
+      "id": "submitted-at-fractional",
+      "group": "input_error",
+      "set": {
+        "submitted_at": 1.5
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "submitted_at"
+      }
+    },
+    {
+      "id": "submitted-at-unsafe-number",
+      "group": "input_error",
+      "set": {
+        "submitted_at": 9007199254740992
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "submitted_at"
+      }
+    },
+    {
+      "id": "typed-data-null",
+      "group": "input_error",
+      "set": {
+        "typed_data": null
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data"
+      }
+    },
+    {
+      "id": "typed-data-array",
+      "group": "input_error",
+      "set": {
+        "typed_data": []
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data"
+      }
+    },
+    {
+      "id": "typed-data-number",
+      "group": "input_error",
+      "set": {
+        "typed_data": 1
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data"
+      }
+    },
+    {
+      "id": "typed-data-malformed-json",
+      "group": "input_error",
+      "set": {
+        "typed_data": "{"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data"
+      }
+    },
+    {
+      "id": "typed-data-json-array",
+      "group": "input_error",
+      "set": {
+        "typed_data": "[]"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data"
+      }
+    },
+    {
+      "id": "typed-domain-null",
+      "group": "input_error",
+      "set": {
+        "typed_data.domain": null
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain"
+      }
+    },
+    {
+      "id": "typed-domain-array",
+      "group": "input_error",
+      "set": {
+        "typed_data.domain": []
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain"
+      }
+    },
+    {
+      "id": "typed-types-null",
+      "group": "input_error",
+      "set": {
+        "typed_data.types": null
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.types"
+      }
+    },
+    {
+      "id": "typed-types-array",
+      "group": "input_error",
+      "set": {
+        "typed_data.types": []
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.types"
+      }
+    },
+    {
+      "id": "typed-message-null",
+      "group": "input_error",
+      "set": {
+        "typed_data.message": null
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message"
+      }
+    },
+    {
+      "id": "typed-message-array",
+      "group": "input_error",
+      "set": {
+        "typed_data.message": []
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message"
+      }
+    },
+    {
+      "id": "primary-type-number",
+      "group": "input_error",
+      "set": {
+        "typed_data.primaryType": 1
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.primaryType"
+      }
+    },
+    {
+      "id": "primary-type-empty",
+      "group": "input_error",
+      "set": {
+        "typed_data.primaryType": ""
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.primaryType"
+      }
+    },
+    {
+      "id": "primary-type-path",
+      "group": "input_error",
+      "set": {
+        "typed_data.primaryType": "../Permit"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.primaryType"
+      }
+    },
+    {
+      "id": "domain-name-null",
+      "group": "input_error",
+      "set": {
+        "typed_data.domain.name": null
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.name"
+      }
+    },
+    {
+      "id": "domain-name-number",
+      "group": "input_error",
+      "set": {
+        "typed_data.domain.name": 42
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.name"
+      }
+    },
+    {
+      "id": "domain-name-mismatch",
+      "group": "domain_error",
+      "set": {
+        "typed_data.domain.name": "Untrusted Coin"
+      },
+      "expected": {
+        "error_kind": "typed_domain_mismatch",
+        "error_path": "typed_data.domain.name"
+      }
+    },
+    {
+      "id": "domain-contract-null",
+      "group": "input_error",
+      "set": {
+        "typed_data.domain.verifyingContract": null
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.verifyingContract"
+      }
+    },
+    {
+      "id": "domain-contract-number",
+      "group": "input_error",
+      "set": {
+        "typed_data.domain.verifyingContract": 1
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.verifyingContract"
+      }
+    },
+    {
+      "id": "domain-contract-malformed",
+      "group": "input_error",
+      "set": {
+        "typed_data.domain.verifyingContract": "0x1234"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.verifyingContract"
+      }
+    },
+    {
+      "id": "chain-zero",
+      "group": "input_error",
+      "set": {
+        "typed_data.domain.chainId": 0
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.chainId"
+      }
+    },
+    {
+      "id": "chain-negative",
+      "group": "input_error",
+      "set": {
+        "typed_data.domain.chainId": -1
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.chainId"
+      }
+    },
+    {
+      "id": "chain-fractional",
+      "group": "input_error",
+      "set": {
+        "typed_data.domain.chainId": 1.5
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.chainId"
+      }
+    },
+    {
+      "id": "chain-unsafe-number",
+      "group": "input_error",
+      "set": {
+        "typed_data.domain.chainId": 9007199254740992
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.chainId"
+      }
+    },
+    {
+      "id": "chain-unsafe-string",
+      "group": "input_error",
+      "set": {
+        "typed_data.domain.chainId": "9007199254740992"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.chainId"
+      }
+    },
+    {
+      "id": "chain-empty",
+      "group": "input_error",
+      "set": {
+        "typed_data.domain.chainId": ""
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.chainId"
+      }
+    },
+    {
+      "id": "chain-whitespace",
+      "group": "input_error",
+      "set": {
+        "typed_data.domain.chainId": " 1"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.chainId"
+      }
+    },
+    {
+      "id": "chain-invalid-hex",
+      "group": "input_error",
+      "set": {
+        "typed_data.domain.chainId": "0xgg"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.chainId"
+      }
+    },
+    {
+      "id": "owner-short",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.owner": "0x1234"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.owner"
+      }
+    },
+    {
+      "id": "owner-invalid-hex",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.owner": "0xgggggggggggggggggggggggggggggggggggggggg"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.owner"
+      }
+    },
+    {
+      "id": "spender-short",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.spender": "0x1234"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.spender"
+      }
+    },
+    {
+      "id": "spender-invalid-hex",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.spender": "0xgggggggggggggggggggggggggggggggggggggggg"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.spender"
+      }
+    },
+    {
+      "id": "value-negative-string",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.value": "-1"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.value"
+      }
+    },
+    {
+      "id": "value-negative-number",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.value": -1
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.value"
+      }
+    },
+    {
+      "id": "value-fractional-number",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.value": 1.5
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.value"
+      }
+    },
+    {
+      "id": "value-whitespace",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.value": " 7"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.value"
+      }
+    },
+    {
+      "id": "value-empty",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.value": ""
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.value"
+      }
+    },
+    {
+      "id": "value-bad-hex",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.value": "0xgg"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.value"
+      }
+    },
+    {
+      "id": "value-uint256-overflow",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.value": "115792089237316195423570985008687907853269984665640564039457584007913129639936"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.value"
+      }
+    },
+    {
+      "id": "value-hex-uint256-overflow",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.value": "0x10000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.value"
+      }
+    },
+    {
+      "id": "value-unsafe-number",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.value": 9007199254740992
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.value"
+      }
+    },
+    {
+      "id": "nonce-negative-string",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.nonce": "-1"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.nonce"
+      }
+    },
+    {
+      "id": "nonce-negative-number",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.nonce": -1
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.nonce"
+      }
+    },
+    {
+      "id": "nonce-fractional-number",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.nonce": 1.5
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.nonce"
+      }
+    },
+    {
+      "id": "nonce-whitespace",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.nonce": " 7"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.nonce"
+      }
+    },
+    {
+      "id": "nonce-empty",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.nonce": ""
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.nonce"
+      }
+    },
+    {
+      "id": "nonce-bad-hex",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.nonce": "0xgg"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.nonce"
+      }
+    },
+    {
+      "id": "nonce-uint256-overflow",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.nonce": "115792089237316195423570985008687907853269984665640564039457584007913129639936"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.nonce"
+      }
+    },
+    {
+      "id": "nonce-hex-uint256-overflow",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.nonce": "0x10000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.nonce"
+      }
+    },
+    {
+      "id": "nonce-unsafe-number",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.nonce": 9007199254740992
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.nonce"
+      }
+    },
+    {
+      "id": "deadline-negative-string",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.deadline": "-1"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.deadline"
+      }
+    },
+    {
+      "id": "deadline-negative-number",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.deadline": -1
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.deadline"
+      }
+    },
+    {
+      "id": "deadline-fractional-number",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.deadline": 1.5
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.deadline"
+      }
+    },
+    {
+      "id": "deadline-whitespace",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.deadline": " 7"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.deadline"
+      }
+    },
+    {
+      "id": "deadline-empty",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.deadline": ""
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.deadline"
+      }
+    },
+    {
+      "id": "deadline-bad-hex",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.deadline": "0xgg"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.deadline"
+      }
+    },
+    {
+      "id": "deadline-uint256-overflow",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.deadline": "115792089237316195423570985008687907853269984665640564039457584007913129639936"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.deadline"
+      }
+    },
+    {
+      "id": "deadline-hex-uint256-overflow",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.deadline": "0x10000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.deadline"
+      }
+    },
+    {
+      "id": "deadline-unsafe-number",
+      "group": "message_error",
+      "set": {
+        "typed_data.message.deadline": 9007199254740992
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.deadline"
+      }
+    },
+    {
+      "id": "deadline-string-9007199254740992",
+      "group": "time_range",
+      "set": {
+        "typed_data.message.deadline": "9007199254740992"
+      },
+      "expected": {
+        "error_kind": "typed_deadline_out_of_range",
+        "error_path": "typed_data.message.deadline"
+      }
+    },
+    {
+      "id": "deadline-string-9007199254740993",
+      "group": "time_range",
+      "set": {
+        "typed_data.message.deadline": "9007199254740993"
+      },
+      "expected": {
+        "error_kind": "typed_deadline_out_of_range",
+        "error_path": "typed_data.message.deadline"
+      }
+    },
+    {
+      "id": "deadline-string-18446744073709551615",
+      "group": "time_range",
+      "set": {
+        "typed_data.message.deadline": "18446744073709551615"
+      },
+      "expected": {
+        "error_kind": "typed_deadline_out_of_range",
+        "error_path": "typed_data.message.deadline"
+      }
+    },
+    {
+      "id": "deadline-string-18446744073709551616",
+      "group": "time_range",
+      "set": {
+        "typed_data.message.deadline": "18446744073709551616"
+      },
+      "expected": {
+        "error_kind": "typed_deadline_out_of_range",
+        "error_path": "typed_data.message.deadline"
+      }
+    },
+    {
+      "id": "deadline-string-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "group": "time_range",
+      "set": {
+        "typed_data.message.deadline": "115792089237316195423570985008687907853269984665640564039457584007913129639935"
+      },
+      "expected": {
+        "error_kind": "typed_deadline_out_of_range",
+        "error_path": "typed_data.message.deadline"
+      }
+    },
+    {
+      "id": "owner-requested-signer-mismatch",
+      "group": "consistency",
+      "set": {
+        "typed_data.message.owner": "0x111122223333444455556666777788889999abcd"
+      },
+      "expected": {
+        "error_kind": "typed_requested_signer_mismatch",
+        "error_path": "typed_data.message.owner"
+      }
+    },
+    {
+      "id": "routing-chain_id-mismatch",
+      "group": "routing_error",
+      "set": {
+        "routing": {
+          "chain_id": 2
+        }
+      },
+      "expected": {
+        "error_kind": "typed_routing_mismatch",
+        "error_path": "routing.chain_id"
+      }
+    },
+    {
+      "id": "routing-verifying_contract-mismatch",
+      "group": "routing_error",
+      "set": {
+        "routing": {
+          "verifying_contract": "0x111122223333444455556666777788889999abcd"
+        }
+      },
+      "expected": {
+        "error_kind": "typed_routing_mismatch",
+        "error_path": "routing.verifying_contract"
+      }
+    },
+    {
+      "id": "routing-primary_type-mismatch",
+      "group": "routing_error",
+      "set": {
+        "routing": {
+          "primary_type": "OtherPermit"
+        }
+      },
+      "expected": {
+        "error_kind": "typed_routing_mismatch",
+        "error_path": "routing.primary_type"
+      }
+    },
+    {
+      "id": "routing-witness_type-mismatch",
+      "group": "routing_error",
+      "set": {
+        "routing": {
+          "witness_type": "Witness"
+        }
+      },
+      "expected": {
+        "error_kind": "typed_routing_mismatch",
+        "error_path": "routing.witness_type"
+      }
+    },
+    {
+      "id": "routing-null",
+      "group": "routing_error",
+      "set": {
+        "routing": null
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "routing"
+      }
+    },
+    {
+      "id": "routing-array",
+      "group": "routing_error",
+      "set": {
+        "routing": []
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "routing"
+      }
+    },
+    {
+      "id": "routing-chain_id-malformed",
+      "group": "routing_error",
+      "set": {
+        "routing.chain_id": 0
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "routing.chain_id"
+      }
+    },
+    {
+      "id": "routing-verifying_contract-malformed",
+      "group": "routing_error",
+      "set": {
+        "routing.verifying_contract": "0x1234"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "routing.verifying_contract"
+      }
+    },
+    {
+      "id": "routing-primary_type-malformed",
+      "group": "routing_error",
+      "set": {
+        "routing.primary_type": "../Permit"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "routing.primary_type"
+      }
+    },
+    {
+      "id": "unregistered-contract",
+      "group": "routing_miss",
+      "set": {
+        "typed_data.domain.verifyingContract": "0x111122223333444455556666777788889999abcd"
+      },
+      "expected": {
+        "error_kind": "no_typed_data_mapper"
+      }
+    },
+    {
+      "id": "unregistered-chain",
+      "group": "routing_miss",
+      "set": {
+        "typed_data.domain.chainId": 2
+      },
+      "expected": {
+        "error_kind": "no_typed_data_mapper"
+      }
+    },
+    {
+      "id": "unregistered-primary-type",
+      "group": "routing_miss",
+      "set": {
+        "typed_data.primaryType": "OtherPermit"
+      },
+      "expected": {
+        "error_kind": "no_typed_data_mapper"
+      }
+    },
+    {
+      "id": "unregistered-contract-malformed-owner",
+      "group": "routing_miss",
+      "set": {
+        "typed_data.domain.verifyingContract": "0x111122223333444455556666777788889999abcd",
+        "typed_data.message.owner": "malformed"
+      },
+      "expected": {
+        "error_kind": "no_typed_data_mapper"
+      }
+    },
+    {
+      "id": "unregistered-contract-missing-owner",
+      "group": "routing_miss",
+      "set": {
+        "typed_data.domain.verifyingContract": "0x111122223333444455556666777788889999abcd"
+      },
+      "omit": [
+        "typed_data.message.owner"
+      ],
+      "expected": {
+        "error_kind": "no_typed_data_mapper"
+      }
+    },
+    {
+      "id": "routing-conflict-before-lookup",
+      "group": "precedence",
+      "set": {
+        "typed_data.domain.verifyingContract": "0x111122223333444455556666777788889999abcd",
+        "routing": {
+          "chain_id": 2
+        },
+        "typed_data.message.owner": "bad"
+      },
+      "expected": {
+        "error_kind": "typed_routing_mismatch",
+        "error_path": "routing.chain_id"
+      }
+    },
+    {
+      "id": "owner-mismatch-before-deadline-range",
+      "group": "precedence",
+      "set": {
+        "typed_data.message.owner": "0x111122223333444455556666777788889999abcd",
+        "typed_data.message.deadline": "9007199254740992"
+      },
+      "expected": {
+        "error_kind": "typed_requested_signer_mismatch",
+        "error_path": "typed_data.message.owner"
+      }
+    },
+    {
+      "id": "message-extra-field",
+      "group": "types_error",
+      "set": {
+        "typed_data.message.extra": "unexpected"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.message.extra"
+      }
+    },
+    {
+      "id": "types-field-order",
+      "group": "types_error",
+      "set": {
+        "typed_data.types.Permit": [
+          {
+            "name": "spender",
+            "type": "address"
+          },
+          {
+            "name": "owner",
+            "type": "address"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256"
+          },
+          {
+            "name": "deadline",
+            "type": "uint256"
+          }
+        ]
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.types.Permit.0.name"
+      }
+    },
+    {
+      "id": "types-field-type",
+      "group": "types_error",
+      "set": {
+        "typed_data.types.Permit": [
+          {
+            "name": "owner",
+            "type": "bytes20"
+          },
+          {
+            "name": "spender",
+            "type": "address"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256"
+          },
+          {
+            "name": "deadline",
+            "type": "uint256"
+          }
+        ]
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.types.Permit.0.type"
+      }
+    },
+    {
+      "id": "types-field-name",
+      "group": "types_error",
+      "set": {
+        "typed_data.types.Permit": [
+          {
+            "name": "holder",
+            "type": "address"
+          },
+          {
+            "name": "spender",
+            "type": "address"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256"
+          },
+          {
+            "name": "deadline",
+            "type": "uint256"
+          }
+        ]
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.types.Permit.0.name"
+      }
+    },
+    {
+      "id": "types-field-missing",
+      "group": "types_error",
+      "set": {
+        "typed_data.types.Permit": [
+          {
+            "name": "owner",
+            "type": "address"
+          },
+          {
+            "name": "spender",
+            "type": "address"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256"
+          }
+        ]
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.types.Permit"
+      }
+    },
+    {
+      "id": "types-field-extra",
+      "group": "types_error",
+      "set": {
+        "typed_data.types.Permit": [
+          {
+            "name": "owner",
+            "type": "address"
+          },
+          {
+            "name": "spender",
+            "type": "address"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256"
+          },
+          {
+            "name": "deadline",
+            "type": "uint256"
+          },
+          {
+            "name": "extra",
+            "type": "uint256"
+          }
+        ]
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.types.Permit"
+      }
+    },
+    {
+      "id": "types-missing-graph-reference",
+      "group": "types_error",
+      "set": {
+        "typed_data.types.Permit": [
+          {
+            "name": "owner",
+            "type": "MissingOwner"
+          },
+          {
+            "name": "spender",
+            "type": "address"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256"
+          },
+          {
+            "name": "deadline",
+            "type": "uint256"
+          }
+        ]
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.types.Permit.0.type"
+      }
+    },
+    {
+      "id": "types-primary-declaration-missing",
+      "group": "types_error",
+      "omit": [
+        "typed_data.types.Permit"
+      ],
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.types.Permit"
+      }
+    },
+    {
+      "id": "types-permit-array-required",
+      "group": "types_error",
+      "set": {
+        "typed_data.types.Permit": {}
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.types.Permit"
+      }
+    },
+    {
+      "id": "domain-version-number",
+      "group": "domain_error",
+      "set": {
+        "typed_data.domain.version": 1
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.version"
+      }
+    },
+    {
+      "id": "domain-version-null",
+      "group": "domain_error",
+      "set": {
+        "typed_data.domain.version": null
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.version"
+      }
+    },
+    {
+      "id": "domain-salt-short",
+      "group": "domain_error",
+      "set": {
+        "typed_data.domain.salt": "0x01"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.salt"
+      }
+    },
+    {
+      "id": "domain-salt-bad-hex",
+      "group": "domain_error",
+      "set": {
+        "typed_data.domain.salt": "0xgggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.salt"
+      }
+    },
+    {
+      "id": "domain-salt-null",
+      "group": "domain_error",
+      "set": {
+        "typed_data.domain.salt": null
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.salt"
+      }
+    },
+    {
+      "id": "domain-salt-number",
+      "group": "domain_error",
+      "set": {
+        "typed_data.domain.salt": 1
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.salt"
+      }
+    },
+    {
+      "id": "domain-declaration-wrong-type",
+      "group": "types_error",
+      "set": {
+        "typed_data.types.EIP712Domain": [
+          {
+            "name": "chainId",
+            "type": "uint8"
+          }
+        ]
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.types.EIP712Domain.0.type"
+      }
+    },
+    {
+      "id": "domain-declaration-value-missing",
+      "group": "types_error",
+      "set": {
+        "typed_data.types.EIP712Domain": [
+          {
+            "name": "version",
+            "type": "string"
+          }
+        ]
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.version"
+      }
+    },
+    {
+      "id": "domain-extra-field",
+      "group": "domain_error",
+      "set": {
+        "typed_data.domain.extra": "unrecognized"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.domain.extra"
+      }
+    },
+    {
+      "id": "types-cyclic-reference",
+      "group": "types_error",
+      "set": {
+        "typed_data.types.Permit": [
+          {
+            "name": "owner",
+            "type": "Cycle"
+          },
+          {
+            "name": "spender",
+            "type": "address"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256"
+          },
+          {
+            "name": "deadline",
+            "type": "uint256"
+          }
+        ],
+        "typed_data.types.Cycle": [
+          {
+            "name": "next",
+            "type": "Cycle"
+          }
+        ]
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data.types.Cycle"
+      }
+    },
+    {
+      "id": "opaque-context-preserved",
+      "group": "preservation",
+      "set": {
+        "context": {
+          "counter": 7,
+          "label": "opaque caller metadata"
+        }
+      },
+      "expected": {}
+    },
+    {
+      "id": "opaque-context-unsafe-number",
+      "group": "preservation",
+      "set": {
+        "context": {
+          "counter": 9007199254740992
+        }
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "context.counter"
+      }
+    },
+    {
+      "id": "reserved-original-json-field",
+      "group": "input_error",
+      "set": {
+        "typed_data_json": "caller collision"
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "typed_data_json"
+      }
+    },
+    {
+      "id": "unregistered-contract-unknown-domain",
+      "group": "precedence",
+      "set": {
+        "typed_data.domain.verifyingContract": "0x111122223333444455556666777788889999abcd",
+        "typed_data.domain.extra": "unrecognized"
+      },
+      "expected": {
+        "error_kind": "no_typed_data_mapper"
+      }
+    },
+    {
+      "id": "unregistered-contract-unsafe-context",
+      "group": "precedence",
+      "set": {
+        "typed_data.domain.verifyingContract": "0x111122223333444455556666777788889999abcd",
+        "context": {
+          "counter": 9007199254740992
+        }
+      },
+      "expected": {
+        "error_kind": "no_typed_data_mapper"
+      }
+    },
+    {
+      "id": "domain-declaration-order-preserved",
+      "group": "normal",
+      "set": {
+        "typed_data.types.EIP712Domain": [
+          {
+            "name": "verifyingContract",
+            "type": "address"
+          },
+          {
+            "name": "chainId",
+            "type": "uint256"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          }
+        ]
+      },
+      "expected": {}
+    },
+    {
+      "id": "opaque-context-fractional-number",
+      "group": "preservation",
+      "set": {
+        "context": {
+          "counter": 1.5
+        }
+      },
+      "expected": {
+        "error_kind": "invalid_typed_data",
+        "error_path": "context.counter"
+      }
+    },
+    {
+      "id": "unregistered-contract-fractional-message",
+      "group": "precedence",
+      "set": {
+        "typed_data.domain.verifyingContract": "0x111122223333444455556666777788889999abcd",
+        "typed_data.message.nonce": 1.5
+      },
+      "expected": {
+        "error_kind": "no_typed_data_mapper"
+      }
+    }
+  ]
+}

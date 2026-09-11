@@ -274,6 +274,54 @@ pub struct DeclarativeRouteTypedDataV3InputDto {
     pub submitted_at: u64,
 }
 
+/// Full-input v4 boundary. Keep the entire envelope as JSON so the validator
+/// can preserve original field spellings, values and optional-field omission.
+/// `typed_data` accepts an object or a JSON string; v3 callers are unaffected.
+#[derive(Debug, Deserialize)]
+#[serde(transparent)]
+pub struct DeclarativeRouteTypedDataV4InputDto(pub serde_json::Value);
+
+#[derive(Debug, Serialize)]
+pub struct DeclarativeRouteTypedDataV4ResultDto {
+    pub actions: Vec<policy_transition::action::Action>,
+    pub decoder_id: String,
+    pub request: TypedDataRequestV4Dto,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TypedDataRequestV4Dto {
+    pub original: serde_json::Value,
+    pub routing: TypedDataRoutingV4Dto,
+    pub validated: TypedDataValidatedV4Dto,
+    pub validation: TypedDataValidationV4Dto,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TypedDataRoutingV4Dto {
+    pub chain_id: u64,
+    pub verifying_contract: String,
+    pub primary_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub witness_type: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TypedDataValidatedV4Dto {
+    pub owner: String,
+    /// Requested signing wallet, never a recovered signature identity.
+    pub requested_signer: String,
+    pub submitter: String,
+    /// Signed nonce, distinct from the Action's external-lookup nonce stub.
+    pub signed_nonce: String,
+    pub deadline_seconds: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TypedDataValidationV4Dto {
+    /// Request consistency does not establish cryptographic validity.
+    pub signature_verification: &'static str,
+}
+
 /// Result returned by `declarative_route_request_v3_json` on success.
 ///
 /// `actions` is the `Vec<policy_transition::action::Action>` produced for the
