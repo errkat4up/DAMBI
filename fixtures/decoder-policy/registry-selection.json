@@ -1,0 +1,32 @@
+{
+  "manifest": {
+    "path": "manifests/standard/erc20/approve@1.0.0.json",
+    "sha256": "0x0a51874b0d42a209e61a79083821338b67c3968c27bda6eea48fc8a78ad5047e"
+  },
+  "tokens": [
+    {
+      "path": "tokens/1/0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.json",
+      "sha256": "0x571acc828446be14a613927cd9eebf2357a2187652f589c59b0cd94df94494a4",
+      "chain_id": 1,
+      "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    },
+    {
+      "path": "tokens/10/0x0b2c639c533813f4aa9d7837caf62653d097ff85.json",
+      "sha256": "0xf2d476ce3c1fec2668d7f4222a6c89364341dc4bce256dd20f39eee39f2b70d3",
+      "chain_id": 10,
+      "address": "0x0b2c639c533813f4aa9d7837caf62653d097ff85"
+    },
+    {
+      "path": "tokens/8453/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.json",
+      "sha256": "0x168634acba1665ce4f2dd060d842d5da75f515a07735a94ad062815d00d7324d",
+      "chain_id": 8453,
+      "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+    },
+    {
+      "path": "tokens/42161/0xaf88d065e77c8cc2239327c5edb3a432268e5831.json",
+      "sha256": "0x45fb6095d9ec290e6812e2328f77734509800fb571589bd43ab91481330479ad",
+      "chain_id": 42161,
+      "address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831"
+    }
+  ]
+}

@@ -1,0 +1,263 @@
+# Dambi: Decoder·정책 → Core → Adapters 개발 계획
+
+작성일: 2026-09-11. 기준: `main`의 `23eaaa6992f21fcd48ba6eb79762ec5db3ad6615`.
+문서 정리 시 브랜치: `feat/decoder`, 사용자 보고 빌드 대상 HEAD: `23eaaa6992f21fcd48ba6eb79762ec5db3ad6615`. D1 앞부분인 DEC-01은 구현됐고, **현재 Rust 소스 직접 빌드 후 연결 시험은 사용자 실행 보고 기준 30개 통과**다. 현재 소스와 WASM 산출물의 연결은 사용자 보고 기준으로 확인했다. DEC-02와 이후 구현 단계는 미착수이며 SDK 전체 소스·빌드 독립화는 미완료다.
+
+이번 DEC-01 검증 기록 정리에는 사용자 실행 제한이 아래 일반 진행 지침보다 우선한다. 작성자는 문서만 수정하고 빌드·시험·의존성 설치 및 Git add·commit·push·merge·reset·브랜치 변경을 실행하지 않는다. 사용자 실행 결과와 확인 대기 항목, 실행·기록 명령은 [DEC-01 README](../../fixtures/decoder-policy/README.md)에 남긴다.
+
+## 1. 목표와 진행 방식
+
+먼저 디코더가 요청을 정확한 동작(Action)으로 해석하고 정책이 그 동작을 의도대로 평가하는지 확인한다. 다음으로 이를 독립 Core 실행부에 연결한다. 마지막으로 실제 API·RPC 통신을 어댑터로 연결한다.
+
+```text
+feat/decoder: 원문 요청 → Decoder → Action → 정책 콘텐츠·manifest 검증
+feat/core:    검증된 번들 + 위 경로 → plan → 원본 Fact 검증 → evaluate/check
+feat/adapters:                   Policy API / RPC 등 실제 외부 데이터 연결
+```
+
+- 한 번에 아래 표의 한 소단계만 진행하고 검증·별도 커밋·결과 보고 후 그 작업을 끝낸다. 뒤 단계를 같은 변경에 섞지 않는다.
+- 같은 소단계도 요청 종류, Rust 추출, 정책 이동처럼 독립적인 목적이 있으면 커밋을 더 나눈다.
+- 일괄 구현 `b219617`은 백업 브랜치의 참고 자료다. 전체 cherry-pick으로 복구하지 않는다.
+- 정책 severity 변경, 지원 범위 축소, 공개 API 변경은 별도 변경점으로 설명한다. 미지원 반환 구현을 기능 지원 완료로 세지 않는다.
+- 실제 코드와 데이터가 검증한 범위만 완료로 표시한다. Mock 포트 시험과 실제 API/RPC 연동을 구분한다.
+- GitHub push·공개 발행은 실행하지 않는다. main 반영도 별도 통합 작업으로 관리한다.
+- 최종 SDK는 배포 패키지뿐 아니라 소스·테스트·빌드·CI도 기존 익스텐션/서버 디렉터리에 의존하지 않아야 한다. 아래 소스 이관 단계와 §7.1의 독립 빌드 검증이 모두 통과해야 SDK 전환 완료로 표시한다.
+
+## 2. 책임과 파일 경계
+
+| 영역 | 책임 | 주로 다룰 경로 |
+| --- | --- | --- |
+| Decoder | selector·chain·대상 주소·typed-data 매칭, ABI/emit 규칙, Action·오류 결과 | `registryV2/manifests/`, `registryV2/tokens/`, `registryV2/scripts/` |
+| 정책 콘텐츠 | Cedar 본문, manifest, 적용 조건·severity·필요 Fact 선언 | 현재 `browser-extension/default-bundles/day1-safety/`; D3에서 공유 원본으로 정리 |
+| 검증 사례 | 원문 요청·예상 Action·정책 ID·판정, 오류·경계 사례 | 신규 `fixtures/decoder-policy/` |
+| 기존 실행기 | Decoder·정책 정확성 검증에 우선 재사용. 확인된 결함만 좁게 수정 | `crates/policy-engine-wasm/src/declarative_exports.rs`, `action_eval_exports.rs` |
+| Core | 신뢰 검증, 순수 Rust 실행기, 계획 고정, Fact 의미 검증, Store/Cache, 최종 판정 | `packages/core/src/`, Core 단계의 신규 `crates/dambi-core/`, `crates/dambi-core-wasm/` |
+| Adapters | HTTP/RPC 요청·인증·응답 전달·취소·통신 오류 | Core 단계 후 신규 `packages/core/src/adapters/` |
+| API 서버 | 번들 발행·서명, 키 운영, 인증, Registry 동기화, 감사 저장 | 기존 API 담당 트랙 |
+
+정책 **콘텐츠**와 정책 **평가 엔진**을 분리한다. Cedar 실행과 최종 판정은 Core에 남는다. 서명·신선도·필수 Fact·계획 일치 검사도 Core 책임이다. 어댑터가 판단을 대신하거나 서명 검증을 완료했다고 주장하는 구조를 만들지 않는다.
+
+별도 npm 패키지나 저장소는 추가하지 않는다. 어댑터는 같은 SDK의 선택적 모듈로 시작하며, export 경로는 C1에서 정한다. WASM, Cache, 서명 검증, 테스트·CI를 각각 장기 브랜치로 쪼개지 않는다.
+
+### 2.1 최종 SDK 소스 구조와 이관 위치
+
+기존 `browser-extension/`, `crates/policy-server/` 경로는 이관 전 동작 확인에만 일시적으로 사용한다. 완성된 SDK의 소스·빌드 입력으로 남기지 않는다. 폴더 이름 변경만으로 완료하지 않고 import, Cargo 의존 경로, 정적 파일 읽기, 테스트 출력, 생성 스크립트까지 전환한다.
+
+아래는 **구현 예정 위치**다. 디렉터리 이관과 로직 변경은 별도 소단계로 진행하고 기존 Rust crate 이름·직렬화 형식은 우선 유지한다.
+
+| 대상 | 현재 위치 → SDK 소유 위치 | 담당 단계 |
+| --- | --- | --- |
+| 공통 상태 타입 | `crates/policy-server/asset-model/state/` → `crates/asset-model/state/` | C2-0a. crate 이름 `policy-state` 유지 |
+| Action 타입 | `crates/policy-server/asset-model/action/` → `crates/asset-model/action/` | C2-0a. crate 이름 `policy-action` 유지 |
+| 순수 상태 계산 로직 | `crates/policy-server/asset-model/transition/` → `crates/asset-model/transition/` | C2-0a. crate 이름 `policy-transition` 및 호환 re-export 유지. SDK에서 필요 없는 계산 모듈은 런타임 의존으로 강제하지 않음 |
+| Cedar schema 원본 | `schema/policy-schema/` → `crates/policy-engine/schema/policy-schema/` | C2-0c. 현재도 서버 밖 원본이며, 이번 이동은 Rust 패키지 내부 포함을 위한 작업 |
+| 정책 콘텐츠 | `browser-extension/default-bundles/day1-safety/` → `policy-bundles/day1-safety/` | D3. SDK 및 시험은 공유 원본이나 여기서 생성한 파일을 사용 |
+| SDK 회귀 시험 데이터 | 확장 dashboard/public 및 서버 seed 중 SDK에 필요한 사례 → `fixtures/sdk/`와 crate별 `tests/fixtures/` | D3·C2c. 배포 crate 시험에 필요한 데이터는 해당 crate 안에 포함 |
+| 순수 TS 입력 처리 | 확장 파일의 selector/typed 정규화 등 → `packages/core/src/internal/`의 해당 모듈 | C1·C5. 필요한 함수와 시험만 이관하고 확장 loader/storage는 가져오지 않음 |
+| Rust Decoder·평가 실행 | 기존 WASM export 내부 로직 → `crates/dambi-core/src/{decode,runtime}/` | C2a·C2b |
+| SDK WASM wrapper | 신규 `crates/dambi-core-wasm/` → `packages/core`가 소비할 WASM/glue | C5. 기존 `policy-engine-wasm/pkg`는 최종 SDK 빌드 입력이 아님 |
+| Decoder 정적 입력·생성 | `registryV2`의 승인된 source/token/고정 자료 → D4의 snapshot 생성 입력 및 SDK asset | D4·C5. 확장 기본 bundle 파일에서 역으로 복사하지 않음 |
+| SDK 빌드·검증 진입점 | 신규 `scripts/sdk/` | C5·§7.1. 확장 빌드/복사 스크립트를 호출하지 않음 |
+
+공통 코드의 원본은 한 곳에 둔다. 이관 후 과거 경로로 다시 fallback하거나 두 사본을 수동 관리하지 않는다. SDK 소스에 필요한 범위가 늘어나면 입력 목록에 추가하고 이관한다. `browser-extension/` 또는 서버 폴더 전체를 빌드 편의를 위해 포함하지 않는다.
+
+API 서버 구현·운영은 API 담당 영역이다. 공통 crate를 이동한 뒤 API가 이를 의존할 수는 있지만, SDK가 서버의 소스·설정·기동을 요구해서는 안 된다. 기존 애플리케이션 파일의 보관·삭제와 무관하게 SDK 소스 배포물과 필수 빌드 경로에서는 제외한다.
+
+## 3. 현재 코드에서 확인한 출발점
+
+1. `main`에는 이미 root workspace와 `core:typecheck`, `core:build`, scaffold CI가 있다. 이를 새로 만드는 단계는 생략한다.
+2. `@dambi/core`는 0.0.1 scaffold이며 `createCore()`는 throw한다. 실제 실행 연결은 Core 단계에서 한다.
+3. `registryV2/manifests/standard/erc20/approve@1.0.0.json`은 `tokens:erc20`으로 주소를 확장한다. source manifest를 완성된 decoder bundle로 오인하면 안 된다.
+4. `unlimited-approval-deny/policy.cedar`는 실제로 `@severity("warn")`이다. 기존 판정을 먼저 재현하고, 변경할 경우 별도 정책 변경으로 다룬다.
+5. 기존 baseline은 이미 만들어진 Action을 평가한다. 새 D1은 원문 calldata부터 디코딩해 그 앞 구간까지 검증한다.
+6. `registryV2`의 `check:manifest`는 현재 체크아웃에 없는 `crates/integration-tests` harness에 의존한다. 새 clone에서 재현되는 완료 조건으로 사용하지 않는다.
+7. 기존 `policy-rpc.ts`에는 `dambi.evaluate_v3` 서버 평가 경로가 있다. 원본 Fact를 반환하는 SDK 어댑터로 그대로 복사할 수 없다.
+8. 루트 `Cargo.toml`은 SDK와 서버 crate를 같은 workspace 구성원으로 둔다. `cargo -p`로 실행 대상만 고르면 서버 폴더가 없어도 된다고 가정할 수 없다. workspace 구성을 실제로 분리해야 한다.
+9. 일부 Rust 시험은 확장/서버 seed를 읽고, `est_roundtrip.rs`는 확장 경로에 fixture를 쓰기도 한다. SDK 시험 데이터와 출력 경로를 옮기고 검증 전후에 과거 디렉터리가 없는지 확인해야 한다.
+10. `policy-engine/src/schema/mod.rs`는 crate 밖 schema를 `include_str!`로 읽는다. npm 실행과 별개로 Rust 소스 패키지의 파일 포함 범위를 해결해야 한다.
+
+## 4. 1차 작업: feat/decoder
+
+### D1. ERC-20 approve 한 경로의 기준 시험
+
+상세 계획에서 D1을 **DEC-01(approve 디코딩)**과 **DEC-02(소비자 정책 연결)**로 나눈다. DEC-01 구현 및 현재 Rust 소스 재빌드 후 연결 시험은 사용자 실행 보고 기준 30개 통과, 실패·취소·건너뛰기 각 0개다. 현재 소스 → 직접 WASM 빌드 → hash 확인 → 실제 builder·digest·WASM 설치·디코딩 경로를 사용자 보고 기준으로 확인했다. DEC-02는 미착수이므로 D1 전체의 정책 평가 완료 조건까지 통과한 것은 아니다. 새 SDK 실행부나 네트워크 어댑터는 만들지 않는다.
+
+```text
+approve calldata
+  → 실제 Registry build-index의 토큰 주소 확장
+  → index 참조 해소·resolved bundle JCS digest 확인
+  → 기존 WASM에 decoder bundle 설치·라우팅
+  → Action 및 token/spender/amount 검증 [DEC-01]
+  → 기존 plan/evaluate에 실제 Cedar·manifest 전달
+  → 적용 정책 ID·severity·판정 검증 [DEC-02, 미착수]
+```
+
+DEC-01 구현 파일:
+
+- `fixtures/decoder-policy/README.md`, `registry-selection.json`, `approve.cases.json`, `approve.test.mjs`.
+- 최소 helper `fixtures/decoder-policy/helpers/build-registry.mjs`, `wasm-worker.mjs`.
+- 루트 `package.json`의 `decoder:test` 스크립트. 시험 내부에서 임시 Registry를 실제로 빌드한다.
+
+DEC-01은 실제 `registryV2/manifests/standard/erc20/approve@1.0.0.json`과 선언된 1·10·8453·42161 네 체인의 실제 USDC token 파일을 하나씩 선택한다. 원본 chain 범위를 줄이지 않는다. 임시 Registry와 `BUILD_INDEX_REGISTRY_ROOT`로 **실제 build-index를 `--strict-callkeys`로 실행**하고 실패 시 일부 산출물도 입력으로 사용하지 않는다. 산출물의 chain·주소·selector 범위와 resolved bundle의 JCS digest까지 확인한다. 이는 선택한 token 기준 시험이며 전체 SDK 커버리지는 아니다. Day-1 정책 입력은 후속 DEC-02에서 연결하며 CI 개편은 DEC-01에 포함하지 않는다.
+
+우선 Node 내장 `node:test`와 기존 WASM 초기화 방식을 사용해 새 테스트 프레임워크 도입을 피한다. 필요한 WASM은 crate를 직접 빌드한다. `scripts/wasm-build.sh`는 extension 경로에 복사하는 부수 동작이 있으므로 신규 시험의 필수 경로로 두지 않는다.
+
+완료 조건:
+
+- 승인량 0·일반 수량, MAX 승인, 허용 spender의 예외가 현재 정책대로 평가된다.
+- `uint256::MAX`, `uint160::MAX`, MAX 바로 아래 값의 차이를 실제 정책 기준으로 검증한다.
+- 정상 형식이지만 해당 approve decoder의 등록 조합 `(chain, to, selector)`에 포함되지 않는 요청이 이 decoder로 해석되지 않는지 확인한다. 이는 **디코더 매칭 범위** 시험이며 주소·체인이 위험하거나 잘못되었다는 판정이 아니다.
+- 기존 주소 파서가 거절하는 문자열, 비정상 hex, ABI 인자가 부족한 calldata는 **입력 형식/디코딩 오류** 사례로 구분한다. 새로운 주소 안전성 기준을 추가하지 않는다.
+- 매칭 실패, malformed, 정상 디코딩을 시험 결과에서 구분한다. SDK가 아직 없는 단계에서 최종 deny 처리를 구현했다고 주장하지 않는다.
+- WASM을 mock하지 않으며 브라우저 확장을 실행하지 않는다. 새 clone에서 준비·실행 명령으로 재현된다.
+
+주소·체인에 대한 세 가지 질문을 혼동하지 않는다.
+
+| 질문 | D1에서 확인하는 내용 |
+| --- | --- |
+| 입력을 파싱할 수 있는가? | 기존 주소/수치/hex/ABI parser의 형식 검사. 예: `not-an-address`는 기존 `invalid_input_json` 사례 |
+| 이 decoder가 처리할 조합인가? | 설치한 approve manifest의 chain·to·selector 매칭. 조합이 없으면 기존 `no_declarative_v3_mapper` 결과 확인 |
+| 이 주소나 동작이 위험한가? | 별도 정책·Fact의 판단 영역. 미등록 주소·체인을 위험하다고 추론하지 않음 |
+
+일반적인 악성 주소 목록, 실제 체인의 존재 여부, 계약 배포 여부, 사용자가 의도한 네트워크인지의 확인은 D1에 추가하지 않는다. 다른 decoder에는 주소 비종속 매칭도 있으므로 `(chain, to, selector)` 규칙을 모든 decoder에 강제하지 않는다. 각 manifest가 이미 선언한 매칭 방식을 기준으로 검증한다.
+
+### D2. 디코더 계약과 요청 종류별 커버리지
+
+- `registryV2`와 신규 `fixtures/decoder-policy/coverage.md`에 지원 chain·contract·selector·typed-data·하위 동작을 기록한다.
+- Action은 기존 Rust `ActionBody` 구조를 기준으로 한다. 새 독립 IR을 동시에 만들지 않는다.
+- 기존 `requires.adapter_capabilities`·`host_capabilities`·extension 호환 메타데이터가 실제로 요구하는 기능을 구분한다. SDK 지원 여부를 Chrome 확장 설치 여부나 확장 버전으로 판단하지 않도록 계약을 정리한다.
+- 수량 정밀도, 주소 정규화, chain 표현, decode 상태·오류 코드를 정리한다. Fact 계획에 필요한 값이 손실되지 않는지 검사한다.
+- approve 다음 transfer, typed permit, multicall을 **각각 별도 변경**으로 검증한다. 알려진 요청의 필수 필드 누락, typed-data schema 불일치, unknown multicall leg를 포함한다.
+- `untyped_signature`, `venue_order`도 지원 현황과 추가 요구사항을 조사한다. 구현 필요 항목을 후속 단계에 남길 때 명시하며, 임의로 v0.1 지원 범위에서 삭제하지 않는다.
+
+완료 조건: 선언된 커버리지마다 정상·경계·오류 사례가 있고, 미검증 항목과 실행 가능한 항목이 구분된다. 단순 unknown 반환을 해당 요청 지원으로 세지 않는다.
+
+### D3. 정책 콘텐츠와 manifest 정리
+
+- 초기 대상으로 Day-1 정책 묶음을 정하고, 새 공유 원본 경로 `policy-bundles/day1-safety/`로 정리한다. 이 이동은 decoder 기능 변경과 다른 커밋으로 한다.
+- SDK 시험과 정책 생성은 공유 원본을 소비하도록 바꾼다. 이관 중 기존 동작을 비교하는 데 필요한 소비 경로만 함께 조정하며, 확장 유지·빌드를 SDK 완료 조건으로 넣지 않는다. 런타임 구현과 UI 코드는 옮기지 않는다.
+- `fixtures/baseline-verdicts.json`이 참조하는 확장 public 정책 파일을 공유 원본에서 재현하는 경로로 전환한다. 내용이 같으면 정책 hash를 유지하며, 경로만 옮기기 위해 판정이나 기대값을 변경하지 않는다.
+- policy id·manifest id, `schema_version: 2`, trigger, severity, 필요한 Fact method·params·outputs·optional 선언을 확인한다.
+- 정적 정책과 외부 Fact가 필요한 정책을 구분하고, 각 정책에 적용/비적용·경계값·필수 데이터 누락 사례를 만든다.
+- 기존 정책을 이름에 맞추려고 warn→deny로 자동 변경하지 않는다. 정책 의도 수정은 별도 변경으로 설명한다.
+
+완료 조건: 정책 원본을 한 곳에서 관리하고 기존 소비 결과가 유지된다. SDK 정책 입력·fixture 생성이 확장 디렉터리를 읽지 않는다. 각 활성화 대상 정책은 유효한 manifest와 예상 판정 사례를 갖는다. 향후 A2에서 구현할 첫 Fact method와 원본 응답 계약을 여기서 선정한다.
+
+### D4. Core에 넘길 번들·고정 스냅샷
+
+- 신규 `contracts/core-v1/`에 payload/envelope 타입·Schema·정상/오류 fixture를 만든다. 정책의 7개 필드는 API 담당이 준 형태를 기준으로 한다.
+- B 방식 문자열 payload, `registry_ref: null`, 역할별 키 분리 방향을 반영한다. 실제 API 필드명·인증·운영값의 미확정 항목은 제안과 구분한다.
+- Registry 빌드의 **개별 bundle digest**와 SDK 고정 스냅샷 전체의 **로컬 digest**를 구분한다. 아직 없는 원격 root digest/ref를 만들어 계약으로 사용하지 않는다.
+- SDK에 포함할 snapshot 범위·생성 입력·정렬·digest·coverage 목록을 기록하고 재현 가능한 빌드 결과를 만든다. 전체 Registry를 무조건 번들링하거나 이전 백업의 세 토큰만 제품 범위로 확정하지 않는다.
+- 정책 payload와 decoder artifact는 신뢰 경로를 각각 기록한다. 내장 artifact 신뢰와 외부 decoder 서명을 혼동하지 않는다. 실제 Core 서명 검증 코드는 C3에서 구현한다.
+- snapshot 생성에 필요한 manifest·token·고정 프로토콜 자료와 생성기 의존 파일을 추적 가능한 목록으로 고정한다. SDK 소스 복사본 안에서 재생성할 수 있어야 한다. live RPC, 확장 산출물, 로컬 전용 cache/harness가 없으면 생성할 수 없는 대상은 미완료로 남긴다.
+
+완료 조건: Core 담당이 extension 디렉터리를 읽지 않고 사용할 정책·decoder 입력과 fixture를 얻는다. 같은 입력은 같은 정규화 바이트/digest를 만든다. 계약 구조 검증과 서명·의미 검증의 완료 여부를 구분한다.
+
+**Decoder 단계 인계물:** coverage 표, 재현 가능한 decoder artifact, Cedar/manifest 원본, API 계약 fixture, 원문 요청→Action→예상 판정 사례.
+
+## 5. 2차 작업: feat/core
+
+실제 API/RPC는 아직 연결하지 않는다. D 단계의 실제 정책·디코더와 서명된 테스트 번들, 기록된 원본 Fact를 반환하는 mock 포트로 실행부를 개발한다. 평가·암호 검증 자체는 mock하지 않는다.
+
+| 단계 | 변경 단위·주요 파일 | 완료 조건 |
+| --- | --- | --- |
+| C1 | `packages/core/src/{core,ports,types,index}.ts` 계열과 공개 `.d.ts` 검사 | 생성/함수·포트·타입 변경 전후가 명시됨. B bytes, 원본 Fact, 계획 handle, 오류·미지원 규칙을 계약으로 고정 |
+| C2-0a | 공통 `state/action/transition`을 `crates/asset-model/`로 이관 | crate 하나씩 이동·경로 수정·시험. 타입/직렬화/계산 로직 변경을 섞지 않음 |
+| C2-0b | SDK/API Cargo workspace 분리 및 manifest·lockfile 정리 | SDK workspace가 서버 폴더의 manifest를 읽지 않음. 검사 때만 manifest를 고치는 방식은 사용하지 않음 |
+| C2-0c | Cedar schema를 배포 crate 내부로 이동하고 include/목록 시험/생성 경로 수정 | schema 원본이 한 곳이고 Rust 패키지에 포함. 과거 root schema 또는 서버 static 파일로 fallback하지 않음 |
+| C2a | Decoder Registry를 신규 `crates/dambi-core/src/decode/`로 추출. 기존 WASM wrapper는 이관 중 회귀 비교용으로만 사용 | 전역 상태를 인스턴스별로 분리. D 단계 디코딩 결과와 독립 인스턴스 시험 통과 |
+| C2b | 순수 평가 로직을 `crates/dambi-core/src/runtime/`로 추출. DTO·기존 wrapper 정리 | 같은 Action·정책·Fact에 기존 결과 유지. 정책 severity 변경이나 전체 의존성 개편을 섞지 않음 |
+| C2c | SDK 필수 회귀 시험·seed·fixture와 읽기/쓰기 경로 이관 | 확장/서버 경로 접근 0. fixture 부재로 필수 시험이 skip되지 않음. 기존 디렉터리를 시험 중 다시 만들지 않음 |
+| C3 | `crates/dambi-core/src/bundle/`에 엄격한 parser/JCS/서명·의미 검증 | 원본 바이트·중복 키·BOM·Unicode·수치·크기·키 역할·scope/time/rollback을 실제 fixture로 검증 |
+| C4 | 검증된 정책/decoder snapshot 및 Store | 전체 검증 후 활성화. 외부 decoder는 별도 역할 서명, 내장은 고정 artifact 신뢰. 갱신 전 계획의 의미가 변하지 않음 |
+| C5 | Rust 계획/평가 + `dambi-core-wasm` + JS `plan/evaluate`, SDK 전용 빌드·시험 경로로 전환 | 요청 digest·해석 결과·정책/decoder·필수 Fact 고정. 타 인스턴스·변조·만료·재사용 거절, 원본 projection 한 번 수행. 기존 WASM/확장 빌드 산출물 참조 제거 |
+| C6 | JS `check`·포트 조율·timeout·Fact Cache·hook | mock 포트로 끝까지 실행. 필수 값·신선도·request/call ID·동시성 검증. 늦은 응답은 상태를 바꾸지 않음 |
+
+C1에서 기존 scaffold의 `PolicySource.payload: unknown`, Fact의 '투영 후 값', selector+chain만 받는 decoder 조회, 기존 plan/evaluate 시그니처와 새 계약의 차이를 명시한다. 초기 공개 표면을 무조건 유지하거나 무단으로 보조 export를 늘리지 않는다. 생성/수명주기 함수와 주요 함수 3종, 포트 2종, 주요 타입 3종 및 보조 타입을 정확히 구분한다.
+
+**C2-0b workspace 변경:** 루트 `Cargo.toml`을 SDK와 필요한 순수 공통 crate를 위한 workspace로 관리한다. `policy-db`, `policy-sync`, `policy-server`는 서버 측 별도 workspace/manifest로 분리하고 공통 crate의 새 위치를 의존하게 한다. 이동으로 의존 버전이 자동 갱신되지 않도록 manifest·lockfile을 함께 검토한다. SDK/API CI는 각각 자신의 workspace 명령을 사용한다. 기존 WASM wrapper는 비교 기간에만 사용하며 C5 전환 완료 시 최종 SDK workspace와 소스 입력 목록에서 제외한다.
+
+**C2-0c schema 변경:** 현재 중립 원본은 `schema/policy-schema/`다. 이를 `crates/policy-engine/schema/policy-schema/`로 옮기고 `src/schema/mod.rs`의 include 경로, schema 목록 시험, 관련 생성·소비 스크립트를 조정한다. 서버의 `static/policy-schema.json`을 SDK 원본으로 사용하거나 수동 복제하지 않는다.
+
+**C2c 시험 변경:** `fixtures/baseline-verdicts.*`, 기존 WASM의 `hl_exchange_deny_e2e.rs`, `est_roundtrip.rs` 등에서 SDK에 필요한 사례와 정적 입력을 인계한다. fixture 출력은 SDK 경로나 임시 디렉터리에 쓴다. 앱 UI 전용 시험은 SDK 시험과 구분하되, 필수 SDK 회귀 사례를 제외하거나 fixture 미존재 시 skip해서 검증을 통과시키지 않는다. 필수 case ID/실행 수를 기록해 누락을 확인한다.
+
+**C5 빌드 전환:** 기능 연결과 빌드 변경을 별도 소단계로 진행한다. 신규 `scripts/sdk/build-wasm.mjs`와 필요한 asset 생성 명령으로 `dambi-core-wasm`을 소스에서 빌드한다. root/package 스크립트, TS import·types, Node fixture, CI의 WASM 입력을 새 경로로 교체한다. SDK 명령은 `scripts/wasm-build.sh`, 확장 `postinstall/build`, 기존 `policy-engine-wasm/pkg`에 의존하지 않는다. root의 서버 기동 명령은 API 측 도구로 분리하고, SDK CI는 `createCore()` throw를 기대하는 scaffold 시험을 실제 실행 시험으로 교체한다.
+
+SDK CI 전환은 C5부터 실제 실행 경로를 검사하고 C6에서 mock 포트 기반 전체 동작까지 확장한다. 어댑터 작업 후에도 같은 독립 빌드 검증을 유지한다. 기존 경로로 실패를 우회하는 fallback은 남기지 않는다.
+
+C3의 정책 `expires_at: null`은 최대 나이를 무제한으로 만드는 뜻이 아니다. 최대 나이·clock skew·크기 제한은 명시적인 Core 지원 정책으로 기록한다. API와 합의되지 않은 값을 서버 계약으로 표현하지 않는다.
+
+C5–C6에서는 empty bundle, 매칭 정책 없음, 엔진 오류, 부분 디코딩, 필수 Fact 누락, 알려진 malformed 요청, 미지원 kind 각각의 결과를 명시한다. `warn`은 호스트 확인 필요, `enforcing`은 호스트의 선언이다. 실제 서명 요청과 평가 요청을 동일하게 유지하는 통합 지침도 작성한다.
+
+**Core 단계 인계물:** 실제 Native/WASM 실행 경로, 고정된 포트·타입, 테스트용 PolicySource/FactProvider, 보안·회귀 시험, 어댑터가 지켜야 할 오류·취소·데이터 계약, SDK 소유 workspace/소스 목록/빌드 명령. 기존 폴더가 없는 복사본에서 C6까지의 시험·빌드가 통과한 결과를 포함한다. 최종 배포 형식 검증은 §7.1에서 수행한다.
+
+## 6. 3차 작업: feat/adapters
+
+C 단계 이후에 브랜치를 만든다. HTTP와 Fact 어댑터는 SDK의 선택적 모듈로 구현하며, Core는 이 구현을 강제로 참조하지 않는다.
+
+| 단계 | 구현 범위 | 완료 조건 |
+| --- | --- | --- |
+| A1 Policy API | `packages/core/src/adapters/policy-api.ts`: URL·인증·HTTP·크기/취소·엄격한 wrapper 파싱·전달 | payload 문자열의 바이트를 재직렬화하지 않음. 실제 서버의 필드·헤더·kid·서명으로 공동 시험. 통신 장애와 잘못된 번들을 구분 |
+| A2 첫 Fact provider | `fact-provider.ts`, 필요한 `evm-rpc.ts` 등: D3에서 선정한 한 method | 실제 raw 데이터에 source·observedAt·필요 block 정보를 연결. call ID별 반환·체인 라우팅·timeout·RPC 오류·필수 누락 검증. 최종 정책 판정을 대신 반환하지 않음 |
+| A3 추가 method·전체 연결 | 필요한 method만 별도 변경으로 확장, `examples/`의 고객 앱 예제 | 원문 요청→실제 정책 API→Core plan→실제 Fact→Core verdict 재현. Node/브라우저에서 확장 없이 실행 |
+
+`oracle.usd_value` 같은 기존 이름만 보고 구현된 데이터 소스가 있다고 가정하지 않는다. 정책 서버의 `dambi.evaluate_v3` 최종 평가 결과는 원본 Fact의 대체물이 아니다. 실제 데이터 API가 없으면 해당 method의 연동을 미완료로 남기고 필요한 서버 계약을 구체적으로 전달한다.
+
+API 담당에게 필요한 입력: 실제 B wrapper와 서명 예제, 인증 헤더/키 절차, staging/production URL, 공개 검증 키·kid, 갱신/만료 정책. 이것이 없어도 D·C와 A의 mock HTTP 시험은 진행할 수 있지만 실제 통합 완료로 표기하지 않는다. 감사 전송이 필요하면 별도 transport로 연결하되 기본 평가가 감사 서버 가용성에 종속되지 않게 한다.
+
+## 7. 마지막 통합·패키징
+
+새 장기 브랜치를 만들지 않고 해당 단계에서 필요한 작은 변경으로 진행한다.
+
+- Core 실행 연결 시부터 실제 WASM 크기를 측정한다. 최종 목표는 raw < 6 MiB, runtime gzip 합계 ≤ 1,500,000 B이며 미달성 값을 통과로 바꾸지 않는다.
+- 런타임과 관계없는 의존성 제거, Cargo 내부 스키마 포함, crate 이름/발행 순서는 각각 확인 후 별도 변경한다. 기존 백업의 광범위한 import 교체를 자동 적용하지 않는다.
+- ESM/CJS·`.d.ts`·WASM/glue·필요 decoder asset을 실제 tarball로 묶는다. 기존 scaffold의 `npm pack --dry-run`만으로 설치 성공을 주장하지 않는다.
+- 저장소 밖 Node ESM/CJS 소비자, 실제 브라우저, Native Cargo 패키지의 독립 실행을 확인한다.
+- npm/Cargo 발행, 실제 API 운영 검증, GitHub 전체 CI의 통과 여부를 로컬 시험과 구분해 릴리스 체크리스트에 기록한다.
+
+### 7.1 필수 완료 조건: SDK 소스만으로 빌드·시험·패키징
+
+**패키지가 실행되는 것만으로 완료하지 않는다. SDK 소스에서 다시 만드는 과정도 독립적이어야 한다.** 다음 검증은 선택 사항이 아닌 SDK 전환·릴리스 필수 조건이다.
+
+신규 구현할 도구:
+
+- `scripts/sdk/sdk-source-files.json`: SDK 소스·workspace 설정·lockfile·schema·정책/decoder 원본·필수 fixture·라이선스·도구 설정의 포함 목록. 목록 밖 원본 저장소 파일을 참조하면 실패한다.
+- `scripts/sdk/check-boundaries.mjs`: 실제 TS import, Cargo path/include, fixture 경로, 빌드·asset 생성 입력을 점검한다. 문서의 과거 코드 링크나 주석 언급과 실행 의존은 구분한다.
+- `scripts/sdk/check-source-isolation.mjs`: 아래 절차를 임시 디렉터리에서 실행한다. 원본 작업 폴더를 삭제·이동하지 않는다.
+- root의 `sdk:verify:isolated`: 위 검사를 실행하는 신규 명령. **현재 구현돼 있거나 통과한 명령이 아니다.**
+
+검증 절차:
+
+1. 추적되는 SDK 원본만 별도 임시 디렉터리에 복사한다. 최종 SDK workspace manifest를 그대로 사용하며 검사 과정에서 members나 dependency를 임의로 빼서 성공시키지 않는다.
+2. `browser-extension/`, `crates/policy-server/`, 기존 `crates/policy-engine-wasm/`은 포함하지 않는다. 기존 `dist`, WASM `pkg`, `target`, `node_modules`, 생성된 Registry index/bundle 출력도 가져오지 않는다. 필요한 원본·고정 입력은 목록에 명시한다.
+3. 원본 저장소로 이어지는 절대 경로·symlink·외부 path dependency가 없는지 확인한다. 패키지 관리자가 격리 디렉터리 내부에 만드는 정상 연결은 허용한다. SDK가 사용하는 로컬 소스·데이터 경로는 모두 복사본 안에서 해소돼야 한다.
+4. 고정한 toolchain/lockfile에 따라 의존성을 설치한다. 일반 의존성 다운로드는 허용하되, 과거 빌드 artifact·compiler 산출물·로컬 전용 테스트 harness를 빌드 대체물로 사용하지 않는다. `SKIP_WASM_BUILD`로 소스 빌드를 건너뛰지 않는다.
+5. 정적 입력에서 decoder/policy asset을 생성하고, 새 Native/WASM 출력 디렉터리에서 Rust → WASM/glue → TS/ESM/CJS/타입을 빌드한다. 원본이 부족하거나 live RPC/cache가 있어야만 생성되면 실패로 남긴다.
+6. Native 및 Node + 실제 WASM의 필수 SDK 사례를 실행한다. 필수 fixture 누락, 필수 사례 0개/skip은 통과가 아니다. mock 외부 포트를 쓰더라도 실제 해석·서명 검증·평가는 실행한다.
+7. 실제 npm tarball을 만든 뒤 저장소 밖 새 소비자 프로젝트에 설치한다. ESM/CJS import, `.d.ts`, WASM/asset 로딩, 실제 `check` 호출 및 필요한 브라우저 소비 시험을 확인한다. workspace link나 SDK의 기존 dist를 직접 읽지 않는다.
+8. 배포할 Rust crate의 package 파일 목록과 unpack한 소스의 경로를 확인한다. schema·fixture·필요 자산이 포함되고 외부 workspace 파일을 읽지 않아야 한다. 아직 발행되지 않은 자체 의존 crate는 로컬 임시 registry 또는 unpack한 패키지들로 검증 환경을 구성하며 원본 source tree로 연결하지 않는다. 공개 registry 의존성 해소 검증과 로컬 사전 검증의 상태는 구분한다.
+9. 빌드·시험이 끝난 후에도 과거 디렉터리가 없고 원본 저장소를 참조하지 않는지 재검사한다. 과거 경로에 fixture나 WASM을 다시 생성하면 실패다.
+
+CI에는 이 명령을 소스부터 실행하는 SDK 전용 job을 둔다. extension/server job의 성공, 그 job이 올린 WASM 파일, dashboard fixture 생성이 선행 조건이어서는 안 된다. Core 단계에서는 해당 시점의 지원 사례로 먼저 통과시키고, 어댑터·패키징 단계에서 릴리스 대상 전체 사례로 확장한다.
+
+완료 증거: 포함한 source 목록, 사용한 toolchain/lockfile, Native/WASM 시험 결과와 필수 case 수, npm/Cargo package 포함 목록 및 소비자 실행 결과, 빌드 전후 경계 검사 결과. 실패 항목이 있으면 SDK 소스·빌드 독립화는 미완료다.
+
+## 8. 브랜치 인계와 보고 단위
+
+현재는 `feat/decoder`만 작업한다. `feat/core`는 출발점에서 유지하고 `feat/adapters`는 아직 만들지 않는다.
+
+Decoder 인계 조건을 충족하면 검토된 decoder 이력을 Core에 통합한다. 아직 main에 반영되지 않았다면 변경 없는 `feat/core`를 `feat/decoder`까지 fast-forward해 이어갈 수 있다. Core 단계 이후 `feat/adapters`는 검토된 Core 커밋에서 만든다. 비교 기준을 각각 직전 단계로 잡아 기존 변경이 새 리뷰에 중복되지 않게 한다. 브랜치가 분기되면 force/reset으로 맞추지 않고 실제 이력을 확인한다.
+
+각 소단계의 보고 형식:
+
+1. 이번 단계와 변경 목적.
+2. 변경 파일과 기존 동작 대비 차이.
+3. 실행한 검증 및 실제 통과/실패.
+4. 지원 범위·미완료·다음 작업.
+5. 로컬 커밋과 push 여부.
+6. 이관 작업이면 제거한 기존 경로 의존과 아직 남은 임시 의존, 독립 빌드 검증 상태.
+
+**현재는 DEC-01 검증 기록 정리와 커밋 준비 단계다.** 구현 및 현재 Rust 소스 재빌드 후 연결 시험은 사용자 제공 로그 기준 30개 통과, 실패·취소·건너뛰기 각 0개이며 작성자가 직접 실행한 결과가 아니다. 사용자 제공 실행 전후 Git 상태에서 HEAD는 `23eaaa6992f21fcd48ba6eb79762ec5db3ad6615`로 같고 Rust 소스·빌드 설정 변경은 표시되지 않았다. 도구 조회 결과는 Rust/Cargo 1.95.0, wasm-pack 0.14.0, Node 25.9.0, npm 11.12.1이다. 빌드 성공 표식 `build_success_utc=2026-09-11T06:57:10Z`, WASM SHA-256과 재시험 로그를 [README](../../fixtures/decoder-policy/README.md)에 기록했다. 재시험은 `2026-09-11T06:57:40Z` 시작, `2026-09-11T06:57:42Z` 성공 표식, `duration_ms=1290.958958`이며 최초 시험 30개 통과(`duration_ms=2050.144875`)와 별도 실행이다.
+
+현재 소스 → 직접 WASM 빌드 → hash 확인 → 동일 경로의 WASM 연결 시험은 사용자 실행 보고 기준으로 확인했다. 빌드 시작 시각·상세 빌드 로그·전체 빌드 명령 출력·실제 임시 `CARGO_TARGET_DIR` 경로는 기록 보완 대기이며, 이를 채우기 위해 빌드·시험을 다시 요구하지 않는다. 작성자는 빌드·시험·Git add·commit을 실행하지 않았다. DEC-02는 미착수이며 자동 진행하지 않는다. 소스 이관과 SDK 전체 소스·빌드 독립화도 미완료다. D1 전체 완료나 Core 재구현 착수로 확대해 해석하지 않는다.

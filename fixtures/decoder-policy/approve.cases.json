@@ -1,0 +1,495 @@
+{
+  "registry_source": "manifests/standard/erc20/approve@1.0.0.json",
+  "defaults": {
+    "submitter": "0x000000000000000000000000000000000000aaaa",
+    "submitted_at": 1700000000,
+    "value": "0",
+    "gas_limit": "200000",
+    "gas_price": "20000000000",
+    "nonce": 1
+  },
+  "cases": [
+    {
+      "id": "amount-zero",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected": {
+        "decoder_id": "standard/erc20/approve@1.0.0",
+        "body": {
+          "domain": "token",
+          "action": "erc20_approve",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:1",
+              "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            }
+          },
+          "spender": "0x00000000000000000000000000000000deadbeef",
+          "amount": "0x0"
+        }
+      }
+    },
+    {
+      "id": "amount-normal",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "decoder_id": "standard/erc20/approve@1.0.0",
+        "body": {
+          "domain": "token",
+          "action": "erc20_approve",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:1",
+              "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            }
+          },
+          "spender": "0x00000000000000000000000000000000deadbeef",
+          "amount": "0xf4240"
+        }
+      }
+    },
+    {
+      "id": "amount-uint160-max",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef000000000000000000000000ffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": {
+        "decoder_id": "standard/erc20/approve@1.0.0",
+        "body": {
+          "domain": "token",
+          "action": "erc20_approve",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:1",
+              "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            }
+          },
+          "spender": "0x00000000000000000000000000000000deadbeef",
+          "amount": "0xffffffffffffffffffffffffffffffffffffffff"
+        }
+      }
+    },
+    {
+      "id": "amount-uint256-max",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": {
+        "decoder_id": "standard/erc20/approve@1.0.0",
+        "body": {
+          "domain": "token",
+          "action": "erc20_approve",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:1",
+              "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            }
+          },
+          "spender": "0x00000000000000000000000000000000deadbeef",
+          "amount": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        }
+      }
+    },
+    {
+      "id": "amount-uint256-max-minus-one",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe"
+      },
+      "expected": {
+        "decoder_id": "standard/erc20/approve@1.0.0",
+        "body": {
+          "domain": "token",
+          "action": "erc20_approve",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:1",
+              "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            }
+          },
+          "spender": "0x00000000000000000000000000000000deadbeef",
+          "amount": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe"
+        }
+      }
+    },
+    {
+      "id": "chain-10-normal",
+      "input": {
+        "chain_id": 10,
+        "to": "0x0b2c639c533813f4aa9d7837caf62653d097ff85",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "decoder_id": "standard/erc20/approve@1.0.0",
+        "body": {
+          "domain": "token",
+          "action": "erc20_approve",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:10",
+              "address": "0x0b2c639c533813f4aa9d7837caf62653d097ff85"
+            }
+          },
+          "spender": "0x00000000000000000000000000000000deadbeef",
+          "amount": "0xf4240"
+        }
+      }
+    },
+    {
+      "id": "chain-8453-normal",
+      "input": {
+        "chain_id": 8453,
+        "to": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "decoder_id": "standard/erc20/approve@1.0.0",
+        "body": {
+          "domain": "token",
+          "action": "erc20_approve",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:8453",
+              "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+            }
+          },
+          "spender": "0x00000000000000000000000000000000deadbeef",
+          "amount": "0xf4240"
+        }
+      }
+    },
+    {
+      "id": "chain-42161-normal",
+      "input": {
+        "chain_id": 42161,
+        "to": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "decoder_id": "standard/erc20/approve@1.0.0",
+        "body": {
+          "domain": "token",
+          "action": "erc20_approve",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:42161",
+              "address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831"
+            }
+          },
+          "spender": "0x00000000000000000000000000000000deadbeef",
+          "amount": "0xf4240"
+        }
+      }
+    },
+    {
+      "id": "address-mixed-case",
+      "input": {
+        "chain_id": 1,
+        "to": "0xA0b86991C6218B36c1d19D4a2E9Eb0CE3606EB48",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000dEaDbEeF00000000000000000000000000000000000000000000000000000000000f4240",
+        "submitter": "0x000000000000000000000000000000000000AaAa"
+      },
+      "expected": {
+        "decoder_id": "standard/erc20/approve@1.0.0",
+        "body": {
+          "domain": "token",
+          "action": "erc20_approve",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:1",
+              "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            }
+          },
+          "spender": "0x00000000000000000000000000000000deadbeef",
+          "amount": "0xf4240"
+        }
+      }
+    },
+    {
+      "id": "zero-spender",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b3000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "decoder_id": "standard/erc20/approve@1.0.0",
+        "body": {
+          "domain": "token",
+          "action": "erc20_approve",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:1",
+              "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            }
+          },
+          "spender": "0x0000000000000000000000000000000000000000",
+          "amount": "0xf4240"
+        }
+      }
+    },
+    {
+      "id": "unselected-token-address",
+      "input": {
+        "chain_id": 1,
+        "to": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "error_kind": "no_declarative_v3_mapper"
+      }
+    },
+    {
+      "id": "unregistered-chain",
+      "input": {
+        "chain_id": 137,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "error_kind": "no_declarative_v3_mapper"
+      }
+    },
+    {
+      "id": "registered-chain-wrong-token-combination",
+      "input": {
+        "chain_id": 10,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "error_kind": "no_declarative_v3_mapper"
+      }
+    },
+    {
+      "id": "unregistered-selector",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0xdeadbeef",
+        "calldata": "0xdeadbeef00000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "error_kind": "no_declarative_v3_mapper"
+      }
+    },
+    {
+      "id": "invalid-to-address",
+      "input": {
+        "chain_id": 1,
+        "to": "not-an-address",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "invalid-submitter-address",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000000f4240",
+        "submitter": "not-an-address"
+      },
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "invalid-chain-negative",
+      "input": {
+        "chain_id": -1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "invalid-chain-string",
+      "input": {
+        "chain_id": "1",
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "invalid-hex-character",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000000f424g"
+      },
+      "expected": {
+        "error_kind": "invalid_calldata"
+      }
+    },
+    {
+      "id": "invalid-hex-odd-length",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000000f424"
+      },
+      "expected": {
+        "error_kind": "invalid_calldata"
+      }
+    },
+    {
+      "id": "selector-only",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b3"
+      },
+      "expected": {
+        "error_kind": "decode_failed"
+      }
+    },
+    {
+      "id": "missing-amount-word",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef"
+      },
+      "expected": {
+        "error_kind": "decode_failed"
+      }
+    },
+    {
+      "id": "partial-amount-word",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000000f42"
+      },
+      "expected": {
+        "error_kind": "decode_failed"
+      }
+    },
+    {
+      "id": "selector-mismatch-registered-lookup",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0x095ea7b3",
+        "calldata": "0xdeadbeef00000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "error_kind": "decode_failed"
+      }
+    },
+    {
+      "id": "selector-mismatch-unregistered-lookup",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0xdeadbeef",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000000f4240"
+      },
+      "expected": {
+        "error_kind": "no_declarative_v3_mapper"
+      }
+    },
+    {
+      "id": "trailing-one-byte",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000000f4240ab"
+      },
+      "expected": {
+        "decoder_id": "standard/erc20/approve@1.0.0",
+        "body": {
+          "domain": "token",
+          "action": "erc20_approve",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:1",
+              "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            }
+          },
+          "spender": "0x00000000000000000000000000000000deadbeef",
+          "amount": "0xf4240"
+        }
+      }
+    },
+    {
+      "id": "trailing-full-word",
+      "input": {
+        "chain_id": 1,
+        "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "selector": "0x095ea7b3",
+        "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000000f4240deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+      },
+      "expected": {
+        "decoder_id": "standard/erc20/approve@1.0.0",
+        "body": {
+          "domain": "token",
+          "action": "erc20_approve",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:1",
+              "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            }
+          },
+          "spender": "0x00000000000000000000000000000000deadbeef",
+          "amount": "0xf4240"
+        }
+      }
+    }
+  ]
+}
