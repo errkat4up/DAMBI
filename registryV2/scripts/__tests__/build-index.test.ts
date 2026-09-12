@@ -6,21 +6,20 @@
  * REGISTRY_ROOT is otherwise script-location-relative, NOT cwd-relative, so a
  * plain `cd` into a temp dir would read the real registryV2/).
  *
- * registryV2 has no vitest of its own — run from `browser-extension/` with its
- * bundled vitest, pointing `--root` at registryV2:
+ * Uses Node's test runner and registryV2's existing tsx dependency:
  *
- *   cd browser-extension
- *   node .yarn/releases/yarn-4.14.1.cjs vitest run \
- *     --root ../registryV2 scripts/__tests__/build-index.test.ts
+ *   cd registryV2
+ *   node --import tsx --test scripts/__tests__/build-index.test.ts
  */
 
+import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, it } from "node:test";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -58,9 +57,9 @@ function scaffold(manifests: Record<string, unknown>): string {
 }
 
 /** Run the real build-index.ts against a temp REGISTRY_ROOT. Never throws. */
-function runBuild(registryRoot: string): RunResult {
+function runBuild(registryRoot: string, args: string[] = []): RunResult {
   try {
-    const stdout = execFileSync(TSX_BIN, [BUILD_INDEX], {
+    const stdout = execFileSync(TSX_BIN, [BUILD_INDEX, ...args], {
       env: { ...process.env, BUILD_INDEX_REGISTRY_ROOT: registryRoot },
       stdio: "pipe",
       encoding: "utf8",
@@ -205,12 +204,13 @@ describe("build-index by-typed-data emission", () => {
   it("(1) emits one by-typed-data entry per chain for a Permit2-shaped manifest", () => {
     const root = track(scaffold({ "permitSingle.json": permit2Manifest() }));
     const res = runBuild(root);
-    expect(res.status, `stderr:\n${res.stderr}`).toBe(0);
+    assert.equal(res.status, 0, `stderr:\n${res.stderr}`);
 
     const files = listTypedData(root);
     // Order-independent: one entry per chain (emit order = chain_to_addresses
     // insertion order; listTypedData() applies its own .sort()).
-    expect([...files].sort()).toEqual(
+    assert.deepEqual(
+      [...files].sort(),
       [
         `1__${PERMIT2}__PermitSingle.json`,
         `10__${PERMIT2}__PermitSingle.json`,
@@ -221,11 +221,11 @@ describe("build-index by-typed-data emission", () => {
 
     // entry shape: matched + bundle_id + manifest_path + bundle_sha256 + bundle
     const entry = JSON.parse(readFileSync(join(typedDataDir(root), `1__${PERMIT2}__PermitSingle.json`), "utf8"));
-    expect(entry.matched).toBe(true);
-    expect(entry.bundle_id).toBe("uniswap/permit2/permitSingle@1.0.0");
-    expect(entry.manifest_path).toBe("manifests/permitSingle.json");
-    expect(typeof entry.bundle_sha256).toBe("string");
-    expect(entry.bundle.match.typed_data.primary_type).toBe("PermitSingle");
+    assert.equal(entry.matched, true);
+    assert.equal(entry.bundle_id, "uniswap/permit2/permitSingle@1.0.0");
+    assert.equal(entry.manifest_path, "manifests/permitSingle.json");
+    assert.equal(typeof entry.bundle_sha256, "string");
+    assert.equal(entry.bundle.match.typed_data.primary_type, "PermitSingle");
   });
 
   it("(2) escapes a colon in primaryType to '__' in the filename", () => {
@@ -249,9 +249,9 @@ describe("build-index by-typed-data emission", () => {
     };
     const root = track(scaffold({ "usdSend.json": manifest }));
     const res = runBuild(root);
-    expect(res.status, `stderr:\n${res.stderr}`).toBe(0);
+    assert.equal(res.status, 0, `stderr:\n${res.stderr}`);
 
-    expect(listTypedData(root)).toEqual([`999__${vc}__HyperliquidTransaction__UsdSend.json`]);
+    assert.deepEqual(listTypedData(root), [`999__${vc}__HyperliquidTransaction__UsdSend.json`]);
   });
 
   it("(2b) rejects path-unsafe typed-data primary and witness names", () => {
@@ -269,9 +269,9 @@ describe("build-index by-typed-data emission", () => {
     });
     const rootA = track(scaffold({ "bad-primary.json": primaryPath }));
     const resA = runBuild(rootA);
-    expect(resA.status).not.toBe(0);
-    expect(resA.stderr + resA.stdout).toMatch(/primary_type.*path-safe/);
-    expect(listTypedData(rootA)).toEqual([]);
+    assert.notEqual(resA.status, 0);
+    assert.match(resA.stderr + resA.stdout, /primary_type.*path-safe/);
+    assert.deepEqual(listTypedData(rootA), []);
 
     const witnessPath = permit2Manifest({
       match: {
@@ -292,9 +292,9 @@ describe("build-index by-typed-data emission", () => {
     });
     const rootB = track(scaffold({ "bad-witness.json": witnessPath }));
     const resB = runBuild(rootB);
-    expect(resB.status).not.toBe(0);
-    expect(resB.stderr + resB.stdout).toMatch(/witness_type.*path-safe/);
-    expect(listTypedData(rootB)).toEqual([]);
+    assert.notEqual(resB.status, 0);
+    assert.match(resB.stderr + resB.stdout, /witness_type.*path-safe/);
+    assert.deepEqual(listTypedData(rootB), []);
   });
 
   it("(3) rejects a manifest whose typed_data.verifying_contract is absent from chain_to_addresses", () => {
@@ -315,14 +315,14 @@ describe("build-index by-typed-data emission", () => {
     const root = track(scaffold({ "bad.json": manifest }));
     const res = runBuild(root);
 
-    expect(res.status).not.toBe(0);
+    assert.notEqual(res.status, 0);
     // Validation message is on STDERR (process.exit(1) after console.error),
     // NOT on the thrown Error.message. Assert the stderr text.
     const combined = res.stderr + res.stdout;
-    expect(combined).toMatch(/verifying_contract/);
-    expect(combined).toMatch(/not in chain_to_addresses/);
+    assert.match(combined, /verifying_contract/);
+    assert.match(combined, /not in chain_to_addresses/);
     // no entry written
-    expect(listTypedData(root)).toEqual([]);
+    assert.deepEqual(listTypedData(root), []);
   });
 
   it("(5) appends witness_type as a 4th filename segment when present", () => {
@@ -349,9 +349,9 @@ describe("build-index by-typed-data emission", () => {
     });
     const root = track(scaffold({ "witness.json": manifest }));
     const res = runBuild(root);
-    expect(res.status, `stderr:\n${res.stderr}`).toBe(0);
+    assert.equal(res.status, 0, `stderr:\n${res.stderr}`);
 
-    expect(listTypedData(root)).toEqual([
+    assert.deepEqual(listTypedData(root), [
       `1__${PERMIT2}__PermitWitnessTransferFrom__ExclusiveDutchOrder.json`,
     ]);
 
@@ -365,9 +365,7 @@ describe("build-index by-typed-data emission", () => {
         "utf8",
       ),
     );
-    expect(entry.bundle.match.typed_data.witness_type).toBe(
-      "ExclusiveDutchOrder",
-    );
+    assert.equal(entry.bundle.match.typed_data.witness_type, "ExclusiveDutchOrder");
   });
 
   it("(6) without witness_type the filename stays the byte-identical 3-segment form", () => {
@@ -375,12 +373,10 @@ describe("build-index by-typed-data emission", () => {
     // the pre-T1 3-segment filename.
     const root = track(scaffold({ "permitSingle.json": permit2Manifest() }));
     const res = runBuild(root);
-    expect(res.status, `stderr:\n${res.stderr}`).toBe(0);
-    expect(listTypedData(root)).toContain(`1__${PERMIT2}__PermitSingle.json`);
+    assert.equal(res.status, 0, `stderr:\n${res.stderr}`);
+    assert.ok(listTypedData(root).includes(`1__${PERMIT2}__PermitSingle.json`));
     // No 4-segment variant leaked in.
-    expect(
-      listTypedData(root).some((f) => f.split("__").length > 3),
-    ).toBe(false);
+    assert.equal(listTypedData(root).some((f) => f.split("__").length > 3), false);
   });
 
   it("(7) two manifests colliding on (chain, vc, primary_type) but differing in witness_type both emit (no overwrite)", () => {
@@ -420,9 +416,10 @@ describe("build-index by-typed-data emission", () => {
       scaffold({ "orderA.json": manifestA, "orderB.json": manifestB }),
     );
     const res = runBuild(root);
-    expect(res.status, `stderr:\n${res.stderr}`).toBe(0);
+    assert.equal(res.status, 0, `stderr:\n${res.stderr}`);
 
-    expect([...listTypedData(root)].sort()).toEqual(
+    assert.deepEqual(
+      [...listTypedData(root)].sort(),
       [
         `1__${PERMIT2}__PermitWitnessTransferFrom__OrderA.json`,
         `1__${PERMIT2}__PermitWitnessTransferFrom__OrderB.json`,
@@ -436,10 +433,10 @@ describe("build-index by-typed-data emission", () => {
     const root = track(scaffold({ "a.json": manifestA, "b.json": manifestB }));
     const res = runBuild(root);
 
-    expect(res.status).not.toBe(0);
+    assert.notEqual(res.status, 0);
     const combined = res.stderr + res.stdout;
-    expect(combined).toMatch(/duplicate typed-data index key/);
-    expect(combined).toMatch(/PermitSingle/);
+    assert.match(combined, /duplicate typed-data index key/);
+    assert.match(combined, /PermitSingle/);
   });
 
   it("(4) emits NO by-typed-data entry when a manifest has no typed_data", () => {
@@ -455,11 +452,67 @@ describe("build-index by-typed-data emission", () => {
     };
     const root = track(scaffold({ "swap.json": plain }));
     const res = runBuild(root);
-    expect(res.status, `stderr:\n${res.stderr}`).toBe(0);
+    assert.equal(res.status, 0, `stderr:\n${res.stderr}`);
 
     // by-typed-data dir is created (wiped) but empty; by-callkey has the entry.
-    expect(listTypedData(root)).toEqual([]);
-    expect(listCallkeys(root).length).toBe(1);
+    assert.deepEqual(listTypedData(root), []);
+    assert.equal(listCallkeys(root).length, 1);
+  });
+});
+
+describe("build-index strict concrete callkey ownership", () => {
+  it("rejects different bundle content at the same callkeys, even with the same bundle ID", () => {
+    const manifest = erc20TransferManifest({
+      match: {
+        selector: "0xa9059cbb",
+        chain_to_addresses: { "1": [ERC20_TOKEN, ERC20_TOKEN_2] },
+      },
+    });
+    const root = track(scaffold({
+      "a.json": manifest,
+      "b.json": { ...manifest, emit: { strategy: "single_emit", body: { amount: "$args.amount" } } },
+    }));
+
+    const res = runBuild(root, ["--strict-callkeys"]);
+    assert.notEqual(res.status, 0);
+    const combined = res.stderr + res.stdout;
+    assert.match(combined, /STRICT_CALLKEYS FAILED — 2 concrete callkey collision\(s\)/);
+    for (const address of [ERC20_TOKEN, ERC20_TOKEN_2]) {
+      assert.ok(combined.includes(`callkey collision: 1__${address}__0xa9059cbb.json`));
+    }
+    assert.ok(combined.includes("both manifests/a.json and manifests/b.json with different bundles"));
+    assert.ok(!combined.includes("identical bundle"));
+    // The CLI may have written partial files while collecting all collisions.
+    // A nonzero exit is never a successful artifact, regardless of those files.
+    assert.ok(!combined.includes("[build-index] done"));
+  });
+
+  it("accepts identical JCS bundle digests from distinct source files and keeps the first", () => {
+    const manifest = erc20TransferManifest({
+      match: {
+        selector: "0xa9059cbb",
+        chain_to_addresses: { "1": [ERC20_TOKEN] },
+      },
+    });
+    // Different original bytes/property order still describe the same bundle.
+    const reordered = Object.fromEntries(Object.entries(manifest).reverse());
+    const root = track(scaffold({ "a.json": manifest, "b.json": reordered }));
+    assert.notEqual(
+      readFileSync(join(root, "manifests/a.json"), "utf8"),
+      readFileSync(join(root, "manifests/b.json"), "utf8"),
+    );
+
+    const res = runBuild(root, ["--strict-callkeys"]);
+    assert.equal(res.status, 0, `stderr:\n${res.stderr}`);
+    const combined = res.stderr + res.stdout;
+    assert.ok(combined.includes("identical bundle"));
+    assert.doesNotMatch(combined, /callkey collision:|STRICT_CALLKEYS FAILED/);
+    assert.deepEqual(listCallkeys(root), [`1__${ERC20_TOKEN}__0xa9059cbb.json`]);
+    const entry = JSON.parse(
+      readFileSync(join(callkeyDir(root), `1__${ERC20_TOKEN}__0xa9059cbb.json`), "utf8"),
+    );
+    assert.equal(entry.manifest_path, "manifests/a.json");
+    assert.deepEqual(entry.bundle, manifest);
   });
 });
 
@@ -491,9 +544,9 @@ describe("build-index token source expansion", () => {
 
     const res = runBuild(root);
 
-    expect(res.status).not.toBe(0);
-    expect(res.stderr + res.stdout).toMatch(/chain_to_addresses_source \+ typed_data is unsupported/);
-    expect(listTypedData(root)).toEqual([]);
+    assert.notEqual(res.status, 0);
+    assert.match(res.stderr + res.stdout, /chain_to_addresses_source \+ typed_data is unsupported/);
+    assert.deepEqual(listTypedData(root), []);
   });
 
   it("expands tokens:erc20 into concrete callkeys backed by a shared bundle ref", () => {
@@ -502,72 +555,75 @@ describe("build-index token source expansion", () => {
     writeToken(root, 1, ERC721_TOKEN, "erc721", { symbol: "NFT" });
 
     const res = runBuild(root);
-    expect(res.status, `stderr:\n${res.stderr}`).toBe(0);
+    assert.equal(res.status, 0, `stderr:\n${res.stderr}`);
 
-    expect(listCallkeys(root)).toEqual([`1__${ERC20_TOKEN}__0xa9059cbb.json`]);
+    assert.deepEqual(listCallkeys(root), [`1__${ERC20_TOKEN}__0xa9059cbb.json`]);
 
     const entry = JSON.parse(
       readFileSync(join(callkeyDir(root), `1__${ERC20_TOKEN}__0xa9059cbb.json`), "utf8"),
     );
-    expect(entry.schema_version).toBe("3-ref");
-    expect(entry.bundle_ref).toMatch(/^bundles\/0x[0-9a-f]{64}\.json$/);
-    expect(entry.context_ref).toBeUndefined();
-    expect(entry.bundle).toBeUndefined();
+    assert.equal(entry.schema_version, "3-ref");
+    assert.match(entry.bundle_ref, /^bundles\/0x[0-9a-f]{64}\.json$/);
+    assert.equal(entry.context_ref, undefined);
+    assert.equal(entry.bundle, undefined);
     const bundle = JSON.parse(readFileSync(join(root, entry.bundle_ref), "utf8"));
-    expect(bundle.match.chain_to_addresses).toEqual({ "1": [ERC20_TOKEN] });
-    expect("chain_to_addresses_source" in bundle.match).toBe(false);
-    expect("chain_ids" in bundle.match).toBe(false);
+    assert.deepEqual(bundle.match.chain_to_addresses, { "1": [ERC20_TOKEN] });
+    assert.equal("chain_to_addresses_source" in bundle.match, false);
+    assert.equal("chain_ids" in bundle.match, false);
   });
 
-  it("prunes concrete-owned callkeys out of sourced bundle fan-out", () => {
-    const concreteTransfer = erc20TransferManifest({
-      id: "compound-v3/comet/transfer@1.0.0",
-      match: {
-        selector: "0xa9059cbb",
-        chain_to_addresses: { "1": [ERC20_TOKEN] },
-      },
+  for (const order of ["source-first", "concrete-first"]) {
+    it(`prunes concrete-owned callkeys out of sourced bundle fan-out in strict mode (${order})`, () => {
+      const concreteTransfer = erc20TransferManifest({
+        id: "compound-v3/comet/transfer@1.0.0",
+        match: {
+          selector: "0xa9059cbb",
+          chain_to_addresses: { "1": [ERC20_TOKEN] },
+        },
+      });
+      const root = track(
+        scaffold({
+          [order === "source-first" ? "a-standard-transfer.json" : "z-standard-transfer.json"]: erc20TransferManifest(),
+          [order === "concrete-first" ? "a-compound-transfer.json" : "z-compound-transfer.json"]: concreteTransfer,
+        }),
+      );
+      writeToken(root, 1, ERC20_TOKEN, "erc20", { symbol: "C20" });
+      writeToken(root, 1, ERC20_TOKEN_2, "erc20", { symbol: "T20" });
+
+      const res = runBuild(root, ["--strict-callkeys"]);
+      assert.equal(res.status, 0, `stderr:\n${res.stderr}`);
+
+      assert.deepEqual(
+        [...listCallkeys(root)].sort(),
+        [
+          `1__${ERC20_TOKEN}__0xa9059cbb.json`,
+          `1__${ERC20_TOKEN_2}__0xa9059cbb.json`,
+        ].sort(),
+      );
+
+      const concreteEntry = JSON.parse(
+        readFileSync(join(callkeyDir(root), `1__${ERC20_TOKEN}__0xa9059cbb.json`), "utf8"),
+      );
+      assert.equal(concreteEntry.bundle_id, "compound-v3/comet/transfer@1.0.0");
+
+      const sourcedEntry = JSON.parse(
+        readFileSync(join(callkeyDir(root), `1__${ERC20_TOKEN_2}__0xa9059cbb.json`), "utf8"),
+      );
+      assert.equal(sourcedEntry.schema_version, "3-ref");
+      const sourcedBundle = JSON.parse(readFileSync(join(root, sourcedEntry.bundle_ref), "utf8"));
+      assert.deepEqual(sourcedBundle.match.chain_to_addresses, {
+        "1": [ERC20_TOKEN_2],
+      });
     });
-    const root = track(
-      scaffold({
-        "standard-transfer.json": erc20TransferManifest(),
-        "compound-transfer.json": concreteTransfer,
-      }),
-    );
-    writeToken(root, 1, ERC20_TOKEN, "erc20", { symbol: "C20" });
-    writeToken(root, 1, ERC20_TOKEN_2, "erc20", { symbol: "T20" });
-
-    const res = runBuild(root);
-    expect(res.status, `stderr:\n${res.stderr}`).toBe(0);
-
-    expect([...listCallkeys(root)].sort()).toEqual(
-      [
-        `1__${ERC20_TOKEN}__0xa9059cbb.json`,
-        `1__${ERC20_TOKEN_2}__0xa9059cbb.json`,
-      ].sort(),
-    );
-
-    const concreteEntry = JSON.parse(
-      readFileSync(join(callkeyDir(root), `1__${ERC20_TOKEN}__0xa9059cbb.json`), "utf8"),
-    );
-    expect(concreteEntry.bundle_id).toBe("compound-v3/comet/transfer@1.0.0");
-
-    const sourcedEntry = JSON.parse(
-      readFileSync(join(callkeyDir(root), `1__${ERC20_TOKEN_2}__0xa9059cbb.json`), "utf8"),
-    );
-    expect(sourcedEntry.schema_version).toBe("3-ref");
-    const sourcedBundle = JSON.parse(readFileSync(join(root, sourcedEntry.bundle_ref), "utf8"));
-    expect(sourcedBundle.match.chain_to_addresses).toEqual({
-      "1": [ERC20_TOKEN_2],
-    });
-  });
+  }
 
   it("rejects tokens:erc20 when the requested chain has no token directory", () => {
     const root = track(scaffold({ "transfer.json": erc20TransferManifest() }));
     const res = runBuild(root);
 
-    expect(res.status).not.toBe(0);
+    assert.notEqual(res.status, 0);
     const combined = res.stderr + res.stdout;
-    expect(combined).toMatch(/tokens\/1\/ does not exist/);
+    assert.match(combined, /tokens\/1\/ does not exist/);
   });
 
   it("rejects token metadata whose chainId disagrees with its directory", () => {
@@ -575,9 +631,9 @@ describe("build-index token source expansion", () => {
     writeToken(root, 1, ERC20_TOKEN, "erc20", { chainId: 8453 });
 
     const res = runBuild(root);
-    expect(res.status).not.toBe(0);
+    assert.notEqual(res.status, 0);
     const combined = res.stderr + res.stdout;
-    expect(combined).toMatch(/chainId field \(8453\) does not match directory \(1\)/);
+    assert.match(combined, /chainId field \(8453\) does not match directory \(1\)/);
   });
 });
 
@@ -658,38 +714,32 @@ describe("build-index protocol source materialization", () => {
     );
 
     const res = runBuild(root);
-    expect(res.status, `stderr:\n${res.stderr}`).toBe(0);
-    expect(listCallkeys(root)).toEqual([`1__${pool}__0x3df02124.json`]);
+    assert.equal(res.status, 0, `stderr:\n${res.stderr}`);
+    assert.deepEqual(listCallkeys(root), [`1__${pool}__0x3df02124.json`]);
 
     const entry = JSON.parse(
       readFileSync(join(callkeyDir(root), `1__${pool}__0x3df02124.json`), "utf8"),
     );
-    expect(entry.schema_version).toBe("3-ref");
-    expect(entry.bundle_id).toMatch(
-      /^curve\/stableswap-ng\/source\/test\/exchange\/1-factory-stable-ng-0-33333333@1\.0\.0$/,
-    );
-    expect(entry.bundle_ref).toMatch(/^bundles\/0x[0-9a-f]{64}\.json$/);
-    expect(entry.context_ref).toBe(
-      `contexts/curve/factory_stable_ng_2coin_mainnet/1/${pool}.json`,
-    );
-    expect(entry.bundle).toBeUndefined();
+    assert.equal(entry.schema_version, "3-ref");
+    assert.match(entry.bundle_id, /^curve\/stableswap-ng\/source\/test\/exchange\/1-factory-stable-ng-0-33333333@1\.0\.0$/);
+    assert.match(entry.bundle_ref, /^bundles\/0x[0-9a-f]{64}\.json$/);
+    assert.equal(entry.context_ref, `contexts/curve/factory_stable_ng_2coin_mainnet/1/${pool}.json`);
+    assert.equal(entry.bundle, undefined);
 
     const template = JSON.parse(readFileSync(join(root, entry.bundle_ref), "utf8"));
-    expect(template.match.chain_to_addresses_source).toBe(
-      "curve:factory_stable_ng_2coin_mainnet",
-    );
-    expect(template.source_materialize).toEqual({ kind: "per_address_context" });
-    expect(template.emit.body.token_in.$cases).toEqual({
+    assert.equal(template.match.chain_to_addresses_source, "curve:factory_stable_ng_2coin_mainnet");
+    assert.deepEqual(template.source_materialize, { kind: "per_address_context" });
+    assert.deepEqual(template.emit.body.token_in.$cases, {
       "0": "$source.coins.0",
       "1": "$source.coins.1",
     });
 
     const context = JSON.parse(readFileSync(join(root, entry.context_ref), "utf8"));
-    expect(context.schema_version).toBe("3-source-context");
-    expect(context.chain_id).toBe(1);
-    expect(context.address).toBe(pool);
-    expect(context.context.coins).toEqual([coin0, coin1]);
-    expect(context.context.id_suffix).toBe("1-factory-stable-ng-0-33333333");
+    assert.equal(context.schema_version, "3-source-context");
+    assert.equal(context.chain_id, 1);
+    assert.equal(context.address, pool);
+    assert.deepEqual(context.context.coins, [coin0, coin1]);
+    assert.equal(context.context.id_suffix, "1-factory-stable-ng-0-33333333");
   });
 });
 
@@ -732,11 +782,9 @@ describe("manifest live-input regressions", () => {
       collectPoolMetaResources(manifest, poolMeta, file);
     }
 
-    expect(poolMeta.length).toBeGreaterThanOrEqual(5);
+    assert.ok(poolMeta.length >= 5);
     for (const entry of poolMeta) {
-      expect(entry.resource.pool_addr, `${entry.file}:${entry.path}`).not.toBe(
-        "0x0000000000000000000000000000000000000000",
-      );
+      assert.notEqual(entry.resource.pool_addr, "0x0000000000000000000000000000000000000000", `${entry.file}:${entry.path}`);
     }
   });
 
@@ -751,15 +799,11 @@ describe("manifest live-input regressions", () => {
       const poolMeta: { file: string; path: string; resource: Record<string, unknown> }[] = [];
       collectPoolMetaResources(manifest, poolMeta, rel);
 
-      expect(poolMeta.length, rel).toBeGreaterThanOrEqual(1);
+      assert.ok(poolMeta.length >= 1, rel);
       for (const entry of poolMeta) {
         const poolAddr = entry.resource.pool_addr as Record<string, unknown> | string | undefined;
-        expect(poolAddr, `${rel}:${entry.path}`).not.toBe(
-          "0x0000000000000000000000000000000000000000",
-        );
-        expect((poolAddr as Record<string, unknown> | undefined)?.$fn, `${rel}:${entry.path}`).toBe(
-          "balancer_pool_id_to_address",
-        );
+        assert.notEqual(poolAddr, "0x0000000000000000000000000000000000000000", `${rel}:${entry.path}`);
+        assert.equal((poolAddr as Record<string, unknown> | undefined)?.$fn, "balancer_pool_id_to_address", `${rel}:${entry.path}`);
       }
     }
   });
