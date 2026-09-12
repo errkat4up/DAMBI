@@ -1,6 +1,6 @@
 # Dambi: Decoder·정책 → Core → Adapters 개발 계획
 
-**DEC-06c·DEC-06 현재 상태:** 구현·정적 검토·사용자 검증 완료. [확정 계약](decoder-design-plan.md#dec-06c--확정-계약과-실행-상태)을 유지하며 실행 근거는 [README 검증 기록](../../fixtures/decoder-policy/README.md#dec-06c--사용자-검증-완료-dec-06-완료) 한 곳을 따른다. 아래 06a/06b 상세는 해당 단계의 기존 기록이다. DEC-07은 구현·정적 검토 완료, 사용자 실행 대기다. SDK 소스 이관은 미착수다.
+**DEC-06c·DEC-06 현재 상태:** 구현·정적 검토·사용자 검증 완료. [확정 계약](decoder-design-plan.md#dec-06c--확정-계약과-실행-상태)을 유지하며 실행 근거는 [README 검증 기록](../../fixtures/decoder-policy/README.md#dec-06c--사용자-검증-완료-dec-06-완료) 한 곳을 따른다. 아래 06a/06b 상세는 해당 단계의 기존 기록이다. DEC-07은 구현·정적 검토·사용자 검증 및 Decoder 인계 완료다. SDK 소스 이관은 미착수다.
 
 **2026-09-12 DEC-06b 구현 당시 상태:** 실제 Bundler3 Call[] 연결 **구현·정적 검토 완료, 사용자 실행 대기**다. 요청 43개 + 구조 6개 = **49개**, 기존 514개 포함 통합 **563개 정의**이며 통과 수가 아니다. DEC-06a는 self 48/48·통합 514/514 및 분리 커밋 `9923487`까지 확인했다. 06c는 별도 미구현이며 06b 사용자 검증 후 진행한다.
 
@@ -303,7 +303,7 @@ Call tuple `(to,data,value,skipRevert,callbackHash)`의 순서·동적 offset/le
 
 ### D4. Core에 넘길 번들·고정 스냅샷
 
-**Decoder 부분 상태:** DEC-07 구현·정적 검토 완료, 사용자 실행 대기. [인계 자료·실행 기록](../../fixtures/decoder-policy/README.md#dec-07--decoder-인계)을 따른다. D4 전체 및 C2c·C5 완료를 뜻하지 않는다.
+**Decoder 부분 상태:** DEC-07 구현·정적 검토·사용자 검증 및 Decoder 인계 완료. [인계 자료·실행 기록](../../fixtures/decoder-policy/README.md#dec-07--decoder-인계)을 따른다. D4 전체 및 C2c·C5 완료를 뜻하지 않는다.
 
 - 신규 `contracts/core-v1/`에 payload/envelope 타입·Schema·정상/오류 fixture를 만든다. 정책의 7개 필드는 API 담당이 준 형태를 기준으로 한다.
 - B 방식 문자열 payload, `registry_ref: null`, 역할별 키 분리 방향을 반영한다. 실제 API 필드명·인증·운영값의 미확정 항목은 제안과 구분한다.

@@ -440,7 +440,7 @@ Batch **108/108·통합 466/466**의 실행 근거와 hash는 [README](README.md
 
 ## DEC-06c — 달라진 지원 범위와 제한
 
-**사용자 검증 완료. DEC-06 전체 완료.** 실제 Registry/WASM 연결, 재귀·한도 경계와 교대 요청, TS route→audit의 진단 전달 및 구형 응답의 필드 부재 보존을 사용자 실행으로 확인했다. 실행 수치·로그는 [README 검증 기록](README.md#dec-06c--사용자-검증-완료-dec-06-완료)을 따른다. 아래 지원 범위·한계는 유지하며 DEC-07은 미착수다.
+**사용자 검증 완료. DEC-06 전체 완료.** 실제 Registry/WASM 연결, 재귀·한도 경계와 교대 요청, TS route→audit의 진단 전달 및 구형 응답의 필드 부재 보존을 사용자 실행으로 확인했다. 실행 수치·로그는 [README 검증 기록](README.md#dec-06c--사용자-검증-완료-dec-06-완료)을 따른다. 아래 지원 범위·한계는 유지하며 DEC-07 인계는 상단 index를 따른다.
 
 - self 깊이 3과 Call[] 깊이 4를 요청 전체의 깊이 4·256개 노드 상한 아래에서 실제 적용한다. self/Call[]/callback 전환이 예산을 초기화하지 않는다. 각 배열 65번째부터는 오류 대신 원문 Unknown+`child_limit`로 보존하고 앞 64개 결과를 유지한다.
 - 성공한 multicall/callback transaction에만 `decoding`의 complete/partial과 원본 경로·사유·decoder ID를 제공한다. 미등록·짧은 Call[] child·알려진 decoder의 Unknown도 partial이다. self의 짧은 child와 읽은 malformed ABI/emit/필수 해석 오류는 계속 전체 오류다.

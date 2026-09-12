@@ -13,7 +13,7 @@
  */
 
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -58,21 +58,18 @@ function scaffold(manifests: Record<string, unknown>): string {
 
 /** Run the real build-index.ts against a temp REGISTRY_ROOT. Never throws. */
 function runBuild(registryRoot: string, args: string[] = []): RunResult {
-  try {
-    const stdout = execFileSync(TSX_BIN, [BUILD_INDEX, ...args], {
-      env: { ...process.env, BUILD_INDEX_REGISTRY_ROOT: registryRoot },
-      stdio: "pipe",
-      encoding: "utf8",
-    });
-    return { status: 0, stdout: stdout ?? "", stderr: "" };
-  } catch (e) {
-    const err = e as { status?: number; stdout?: Buffer | string; stderr?: Buffer | string };
-    return {
-      status: err.status ?? 1,
-      stdout: err.stdout?.toString() ?? "",
-      stderr: err.stderr?.toString() ?? "",
-    };
-  }
+  // The builder writes diagnostics to stderr even on success. Preserve both
+  // streams so accepted duplicates remain distinguishable from collisions.
+  const result = spawnSync(TSX_BIN, [BUILD_INDEX, ...args], {
+    env: { ...process.env, BUILD_INDEX_REGISTRY_ROOT: registryRoot },
+    stdio: "pipe",
+    encoding: "utf8",
+  });
+  return {
+    status: result.status ?? 1,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr || result.error?.message || "",
+  };
 }
 
 function typedDataDir(root: string): string {

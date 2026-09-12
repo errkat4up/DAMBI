@@ -2,7 +2,17 @@
 
 ## DEC-07 — Decoder 인계
 
-**구현·정적 검토 완료, 사용자 실행 대기.** 착수 HEAD `a0fd27a`, 작업 트리 깨끗함을 확인했다. 이번 변경은 인계 목록·시험 helper·Registry 검사·CI와 단계 상태 문서다. MJS 15파일의 구문 검사, 변경 TS의 AST 구문 검토, JSON 파싱과 `git diff --check`에서 오류가 없었다. 설치 시나리오와 workflow 연결도 소스로 대조했다. 실행한 빌드·시험·설치·커밋·푸시는 없으며, 실행 통과/실패 수는 아직 없다. 사용자 검증 결과와 검증한 변경 범위는 이 절에만 짧게 추가하고 DEC-07 인계 완료 여부를 판단한다.
+**구현·정적 검토·사용자 검증 완료, DEC-07 Decoder 인계 완료.** 착수 HEAD는 `a0fd27a`이며 구현 커밋 `2a0eafb`(Registry 검사)·`0304e23`(인계 구현)·`cdb805b`(CI·문서)을 확인했다. 추가로 검증한 변경은 `registryV2/scripts/__tests__/build-index.test.ts`의 `runBuild()` stderr 보존 수정이다. MJS·TS 구문, JSON 및 `git diff --check`의 정적 검토를 마쳤다. 에이전트는 빌드·시험·설치·커밋·푸시를 실행하지 않았다.
+
+**사용자 제공 실행 결과:** 아래 세 결과를 확인해 DEC-07 검증 조건을 충족했다. 실행 시점 HEAD는 제공 요약만으로 단정하지 않으며, 기록 갱신을 위한 재빌드·재시험은 필요 없다.
+
+| 검사 | 통과/전체 | suites | 실패·취소·건너뛰기·todo | duration_ms |
+| --- | --- | --- | --- | --- |
+| Node 통합 회귀 | 589/589 | 0 | 각 0 | 2060.624666 |
+| Registry 검사 — stderr 수정 후 재실행 | 20/20 | 5 | 각 0 | 6610.29375 |
+| 인계 index 정합성·두 임시 빌드 재현성 | 1/1 | 0 | 각 0 | 826.377834 |
+
+Registry 최초 실행은 **19 통과·1 실패**(suites 5, 취소·건너뛰기·todo 각 0, `duration_ms=7077.637708`)였다. 동일 JCS digest 중복 시험의 `identical bundle` 확인 실패는 성공 시 stderr를 버리던 시험 helper가 원인이었으며, `spawnSync`로 양쪽 출력과 종료 상태를 보존한 뒤 위 재실행에서 통과했다. builder·JCS·충돌 기대값은 유지했다. 남은 한계는 아래 표와 경로 의존 목록을 따른다. GitHub workflow 실행, SDK 소스·빌드 독립화(C2c·C5), 제품 배포 완료를 뜻하지 않는다.
 
 [handoff-index.json](handoff-index.json)이 단일 인계 목록이다. `artifacts.source_key`로 [선택 목록](registry-selection.json)의 원본 경로·SHA와 연결하고, 원본 ID의 `@` 버전 → `suites.build_options` → resolved bundle ID·JCS digest → `index_paths` → `suites.fixture`의 case ID·`scenarios.installs` 순으로 추적한다. 선택 원본 11개와 token 4개, 시험 파일 10개, 설치 시나리오 32개를 담았다. 요청·Action은 fixture와 `verification`의 기존 기대값/조립 함수를 참조하며 복제하지 않는다. `case_ids: "all"`은 해당 fixture의 모든 case ID이고, 교대·변형 요청은 `generated_cases_ref`의 기존 코드에서 확인한다.
 
@@ -24,7 +34,7 @@
 
 기존 `build-index.test.ts`의 검사를 재사용해 strict concrete 충돌·동일 digest 중복·concrete 우선순위를 보강했다. 확장 Vitest 설치에 의존하던 이 파일은 기존 Registry `tsx`와 Node test runner로 실행하도록 옮겼다. CI는 Registry 검사와 새 인계 검사를 연결하고, 기존 wasm job에서 **같은 실행에 빌드한 pkg**로 Node Decoder 회귀를 실행한다. Decoder 시험에 확장 실행·서버 기동은 필요 없다. workflow는 수정했으며 GitHub 실행은 하지 않았다.
 
-사용자 실행 명령은 아래와 같다. Node 20 이상과 기존 Registry 의존성, DEC-06c에서 검증한 JS/WASM 쌍을 재사용한다. 이번에 Rust·빌드 입력은 바뀌지 않았으므로 Native·WASM 재빌드를 반복할 필요가 없다. Registry 의존성이 없는 새 checkout에서만 `npm ci --prefix registryV2`로 준비한다. 예상 검사 정의는 Registry 20개, 인계 1개, helper/worker 경로가 바뀐 Node 통합 589개이며 통과 수가 아니다.
+사용자 실행 명령은 아래와 같다. Node 20 이상과 기존 Registry 의존성, DEC-06c에서 검증한 JS/WASM 쌍을 재사용한다. 이번에 Rust·빌드 입력은 바뀌지 않았으므로 Native·WASM 재빌드를 반복할 필요가 없다. Registry 의존성이 없는 새 checkout에서만 `npm ci --prefix registryV2`로 준비한다. 아래 세 검사는 사용자 실행으로 모두 통과했다. 명령은 재현용으로 보존하며 문서 갱신을 위해 다시 실행하지 않는다.
 
 ```bash
 cd /Users/spu/SDKdambi/DAMBI
