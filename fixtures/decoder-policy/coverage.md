@@ -1,6 +1,6 @@
 # Decoder 기준 시험 커버리지
 
-**DEC-05 최신 상태:** Single은 **구현 완료, 사용자 실행 대기**다. 실제 원본을 선택하는 v3 연결 시험·최소 builder 옵션·개별/통합 script를 작성했다. 실행 통과 수는 미확인이고, Batch는 **미착수**다. 기존 Node 다섯 시험 파일의 273개 검증 기록은 그대로 유지한다. 아래 DEC-01~04의 “현재/이번”·DEC-05 미진행 표현은 해당 과거 단계 기록이며, 이번 상태는 [DEC-05a](#dec-05a--작성한-검사와-미결-계약)를 따른다.
+**DEC-05 최신 상태:** Single은 저장 로그 기준 **사용자 실행 검증 완료**다. 실제 원본을 선택하는 v3 연결 시험·최소 builder 옵션·개별/통합 script를 작성했다. Single 85/85·당시 통합 358/358 통과를 확인했다. Batch는 **구현 완료, 사용자 실행 대기**이며 신규 108개·통합 466개는 정의 수다. 기존 Node 다섯 시험 파일의 273개 검증 기록은 그대로 유지한다. 아래 DEC-01~04의 “현재/이번”·DEC-05 미진행 표현은 해당 과거 단계 기록이며, 현재 Batch 작성 범위는 [DEC-05b](#dec-05b--작성한-검사와-미결-계약), Single 사용자 실행 근거는 [DEC-05a](#dec-05a--작성한-검사와-미결-계약)를 따른다.
 
 **DEC-01/02의 과거 사용자 실행 기준 37개 통과(30 + 7) 기록을 유지하며, DEC-03도 사용자 실행 보고 기준 검증 완료다.** 새로 제공된 전체 로그에서 transfer 개별 21개와 통합 회귀 58개가 모두 통과했다. 두 실행 모두 실패·취소·건너뛰기·todo·suites는 0이며 `duration_ms`는 각각 `866.922333`, `635.086875`다. 에이전트의 독립 재실행 결과가 아니다. 04a는 사용자 제공 전체 로그 기준 typed permit **47/47 통과**(`duration_ms=801.277375`), 당시 통합 **105/105 통과**(`duration_ms=690.439291`)다. 두 실행 모두 suites·fail·cancelled·skipped·todo는 0이다. 04a 당시 실행 HEAD·시각·도구 버전·JS/WASM hash·새 빌드 로그는 미제공이며 이전 기록으로 채우지 않는다. 04a 사용자 실행 결과를 반영했고, 합의된 04b v4 DTO·strict validator·실행부·Rust/Node 회귀 시험을 별도 변경으로 작성했다. 04b 사용자 실행의 저장 로그를 직접 확인했다. Native 181개와 새 WASM 빌드, Node strict 168개·기존 typed 47개·통합 273개가 모두 통과하여 **DEC-04 전체 검증 완료**다. 에이전트가 빌드·시험을 재실행한 결과는 아니다. SDK 전체 소스·빌드 독립화도 미완료다.
 
@@ -12,6 +12,7 @@
 | `standard/erc20/transfer@1.0.0` | `manifests/standard/erc20/transfer@1.0.0.json` | `0xa9059cbb` | `0x47e37a1ada72a9fee9e4b8077b7000f0b1198a0219fa513d3ccb74def70ee925` |
 | `standard/erc20/permit@1.0.0` | `manifests/standard/erc20/permit@1.0.0.json` | `0xd505accf` | `0x9e7337ae3ce7e1a80851652e39b2ac4fb264b5e8caf00a4c93193c6b93c76eb3` |
 | `uniswap/permit2/permitSingle@1.0.0` | `manifests/uniswap/permit2/permitSingle@1.0.0.json` | `0x2b67b570` | `0x6657c04696e97d08aaa80cc842d3d7976df7515953e7506fa97e50bd2812e696` |
+| `uniswap/permit2/permitBatch@1.0.0` | `manifests/uniswap/permit2/permitBatch@1.0.0.json` | `0x2a2d80d1` | `0x0343bc44659b2b1e7e184a39e7e17acd642ec52f2776adca963df4d8d3bd35ee` |
 
 approve·transfer 두 원본은 모두 `chain_ids: [1, 10, 8453, 42161]`, `chain_to_addresses_source: "tokens:erc20"`를 유지한다. DEC-03은 기존 approve/token 경로·hash를 보존하고 transfer 선택을 추가했다. DEC-04a는 permit 선택만 더한다. permit은 `chain_to_addresses`에 mainnet USDC 한 주소를 직접 선언하며 네 체인으로 확장하지 않는다.
 
@@ -203,7 +204,9 @@ strict fixture는 정상 20, 기본 입력 49, message 46, domain 8, deadline �
 
 ## DEC-05a — 작성한 검사와 미결 계약
 
-**코드 작성·정적 검토: 구현 완료, 사용자 실행 대기. 사용자 실행 검증: 미실행·로그 미제공.** 새 [`permit2-single.cases.json`](permit2-single.cases.json)과 [`permit2-single.test.mjs`](permit2-single.test.mjs)은 실제 Single 원본을 사용한다. 요청은 normal 19, routing_miss 6, input_error 12, emit_error 26, legacy_diagnostic 14, compatibility 2인 **79개**, 구조 검사 6개를 더한 **85개 정의**다. 통합은 기존 273개 + 신규 85개 = **358개 정의**이며 통과 수가 아니다. 구조 검사에는 기존 USDC flat 회귀와 v4 Permit2 미지원 경계도 포함한다. 아래 값은 작성한 검사의 기대값 또는 소스상 진단이며 통과 결과가 아니다. nonce·폭·시간 관련 관찰은 정상 Permit2 입력으로 승인하거나 계약 문제를 해결했다는 뜻이 아니다.
+**DEC-05a 저장 로그 확인:** `/private/tmp/dambi-dec05a-verify.JPtwLZ/`에서 Single **85/85 통과**(`duration_ms=728.833416`), 당시 통합 **358/358 통과**(`duration_ms=1055.562083`)를 확인했다. 두 실행 모두 suites/fail/cancelled/skipped/todo는 0이다. 실제 실행 HEAD는 전후 `60bb3d561b889594ce5837088d74f072de4fd6a2`이며 9개 미커밋 경로가 있던 worktree다. 이후 사용자 커밋 `66af65c6bbe0adb6f8fbb9941aac729ec330b801`과 **Batch 편집 전** 파일을 대조하여 로그 입력 41개가 모두 현재 파일·Git blob에 일치함을 확인했다. 전후 tracked patch도 바이트 동일하고 입력 41개·산출물 2개 사후 검사는 모두 OK다. Node v25.9.0/npm 11.12.1, UTC Single `2026-09-12T06:46:09Z–06:46:10Z`, 통합 `06:46:10Z–06:46:11Z`, verification/input hash/artifact hash exit는 모두 0이다. DEC-04의 같은 JS/WASM 쌍을 재빌드 없이 사용했고 현재 산출물 hash도 일치한다. 실행 HEAD와 이후 구현 커밋을 구분한다. 에이전트 재실행이 아니며 full EIP-712·서명·외부 nonce 검증이나 A안에서 별도로 남긴 계약 교정의 완료가 아니다. 상세 로그·hash는 [README](README.md#dec-05a-사용자-실행-기록--저장-로그-확인)에 기록했다.
+
+**코드 작성·정적 검토 및 사용자 실행 검증 완료.** 새 [`permit2-single.cases.json`](permit2-single.cases.json)과 [`permit2-single.test.mjs`](permit2-single.test.mjs)은 실제 Single 원본을 사용한다. 요청은 normal 19, routing_miss 6, input_error 12, emit_error 26, legacy_diagnostic 14, compatibility 2인 **79개**, 구조 검사 6개를 더한 **85개 정의**다. 사용자 로그에서 Single **85/85** 및 당시 통합 기존 273개 + 신규 85개 = **358/358 통과**를 확인했다. 구조 검사에는 기존 USDC flat 회귀와 v4 Permit2 미지원 경계도 포함한다. 아래 정상·오류·관찰 검사는 사용자 실행에서 통과했다. 원래 정적 분석으로 설명한 raw 시간 한계는 별도 근거로 유지한다. nonce·폭·시간 관련 관찰은 정상 Permit2 입력으로 승인하거나 계약 문제를 해결했다는 뜻이 아니다.
 
 **DEC-05a 정적 검토 기록:** 신규 시험/helper 2개의 `node --check`, README 신규 Bash 블록 2개의 `bash -n`, JSON 3개 파싱·unsafe integer literal 부재, 명령의 입력 41개 경로 존재를 확인했다. 고정 원본 8개의 hash가 일치하고 기존 시험 5개·fixture 4개·worker의 10파일은 HEAD와 바이트가 같다. decimal 경계 9개를 정확한 정수 거듭제곱으로 독립 검산했고 `git diff --check`·신규 파일 공백 검사도 이상 없다. DEC-04 저장 로그의 JS/WASM 쌍 및 Rust/빌드 입력 9개와 현재 hash가 일치한다. 이는 구문·원본·소스 대조이며 Registry 빌드·Native/WASM/Node 시험을 실행한 결과가 아니다.
 
@@ -265,12 +268,55 @@ strict fixture는 정상 20, 기본 입력 49, message 46, domain 8, deadline �
 
 PermitSingle/PermitBatch는 AllowanceTransfer이며 순차 nonce를 사용한다. unordered nonce bitmap은 SignatureTransfer 개념이므로 현재 manifest/Action 모델과 프로토콜 의미의 차이를 미결로 남긴다. [AllowanceTransfer 공식 문서](https://developers.uniswap.org/docs/protocols/permit2/concepts/allowance-transfer), [SignatureTransfer 공식 문서](https://developers.uniswap.org/docs/protocols/permit2/concepts/signature-transfer).
 
-**결정 상태:** 사용자는 교정안 구체화 후 **A — 연결 시험·교정 설계만 마무리**를 선택했다. [구체 계약 교정안 A/B/C](../../docs/sdk-migration/decoder-design-plan.md#dec-05-계약-교정안-a안-확정bc-미구현-제안)는 baseline+설계(A, 확정), v4 입력 검증만 추가(B), 새 allowance Action/소비자까지 교정(C)으로 분리했다. 이번 범위의 미응답 질문은 없다. nonce·malformed·폭·시간·v4 교정은 별도 범위의 미결 문제로 남기며 B/C는 미구현 제안이다. Rust·manifest·worker·기존 273개 기대값은 변경하지 않았다. 실행 명령과 검증된 DEC-04 JS/WASM 재사용 근거는 [README](README.md#dec-05a-사용자가-직접-실행할-검증-명령)에 있다.
+**결정 상태:** 사용자는 교정안 구체화 후 **A — 연결 시험·교정 설계만 마무리**를 선택했다. [구체 계약 교정안 A/B/C](../../docs/sdk-migration/decoder-design-plan.md#dec-05-계약-교정안-a안-확정bc-미구현-제안)는 baseline+설계(A, 확정), v4 입력 검증만 추가(B), 새 allowance Action/소비자까지 교정(C)으로 분리했다. 이번 범위의 미응답 질문은 없다. nonce·malformed·폭·시간·v4 교정은 별도 범위의 미결 문제로 남기며 B/C는 미구현 제안이다. Rust·manifest·worker·기존 273개 기대값은 변경하지 않았다. 실행 명령과 검증된 DEC-04 JS/WASM 재사용 근거는 [README](README.md#dec-05a-사용자-실행-기록--저장-로그-확인)에 있다.
 
-## DEC-05b — Single 사용자 검증 이후 착수
+## DEC-05b — 작성한 검사와 미결 계약
 
-실제 [`permitBatch@1.0.0.json`](../../registryV2/manifests/uniswap/permit2/permitBatch@1.0.0.json)을 읽고 원본 대응을 정적으로 확인했으며 **Batch fixture·시험·script 구현은 미착수, 사용자 실행 검증도 미실행**이다. Single과 같은 네 체인 concrete Permit2 주소를 선언하고 `array_source: "$args.permitBatch[0]"` 및 원소별 positional nonce를 사용한다. 기존 Rust `ON_DISK` 상수의 named emit·nonce 누락은 현재 실제 파일과 다르므로 새 시험의 원본으로 사용하지 않는다.
+**코드 작성·정적 검토: 구현 완료, 사용자 실행 대기. 사용자 실행 검증: 미실행·로그 미제공.** Single의 85/85·당시 통합 358/358 로그를 먼저 기록하고 실제 [`permitBatch@1.0.0.json`](../../registryV2/manifests/uniswap/permit2/permitBatch@1.0.0.json)을 연결하는 [`permit2-batch.cases.json`](permit2-batch.cases.json)과 [`permit2-batch.test.mjs`](permit2-batch.test.mjs)을 작성했다. 요청 분류는 normal 25, legacy_diagnostic 22, limit_boundary 1, limit_error 3, empty_observation 1, emit_error 37, input_error 8, routing_miss 5인 **102개**다. 구조 검사 6개를 더한 **108개 정의**, 기존 358개를 포함한 통합 **466개 정의**이며 통과 수가 아니다. 아래 기대값·오류는 작성한 검사와 정적 소스 대조이며 Batch 실행 결과가 아니다. 기존 Single fixture/test·기존 358개 기대값을 변경하지 않는다.
 
-Single 사용자 로그를 확인한 뒤 복수 원소의 서로 다른 token/amount/expiration/nonce·순서 및 역순·중복 token 보존, 공통 spender/sigDeadline 적용, 첫째/둘째 필수 필드 누락, empty/비배열/64·65 경계와 같은 WASM 프로세스에서 Single/Batch primary type 분리를 검사한다. 현재 출력은 최상위 Action 하나 아래 Multicall body의 자식 ActionBody이며 details 수와 최상위 actions 수를 같게 가정하지 않는다. empty typed Batch는 Unknown, 일부 오류는 전체 실패로 전파되는 경로가 있어 임의 정상화·부분 성공·조용한 생략을 도입하지 않는다. 한도 계약 변경은 DEC-06 진단 계획과 함께 별도 판단한다.
+구조 검사 6개는 정확한 12/8/0 index·네 체인/JCS, 실제 ABI/emit 원본, BigInt 독립 검산·분류, key 재배열/역순/중복, 같은 프로세스의 Single/Batch 교대 9요청·설치 상태 4개의 프로세스 격리·등록된 primary type 교차 시 입력 오류, v4 Single/Batch unsupported guard다. 요청 경계에는 양쪽 원소 각각의 0/MAX/MAX+1·nonce 255/256/513/770, 64개 정상·65개 전체 오류·65개+첫 원소 오류의 한도 우선·64개+마지막 원소 오류의 전체 전파를 포함한다. 시간 `2^53+1`/`2^64`는 legacy diagnostic이다.
 
-Batch의 nonce 모델·범위·시간 표현·v4 미지원·외부 조회 미연결도 Single과 같은 미결 사항이다. 원본을 읽었다는 사실이나 Single 성공만으로 Batch·DEC-05 전체·D2 전체를 완료 처리하지 않는다.
+**DEC-05b 정적 검토 기록:** 신규 시험/helper 2개의 `node --check`, README 신규 Bash 블록 2개의 `bash -n`, JSON 3개 파싱·102개 case ID의 유일성·unsafe integer literal 부재를 확인했다. 명령의 입력 44개 경로가 존재하고 고정 원본 9개의 hash가 일치한다. decimal 경계 18개를 정수 거듭제곱으로 독립 검산했으며 기존 시험 6개·fixture 5개·worker의 12파일은 `66af65c`와 바이트가 같다. Rust·빌드 입력에 변경이 없고 현재 JS/WASM hash는 Single 저장 로그의 검증된 쌍과 일치한다. `git diff --check`와 신규 파일 공백 검사도 이상 없다. 별도 소스 검토에서 array_emit의 한도 검사 순서·전체 실패·v4 guard와 기대값을 대조했다. 이는 파일·구문·소스 대조이며 Registry 빌드나 Native/WASM/Node 시험 실행 결과가 아니다.
+
+| 설치·원본 검사 | 요구값·근거 |
+| --- | --- |
+| 선택 | `includePermit2Single: true`, `includePermit2Batch: true`로 approve + Single + Batch. USDC permit은 이 조합에 포함하지 않음 |
+| index 수 | callkey 12개(approve/Single/Batch 각 4), typed 8개(Single/Batch 각 4), selector 0개 |
+| 주소·chain | 두 Permit2 manifest의 `1/10/8453/42161` concrete Permit2 주소 직접 선언 유지. USDC token 목록을 통한 Permit2 주소 확장 금지 |
+| 실제 원본 | selection의 Batch 원본 바이트 SHA-256 확인, typed/callkey 참조·inline 원본 보존·JCS digest 확인 후 실제 WASM install |
+| 변환 | `array_source: "$args.permitBatch[0]"`, 원소 `$inputs[0..3]`와 공통 `$args.permitBatch[1..2]`. ABI components 순서의 기존 Rust named→positional 변환 |
+| 같은 프로세스의 primary type 분리 | Single/Batch 동시 설치·교대 요청에서 각 ID/Action. 설치 상태가 다른 경우에는 기존 worker의 별도 프로세스 유지 |
+| 비교 원본 | Rust `ON_DISK` Batch 상수는 실제 파일과 다른 named emit·body nonce 누락이므로 이번 원본으로 사용하지 않음 |
+
+| 분류 | 입력·작성한 검사 | 해석 범위 |
+| --- | --- | --- |
+| 정상 복수 원소 | 서로 다른 token·amount·expiration·nonce, 공통 spender·sigDeadline | 외부 Action 1개 아래 Multicall의 자식 ActionBody에 각 값 투영. 외부 meta 하나이고 자식에는 meta 없음 |
+| 순서·중복 | 원소 역순·중복 token 및 객체 key 재배열 | 입력 순서대로 push하며 token 중복을 병합/삭제하지 않음. key 순서는 ABI tuple components 순서와 구분 |
+| 주소 역할 | Permit2 verifying contract, underlying token별 chain/address, spender, submitter | message에 owner를 추가하지 않고 네 역할을 구분 |
+| 수량·expiration·nonce | `0`, 일반 값, `2^160−1`/`2^48−1`, 범위 초과 `2^160`/`2^48`, 서로 다른 nonce와 word/bit 경계 | 정상 입력 변환과 선언 폭 미검사 진단 분리. decimal string·BigInt 독립 검산 |
+| 필수 필드·형식 | 첫째·둘째 각각 token/amount/expiration/nonce 누락·null·잘못된 형식 | 다른 emit 오류의 전체 실패와 nonce zero fallback을 구분. 정상 자식을 임의로 남기지 않음 |
+| details·원소 구조 | empty·누락/null/비배열, 잘못된 원소 타입 | empty Unknown과 array/child 오류를 구분. 정상 입력은 named EIP-712 object로 전달 |
+| 한도 | 64개와 65개 | 64개는 외부 Action 하나 아래 64 child 요구. 65개는 명시적 전체 오류이며 조용한 자르기 없음 |
+| 시간·LiveField | 정상 sigDeadline의 모든 child/외부 meta 일치, 큰 값의 별도 진단, 원소별 signed nonce/tuple/source/ttl/synced_at | source 표시와 실제 조회를 구분하고 unsafe JS 결과를 정확한 원문으로 취급하지 않음 |
+| lookup·v4 | 미등록 chain/contract/primary type와 매칭 후 malformed 구분, installed Batch v4 unsupported guard | full types 검증을 수행했다고 하지 않으며 v4 실패 후 v3 retry 없음 |
+
+### Batch 오류·한도와 관찰의 정적 근거
+
+관련 경로는 [`declarative_exports.rs`](../../crates/policy-engine-wasm/src/declarative_exports.rs)의 typed reshape/array emit 분기와 [`action_builder.rs`](../../crates/adapters/mappers/src/declarative/action_builder.rs)의 `build_array_emit`·live nonce wrapping이다. 원소 수 검사 → 순서대로 child 생성 순서를 유지하고 실패 시 `data: null`인 오류 envelope를 반환하는 경로를 작성한 시험으로 확인한다. 아래 문자열은 현재 코드의 예상 오류이며 실행으로 확인된 로그는 아직 없다.
+
+| 최소 입력·조건 | 현재 예상 결과 | 계약·기대값 판단 |
+| --- | --- | --- |
+| 정상 message에서 `details: []` | Batch decoder ID·외부 Action 1개, body `{domain:"unknown", target:Permit2, chain:"eip155:1", calldata:"", value:"0x0"}`, 정상 외부 meta | 빈 배열을 정상 Multicall 완료나 정책 allow로 표현하지 않음 |
+| details 누락/null/비배열 | `build_array_emit_failed`, `data: null`, message `array_emit array_source did not resolve to an array: $args.permitBatch[0]` | malformed와 empty의 의미 구분 |
+| 정상 details 65개 | `build_array_emit_failed`, `data: null`, message `array_emit array_source $args.permitBatch[0] has 65 element(s), exceeding max_elements=64` | 64개 결과 보존이나 65번째 생략을 새로 도입하지 않음. 현행 오류 관찰이므로 새 한도 계약 결정은 불필요 |
+| 첫째/둘째 token·amount·expiration 누락/null/불량 | `build_array_emit_failed`, message `serde from_value:` 시작, `data: null` | 앞서 생성할 수 있는 정상 child도 최종 부분 성공으로 반환하지 않음 |
+| child 자체가 null/string/bool/number | `build_array_emit_failed`, `invalid arg path`/`indexed access on non-array` 계열 메시지, `data: null` | 현재 없는 element index/path 오류 필드를 임의로 추가하지 않음 |
+| 첫째/둘째 nonce 누락/null/파싱 실패 | 해당 child의 tuple `["0x0",0]`으로 성공 가능, 다른 child 값·순서 유지 | **legacy diagnostic**이며 유효한 PermitBatch 입력으로 승인하지 않음 |
+| 정상 Batch에 primary type만 `PermitSingle`로 변경 | Single이 설치돼 있으면 Single lookup 이후 입력 해석 오류 | 미등록 primary type 사례와 구분. lookup miss에는 별도의 미등록 이름 사용 |
+| 설치된 Batch를 full-input v4로 요청 | `unsupported_typed_data_contract`, `data: null`, `installed typed-data contract is outside strict Permit support; detailed validation not performed` | types 상세 검증·암호 검증 전에 미지원. Batch 미설치는 `no_typed_data_mapper` |
+
+각 nonce LiveField는 **signed nonce를 분해한** 현재 word/bit tuple과 `onchain_view`·해당 chain·Permit2 contract·`nonceBitmap(address,uint256)`·`permit2_nonce_bitmap`, `ttl:12`, `synced_at: submitted_at`으로 구성된다. 실제 체인 조회나 신선한 Fact가 아니다. AllowanceTransfer 순차 uint48 nonce와 SignatureTransfer bitmap 의미 차이는 A안의 별도 교정 대상으로 유지한다.
+
+현재 v3는 `uint160/uint48` 폭을 검사하지 않아 초과값을 출력 타입 범위에서 수용할 수 있고 nonce `2^48`은 `["0x10000000000",0]`으로 표현된다. 큰 공통 sigDeadline은 모든 child에 적용되므로 JS 안전 정수 초과와 body u64 포화/외부 meta 0 문제도 전파될 수 있다. worker JSON.parse 이후의 값으로 raw 정수 정밀도를 복원했다고 주장하지 않는다. nonce·폭·시간·v4의 교정 설계와 B/C 제안은 [상세 계획](../../docs/sdk-migration/decoder-design-plan.md#dec-05-계약-교정안-a안-확정bc-미구현-제안)에 보존하며 이번에 다시 승인 질문하거나 런타임을 변경하지 않는다.
+
+Batch 실행 명령은 [README](README.md#dec-05b-사용자가-직접-실행할-검증-명령)의 **Batch 개별 → 기존 358개 포함 통합** 순서다. Rust·worker·manifest를 변경하지 않아 검증된 JS/WASM을 재사용한다. Single 개별 재실행은 별도로 요구하지 않는다. 외부 nonce 조회·서명 검증·정책·Core·DEC-06/07·SDK 소스 이관은 미연결/미구현이다. Batch 사용자 실행 검증 전에는 DEC-05 전체나 D2 전체를 완료 처리하지 않는다.

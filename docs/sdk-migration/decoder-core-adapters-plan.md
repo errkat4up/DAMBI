@@ -1,6 +1,6 @@
 # Dambi: Decoder·정책 → Core → Adapters 개발 계획
 
-**2026-09-12 현재 진행:** D2의 DEC-05a Permit2 Single은 **구현 완료, 사용자 실행 대기**다. 실제 manifest의 v3 연결 fixture·시험 및 최소 선택 옵션을 작성했고 Rust·worker·기존 다섯 Node 시험의 273개 기대값을 유지했다. 새 시험은 요청 79개와 구조 검사 6개인 **85개 정의**, 통합은 **358개 정의**이며 통과 수가 아니다. DEC-05b Batch는 **미착수**이고 Single 사용자 실행 검증 후 별도 진행한다. 사용자는 계약 교정안 구체화 후 **A — 연결 시험·교정 설계만 마무리**를 선택했다. 이번 범위는 확정됐고 nonce·malformed·범위/시간·v4의 런타임 교정은 별도 범위의 미결 문제로 남긴다. 실행 명령은 [README](../../fixtures/decoder-policy/README.md#dec-05a-사용자가-직접-실행할-검증-명령), 상세 원본/교정안은 [DEC-05 설계](decoder-design-plan.md#dec-05--permit2-single--batch--전체-계획-d2)를 따른다.
+**2026-09-12 현재 진행:** D2의 DEC-05a Permit2 Single은 저장 로그 기준 **사용자 실행 검증 완료**다. 실제 manifest의 v3 연결 fixture·시험 및 최소 선택 옵션을 작성했고 Rust·worker·기존 다섯 Node 시험의 273개 기대값을 유지했다. Single 사용자 실행은 요청 79개+구조 6개인 **85/85**, 당시 통합 **358/358 통과**다. 이 실행 로그·입력·산출물을 먼저 확인한 뒤 DEC-05b Batch를 작성했으며 **구현 완료, 사용자 실행 대기**다. 신규 102요청+6구조=108개·통합 466개는 정의 수이며 Batch 실행 결과는 아직 없다. 사용자는 계약 교정안 구체화 후 **A — 연결 시험·교정 설계만 마무리**를 선택했다. 이번 범위는 확정됐고 nonce·malformed·범위/시간·v4의 런타임 교정은 별도 범위의 미결 문제로 남긴다. 실행 명령은 [README](../../fixtures/decoder-policy/README.md#dec-05b-사용자가-직접-실행할-검증-명령), 상세 원본/교정안은 [DEC-05 설계](decoder-design-plan.md#dec-05--permit2-single--batch--전체-계획-d2)를 따른다.
 
 아래 DEC-01~04의 “현재/이번”·DEC-05 미진행·문서만 변경했다는 설명은 당시 과거 기록이다. DEC-04의 저장 로그·Native 181개·Node 273개 검증 완료 기록과 미제공 항목을 보존한다. 이번에도 읽기·수정·정적 검토만 수행하고 빌드·시험·설치·Git 변경 명령은 실행하지 않는다.
 
@@ -213,10 +213,12 @@ worker 기본/transaction·선택적 정책 평가·typed v3 동작을 유지하
 
 #### DEC-05a / DEC-05b — Permit2 기존 v3 연결과 계약 교정 범위
 
+**DEC-05a 저장 로그 확인:** `/private/tmp/dambi-dec05a-verify.JPtwLZ/`에서 Single **85/85 통과**(`duration_ms=728.833416`), 당시 통합 **358/358 통과**(`duration_ms=1055.562083`)를 확인했다. 두 실행 모두 suites/fail/cancelled/skipped/todo는 0이다. 실제 실행 HEAD는 전후 `60bb3d561b889594ce5837088d74f072de4fd6a2`이며 9개 미커밋 경로가 있던 worktree다. 이후 사용자 커밋 `66af65c6bbe0adb6f8fbb9941aac729ec330b801`과 **Batch 편집 전** 파일을 대조하여 로그 입력 41개가 모두 현재 파일·Git blob에 일치함을 확인했다. 전후 tracked patch도 바이트 동일하고 입력 41개·산출물 2개 사후 검사는 모두 OK다. Node v25.9.0/npm 11.12.1, UTC Single `2026-09-12T06:46:09Z–06:46:10Z`, 통합 `06:46:10Z–06:46:11Z`, verification/input hash/artifact hash exit는 모두 0이다. DEC-04의 같은 JS/WASM 쌍을 재빌드 없이 사용했고 현재 산출물 hash도 일치한다. 실행 HEAD와 이후 구현 커밋을 구분한다. 에이전트 재실행이 아니며 full EIP-712·서명·외부 nonce 검증이나 A안에서 별도로 남긴 계약 교정의 완료가 아니다. 상세 로그·hash는 [README](../../fixtures/decoder-policy/README.md#dec-05a-사용자-실행-기록--저장-로그-확인)에 기록했다.
+
 | 단계 | 코드 작성·정적 검토 | 사용자 실행 검증·현재 범위 |
 | --- | --- | --- |
-| DEC-05a Single | **구현 완료, 사용자 실행 대기**. `permit2-single.cases.json`, `.test.mjs`, selection·최소 builder 선택·script·네 문서 | 미실행. 요청 79개 + 구조 6개 = 85개 정의, 기존 273개를 보존한 통합 358개 정의. 아직 통과 수 없음 |
-| DEC-05b Batch | **미착수**. 실제 원본과 기존 Rust 상수의 차이만 정적 대조 | 미실행. Single 로그를 확인한 뒤 별도 fixture/test/script로 진행 |
+| DEC-05a Single | 코드 작성·정적 검토·사용자 실행 검증 완료. 사용자 구현 커밋 `66af65c` | 저장 로그에서 **85/85·당시 통합 358/358 통과**. 실제 실행 HEAD `60bb3d5`와 이후 커밋 구분 |
+| DEC-05b Batch | **구현 완료, 사용자 실행 대기**. 실제 Batch 원본·fixture/test·최소 helper 선택·script·네 문서 | 미실행. 요청 102개+구조 6개=108개·통합 466개 정의. 통과 수·실행 로그 미제공 |
 | 계약 교정 | 사용자 요청에 따라 이번 단계에서 [교정안 A/B/C](decoder-design-plan.md#dec-05-계약-교정안-a안-확정bc-미구현-제안) 구체화 | **A baseline+설계 확정**. B v4 입력 검증, C allowance Action/소비자 교정은 별도 범위의 미구현 제안 |
 
 Single 원본은 [`registryV2/manifests/uniswap/permit2/permitSingle@1.0.0.json`](../../registryV2/manifests/uniswap/permit2/permitSingle@1.0.0.json), Batch는 [`permitBatch@1.0.0.json`](../../registryV2/manifests/uniswap/permit2/permitBatch@1.0.0.json)이다. 두 파일 모두 체인 `1/10/8453/42161`의 concrete Permit2 주소를 직접 선언하고 USDC token 목록을 통한 확장 대상이 아니다. 기존 Rust synthetic Single/Batch는 schema·ID·체인/types·emit이 다르며 `ON_DISK` Batch JSON literal도 현재 원본과 달리 named emit·nonce 누락이다. 새 연결 시험은 실제 파일을 사용한다. 상세 대응표는 [상세 계획 DEC-05](decoder-design-plan.md#dec-05--permit2-single--batch--전체-계획-d2)에 기록했다.
@@ -229,7 +231,11 @@ Single 정상 객체의 details token/amount/expiration/nonce·공통 spender/si
 
 정적 분석상 nonce malformed는 zero fallback, v3는 선언 uint160/uint48 폭 미검사, 큰 sigDeadline은 body u64 포화/meta 0 또는 JSON→JS 정밀도 손실이 가능하다. nonce 모델 변경은 Action·sync args·transition 소비에 영향을 주고 malformed/범위/시간 거절은 기존 v3 성공을 오류로 바꾼다. 사용자는 교정안 구체화 후 **A — 연결 시험·교정 설계만 마무리**를 선택했다. 이번 범위의 미응답 질문은 없으며 런타임 교정은 별도 범위로 남긴다. B/C의 입력/출력 계약 변경은 아직 구현하거나 승인한 것이 아니다. 구체 최소 입력·현재 동작·차이·수정 범위·소비자 영향은 [coverage](../../fixtures/decoder-policy/coverage.md#dec-05a--작성한-검사와-미결-계약)와 상세 계획을 따른다. v4 strict는 현재 USDC EIP-2612만 지원하고 Permit2 허용 ID 추가·v3 fallback은 적용하지 않는다.
 
-Batch 착수 후에는 서로 다른 원소·순서/역순/중복 유지, 공통 spender/sigDeadline, 첫째/둘째 누락, empty/비배열/64·65개, 동일 WASM의 Single/Batch primary type 구분을 확인한다. 현재 최상위 Action 하나 아래 Multicall 자식 ActionBody 구조와 empty Unknown·부분 오류의 전체 전파를 유지하며 새 한도 계약은 DEC-06 진단과 함께 결정한다. 외부 nonce/RPC·서명·정책·witness/SignatureTransfer 기능·venue·Core·SDK 소스 이관을 이번 fixture와 함께 구현하지 않는다. Single만으로 DEC-05나 D2 전체를 완료 처리하지 않는다.
+Batch는 별도 `permit2-batch.cases.json`/`.test.mjs`와 `includePermit2Batch: false` 기본값·명시 선택 때만 `permit2BatchSource` 반환을 작성했다. `buildRegistry(selection, { includePermit2Single: true, includePermit2Batch: true })`로 **approve+Single+Batch**를 선택하여 callkey 12·typed 8·selector 0개를 요구한다. 네 체인 typed/callkey 참조·JCS digest·실제 WASM 설치와 v3 요청을 연결한다. USDC permit은 이 조합에 포함하지 않고 기존 Single 시험의 조합과 기대값은 유지한다. 원본 Batch SHA-256은 `0x0343bc44659b2b1e7e184a39e7e17acd642ec52f2776adca963df4d8d3bd35ee`다.
+
+작성 범위는 서로 다른 token/amount/expiration/nonce·순서/역순/중복 유지, 공통 spender/sigDeadline, 첫째/둘째 필수 필드 누락/null/불량, empty/비배열/64·65개, 동일 WASM Single/Batch primary type 구분이다. 최상위 Action 하나와 외부 meta 하나 아래 Multicall의 자식 ActionBody 구조를 검사한다. empty는 Unknown이며 65개는 명시적 `build_array_emit_failed` 전체 오류다. child 오류도 `data:null`인 전체 실패이며 정상 child만 남기거나 65번째 이후를 조용히 자르지 않는다. nonce 누락의 zero fallback·폭/시간은 별도 기존 한계 진단이며 A안의 교정을 이번에 구현하지 않는다. 현행 한도 오류를 관찰하므로 새 한도 계약 결정이 필요하지 않다.
+
+Batch의 **코드 작성·정적 검토는 구현 완료, 사용자 실행 대기**다. 요청은 normal 25, legacy_diagnostic 22, limit_boundary 1, limit_error 3, empty_observation 1, emit_error 37, input_error 8, routing_miss 5로 102개이며 구조 6개를 더한 108개·통합 466개는 아직 정의 수다. v4는 여전히 USDC만 지원하고 외부 nonce/RPC·서명·정책·witness/SignatureTransfer 기능·venue·Core·DEC-06/07·SDK 소스 이관을 추가하지 않는다. 실행은 [README](../../fixtures/decoder-policy/README.md#dec-05b-사용자가-직접-실행할-검증-명령)의 검증된 JS/WASM 재사용 → Batch 개별 → 기존 Single 포함 통합 순서다. Single 개별 재실행을 별도로 요구하지 않는다. 상세 오류·coverage는 [Batch 기록](../../fixtures/decoder-policy/coverage.md#dec-05b--작성한-검사와-미결-계약)을 따른다. Batch 실행 검증 전에는 DEC-05나 D2 전체를 완료 처리하지 않는다.
 
 ### D3. 정책 콘텐츠와 manifest 정리
 

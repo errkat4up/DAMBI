@@ -1,8 +1,185 @@
 # DEC-01~05: 실제 Registry·WASM Decoder 기준 시험
 
-## DEC-05a 현재 상태 — 구현 완료, 사용자 실행 대기
+## DEC-05b 현재 상태 — 구현 완료, 사용자 실행 대기
 
-DEC-05a는 실제 [`permitSingle@1.0.0.json`](../../registryV2/manifests/uniswap/permit2/permitSingle@1.0.0.json)을 기존 **v3 typed 경로**에 연결하는 fixture·시험 구현이다. 코드 작성·정적 검토와 사용자 실행 검증을 구분한다. **구현 완료, 사용자 실행 대기**이며 실행 통과 수·실행 로그·resolved digest는 아직 없다. 신규 요청 79개 + 구조 검사 6개 = **85개 정의**, 기존 Node 273개를 보존한 통합은 **358개 정의**다. DEC-01~04 사용자 통과 기록은 아래에 보존한다. **DEC-05b Batch는 미착수**이고 Single 사용자 실행 결과를 확인한 뒤 별도 변경으로 진행한다.
+Single의 저장 로그를 먼저 확인해 **85/85·당시 통합 358/358 사용자 실행 검증 완료**를 아래 기록에 반영했다. 실행 당시 HEAD `60bb3d5`와 이후 사용자 커밋 `66af65c6bbe0adb6f8fbb9941aac729ec330b801`을 구분하며, Batch 편집 전 로그 입력 41개·현재 파일·커밋 blob의 일치도 확인했다. 이번에는 확정된 **A안: 기존 v3 연결 시험·교정 설계** 범위로 DEC-05b를 작성했다. **Batch는 구현 완료, 사용자 실행 대기**다. 신규 요청 102개 + 구조 검사 6개 = **108개 정의**, 기존 358개를 포함한 통합은 **466개 정의**이며 실행 통과 수·로그·resolved digest는 아직 없다. DEC-04의 273개 및 Single의 85개 기존 기대값을 보존한다.
+
+| 이번 변경 파일 | 목적 |
+| --- | --- |
+| `permit2-batch.cases.json`, `permit2-batch.test.mjs` | 실제 Batch 원본 → strict Registry → typed 참조/JCS → 실제 WASM v3 → Multicall·오류·기존 한계 진단 |
+| `registry-selection.json` | `permit2_batch_manifest`의 원본 경로·바이트 SHA-256 고정 |
+| `helpers/build-registry.mjs` | `includePermit2Batch: false` 기본값, 명시적 선택 때만 원본 추가·`permit2BatchSource` 반환. 기존 선택·반환·hash 검사·실패 정리 보존 |
+| 루트 `package.json` | Batch 개별 `decoder:test:permit2-batch`, 기존 여섯 시험 파일을 보존한 통합 명령에 Batch만 추가 |
+| README·coverage·두 SDK migration 계획서 | Single 사용자 검증 증거와 Batch 작성/실행 상태·한계·사용자 명령 분리 |
+
+Batch 시험은 `buildRegistry(selection, { includePermit2Single: true, includePermit2Batch: true })`로 **approve + Single + Batch**를 선택한다. callkey **12개**(각 4), typed index **8개**(Single 4 + Batch 4), selector index **0개**를 요구한다. USDC permit은 이 설치 조합에 포함하지 않으며 기존 Single 시험의 approve+USDC+Single 조합은 유지한다. 두 Permit2 원본은 체인 `1/10/8453/42161`에 concrete Permit2 주소를 선언하므로 token 목록으로 주소를 확장하지 않는다. 실제 [`permitBatch@1.0.0.json`](../../registryV2/manifests/uniswap/permit2/permitBatch@1.0.0.json)의 바이트 SHA-256은 `0x0343bc44659b2b1e7e184a39e7e17acd642ec52f2776adca963df4d8d3bd35ee`다.
+
+서로 다른 details의 token/amount/expiration/nonce, 순서·역순·중복 token, 공통 spender/sigDeadline, 첫째/둘째 필수 필드 누락·null·형식 오류, empty/비배열/64·65 경계와 같은 WASM 프로세스의 Single/Batch 구분을 작성했다. 출력은 **외부 Action 하나·외부 meta 하나 아래 Multicall의 자식 ActionBody 목록**이며 자식별 meta나 details 수만큼 최상위 Action이 생긴다고 가정하지 않는다. 현재 empty는 Unknown, 65개는 명시적 `build_array_emit_failed`, 일부 원소 오류는 전체 실패다. 이 동작을 정상 empty·부분 성공·조용한 생략으로 변경하지 않는다. 자세한 작성 범위·정적 오류·진단은 [coverage](coverage.md#dec-05b--작성한-검사와-미결-계약)를 따른다.
+
+A안에서 별도로 남긴 nonce 모델·malformed fallback·uint160/uint48 범위·큰 시간 표현 문제는 계속 미결이다. signed nonce를 분해한 tuple/LiveField는 실제 RPC 조회값이 아니고 v3 변환 통과는 full EIP-712 검증이 아니다. Rust·worker·원본 manifest를 변경하지 않았으며 v4는 USDC EIP-2612만 지원한다. nonce/RPC·서명·정책·Core·DEC-06/07·SDK 이관을 추가하지 않는다. 새 한도 계약 변경 없이 현재 64/65와 전체 오류 전파를 확인하는 단계다.
+
+### DEC-05b 사용자가 직접 실행할 검증 명령
+
+현재 Rust·worker·빌드 입력과 검증된 JS/WASM 쌍을 유지하므로 **새 WASM 빌드는 필요 없다**. 아래 명령은 **Batch 개별 → 기존 Single 및 DEC-01~04를 포함한 통합 시험** 순서다. Single 개별 재실행을 별도로 요구하지 않는다. 입력/산출물 hash와 HEAD·Git 상태·tracked patch를 실행 전후 `/tmp`에 저장하고 `set -euo pipefail`과 종료 trap으로 `tee` 사용 시에도 실패를 유지한다. 입력 44개는 이번 실행의 대조 목록이며 SDK 전체 독립 빌드 입력을 주장하지 않는다. 에이전트는 이 명령을 실행하지 않았다.
+
+```bash
+bash <<'BASH'
+set -euo pipefail
+cd /Users/spu/SDKdambi/DAMBI
+export GIT_OPTIONAL_LOCKS=0
+dec05b_log_dir="$(mktemp -d /tmp/dambi-dec05b-verify.XXXXXX)"
+printf 'dec05b_log_dir=%s\n' "$dec05b_log_dir"
+dec05b_inputs=(
+  package.json
+  Cargo.toml
+  Cargo.lock
+  rust-toolchain.toml
+  fixtures/decoder-policy/permit2-single.cases.json
+  fixtures/decoder-policy/permit2-single.test.mjs
+  fixtures/decoder-policy/permit2-batch.cases.json
+  fixtures/decoder-policy/permit2-batch.test.mjs
+  fixtures/decoder-policy/registry-selection.json
+  fixtures/decoder-policy/helpers/build-registry.mjs
+  fixtures/decoder-policy/helpers/wasm-worker.mjs
+  fixtures/decoder-policy/approve.cases.json
+  fixtures/decoder-policy/approve.test.mjs
+  fixtures/decoder-policy/approve-policy.test.mjs
+  fixtures/decoder-policy/transfer.cases.json
+  fixtures/decoder-policy/transfer.test.mjs
+  fixtures/decoder-policy/typed-permit.cases.json
+  fixtures/decoder-policy/typed-permit.test.mjs
+  fixtures/decoder-policy/typed-permit-strict.cases.json
+  fixtures/decoder-policy/typed-permit-strict.test.mjs
+  fixtures/decoder-policy/README.md
+  fixtures/decoder-policy/coverage.md
+  docs/sdk-migration/decoder-design-plan.md
+  docs/sdk-migration/decoder-core-adapters-plan.md
+  registryV2/package.json
+  registryV2/package-lock.json
+  registryV2/scripts/build-index.ts
+  registryV2/manifests/standard/erc20/approve@1.0.0.json
+  registryV2/manifests/standard/erc20/transfer@1.0.0.json
+  registryV2/manifests/standard/erc20/permit@1.0.0.json
+  registryV2/manifests/uniswap/permit2/permitSingle@1.0.0.json
+  registryV2/manifests/uniswap/permit2/permitBatch@1.0.0.json
+  registryV2/tokens/1/0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.json
+  registryV2/tokens/10/0x0b2c639c533813f4aa9d7837caf62653d097ff85.json
+  registryV2/tokens/8453/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.json
+  registryV2/tokens/42161/0xaf88d065e77c8cc2239327c5edb3a432268e5831.json
+  crates/policy-engine-wasm/src/declarative_exports.rs
+  crates/policy-engine-wasm/Cargo.toml
+  crates/policy-engine-wasm/src/lib.rs
+  crates/policy-engine-wasm/src/typed_data_validation.rs
+  crates/policy-engine-wasm/src/dto.rs
+  crates/adapters/mappers/src/declarative/action_builder.rs
+  crates/policy-server/asset-model/action/src/token/permit2_sign.rs
+  crates/policy-engine-wasm/tests/declarative_v3_typed_data_install.rs
+)
+dec05b_artifacts=(
+  crates/policy-engine-wasm/pkg/policy_engine_wasm.js
+  crates/policy-engine-wasm/pkg/policy_engine_wasm_bg.wasm
+)
+dec05b_finish() {
+  dec05b_exit=$?
+  trap - EXIT
+  set +e
+  {
+    date -u '+finished_utc=%Y-%m-%dT%H:%M:%SZ'
+    git branch --show-current
+    git rev-parse HEAD
+    git status --short
+    git diff --name-only
+  } > "$dec05b_log_dir/source-after.log" 2>&1
+  git diff --binary > "$dec05b_log_dir/tracked-after.patch"
+  shasum -a 256 -c "$dec05b_log_dir/inputs-before.sha256" > "$dec05b_log_dir/inputs-after.log" 2>&1
+  dec05b_input_exit=$?
+  shasum -a 256 -c "$dec05b_log_dir/artifacts-before.sha256" > "$dec05b_log_dir/artifacts-after.log" 2>&1
+  dec05b_artifact_exit=$?
+  if [ "$dec05b_exit" -eq 0 ] && { [ "$dec05b_input_exit" -ne 0 ] || [ "$dec05b_artifact_exit" -ne 0 ]; }; then
+    dec05b_exit=1
+  fi
+  printf 'verification_exit=%s input_hash_exit=%s artifact_hash_exit=%s\n' \
+    "$dec05b_exit" "$dec05b_input_exit" "$dec05b_artifact_exit" | tee -a "$dec05b_log_dir/timeline.log"
+  printf 'dec05b_log_dir=%s\n' "$dec05b_log_dir"
+  exit "$dec05b_exit"
+}
+trap dec05b_finish EXIT
+{
+  date -u '+started_utc=%Y-%m-%dT%H:%M:%SZ'
+  git branch --show-current
+  git rev-parse HEAD
+  git status --short
+  git diff --name-only
+  node --version
+  npm --version
+} | tee "$dec05b_log_dir/source-and-tools.log"
+git diff --binary > "$dec05b_log_dir/tracked-before.patch"
+shasum -a 256 "${dec05b_inputs[@]}" > "$dec05b_log_dir/inputs-before.sha256"
+shasum -a 256 "${dec05b_artifacts[@]}" > "$dec05b_log_dir/artifacts-before.sha256"
+cat > "$dec05b_log_dir/dec04b-artifacts.sha256" <<'HASHES'
+628e1a7956b3d82ec203c17af83cb3b06a915d45df070166c6de49a843207043  crates/policy-engine-wasm/pkg/policy_engine_wasm.js
+c39531dabb7f6f81b0cfa7b0324f33a2b5e906c569ddc15063ec1d170f6177b9  crates/policy-engine-wasm/pkg/policy_engine_wasm_bg.wasm
+HASHES
+shasum -a 256 -c "$dec05b_log_dir/dec04b-artifacts.sha256" | tee "$dec05b_log_dir/reused-artifacts.log"
+git diff --check 2>&1 | tee "$dec05b_log_dir/diff-check.log"
+date -u '+batch_started_utc=%Y-%m-%dT%H:%M:%SZ' | tee -a "$dec05b_log_dir/timeline.log"
+npm run decoder:test:permit2-batch 2>&1 | tee "$dec05b_log_dir/permit2-batch.log"
+date -u '+batch_success_utc=%Y-%m-%dT%H:%M:%SZ' | tee -a "$dec05b_log_dir/timeline.log"
+date -u '+integrated_started_utc=%Y-%m-%dT%H:%M:%SZ' | tee -a "$dec05b_log_dir/timeline.log"
+npm run decoder:test 2>&1 | tee "$dec05b_log_dir/integrated.log"
+date -u '+integrated_success_utc=%Y-%m-%dT%H:%M:%SZ' | tee -a "$dec05b_log_dir/timeline.log"
+BASH
+```
+
+실행 후 표시된 `/tmp/dambi-dec05b-verify.*` 경로의 Batch·통합 로그, 종료 코드, 전후 hash·Git 기록을 실제 코드와 대조하여 네 문서를 갱신한다. 입력/산출물 확인 실패를 시험 통과로 대체하지 않는다. 검증된 산출물이 없거나 hash가 다르면 출처를 확인하기 전 과거 쌍으로 새 Rust 변경을 시험하지 않는다. 이번 작업에 dependency 설치·재빌드를 요구하는 소스 변경은 없다.
+
+### DEC-05b 검증 결과 반영 후 로컬 커밋 명령
+
+Batch 사용자 실행 결과를 확인하고 네 문서에 반영한 후 사용할 명령이다. 기존 staged 변경이 있으면 중단하고, stage한 경로가 **Batch 관련 아홉 파일과 정확히 일치**해야 commit한다. Single fixture/test는 이미 검증·커밋됐으므로 이번 stage 목록에 넣지 않는다. 출력은 `/tmp/dambi-dec05b-stage.*`의 `commit.log`에 저장하며 `pipefail`로 실패 상태를 보존한다. WASM·pkg·target·node_modules·임시 로그·push는 포함하지 않는다.
+
+```bash
+bash <<'BASH'
+set -euo pipefail
+cd /Users/spu/SDKdambi/DAMBI
+dec05b_stage_dir="$(mktemp -d /tmp/dambi-dec05b-stage.XXXXXX)"
+printf 'dec05b_stage_dir=%s\n' "$dec05b_stage_dir"
+(
+set -euo pipefail
+git diff --check
+git status --short
+git diff --name-only
+if ! git diff --cached --quiet; then
+  printf 'Existing staged changes: review their scope before this commit.\n' >&2
+  git diff --cached --name-only
+  exit 1
+fi
+dec05b_files=(
+  fixtures/decoder-policy/permit2-batch.cases.json
+  fixtures/decoder-policy/permit2-batch.test.mjs
+  fixtures/decoder-policy/registry-selection.json
+  fixtures/decoder-policy/helpers/build-registry.mjs
+  package.json
+  fixtures/decoder-policy/README.md
+  fixtures/decoder-policy/coverage.md
+  docs/sdk-migration/decoder-design-plan.md
+  docs/sdk-migration/decoder-core-adapters-plan.md
+)
+git add -- "${dec05b_files[@]}"
+git diff --cached --check
+git diff --cached --stat
+printf '%s\n' "${dec05b_files[@]}" | LC_ALL=C sort > "$dec05b_stage_dir/expected-paths.txt"
+git diff --cached --name-only | LC_ALL=C sort > "$dec05b_stage_dir/staged-paths.txt"
+diff -u "$dec05b_stage_dir/expected-paths.txt" "$dec05b_stage_dir/staged-paths.txt"
+git commit -m "test(decoder): connect real Permit2 Batch typed decoding" -- "${dec05b_files[@]}"
+git log -1 --oneline
+git status --short
+) 2>&1 | tee "$dec05b_stage_dir/commit.log"
+BASH
+```
+
+## DEC-05a 상태 — 사용자 실행 검증 완료
+
+DEC-05a는 실제 [`permitSingle@1.0.0.json`](../../registryV2/manifests/uniswap/permit2/permitSingle@1.0.0.json)을 기존 **v3 typed 경로**에 연결하는 fixture·시험 구현이다. 코드 작성·정적 검토에 이어 저장된 사용자 로그를 직접 확인하여 **사용자 실행 검증 완료**로 기록한다. 신규 요청 79개 + 구조 검사 6개 = **85/85 통과**, 기존 Node 273개를 보존한 당시 통합은 **358/358 통과**다. DEC-01~04 사용자 통과 기록은 아래에 보존한다. Single 로그·입력·산출물을 먼저 대조한 뒤 DEC-05b를 별도 변경으로 진행한다.
 
 | 변경 파일 | 목적 |
 | --- | --- |
@@ -20,9 +197,33 @@ Single 시험의 선택은 `buildRegistry(selection, { includePermit: true, incl
 
 nonce 누락/null/파싱 실패의 zero fallback, `uint160/uint48` 선언 폭 미검사, 큰 `sigDeadline`의 body/meta 불일치·JS 정밀도 손실은 정상 계약으로 승인한 기대값이 아닌 **기존 동작 진단**이다. 사용자는 교정안 구체화 후 **A — 연결 시험·교정 설계만 마무리**를 선택했다. [구체 계약 교정안 A/B/C](../../docs/sdk-migration/decoder-design-plan.md#dec-05-계약-교정안-a안-확정bc-미구현-제안)는 A 현재 baseline+설계(확정), B v4 입력 검증만 추가(모델 의미 미교정), C v4+새 allowance Action/소비자 교정으로 구분한다. 이번 변경 범위의 미응답 질문은 없다. 런타임 계약 교정은 별도 범위로 남기며 B/C는 미구현 제안이다. v4 strict 지원은 여전히 USDC EIP-2612만이며 Permit2 허용 ID 추가·v3 자동 재시도를 하지 않는다. 외부 nonce 조회·서명 검증·정책 판정은 미연결이다.
 
-### DEC-05a 사용자가 직접 실행할 검증 명령
+### DEC-05a 사용자 실행 기록 — 저장 로그 확인
 
-에이전트는 빌드·시험·의존성 설치·Git 변경 명령을 실행하지 않았다. Rust·worker·빌드 입력을 변경하지 않았고 DEC-04 저장 로그의 Rust/빌드 입력 9개와 현재 파일을 읽기 전용으로 대조해 일치를 확인했다. 현재 JS/WASM hash도 아래 DEC-04b 저장 로그의 검증된 쌍과 일치한다. 따라서 **WASM 재빌드 없이** Single 개별 시험 → 기존 273개를 포함한 통합 시험을 실행한다. 아래 블록은 실행 전후 입력/산출물 hash·Git 상태·patch와 종료 상태를 `/tmp`에 저장하며 `tee`가 시험 실패를 숨기지 않게 한다. 산출물이 기록값과 다르면 이 블록은 시험 전에 중단하므로 출처를 먼저 확인한다.
+사용자 실행 로그 `/private/tmp/dambi-dec05a-verify.JPtwLZ/`를 직접 읽었다. **Single의 실제 원본 → Registry → WASM v3 연결 검증 완료**이며 에이전트의 빌드·시험 재실행 결과가 아니다. A안(연결 시험·교정 설계만)은 계속 확정 상태다. 정상 변환과 기존 한계 진단이 통과한 것이며 full EIP-712·서명·외부 nonce 검증 또는 nonce/폭/시간 계약 교정 완료를 의미하지 않는다.
+
+| 사용자 실행 | 전체 / 통과 | suites / fail / cancelled / skipped / todo | duration_ms |
+| --- | --- | --- | --- |
+| `npm run decoder:test:permit2-single` | **85 / 85** | **0 / 0 / 0 / 0 / 0** | 728.833416 |
+| 당시 `npm run decoder:test` | **358 / 358** | **0 / 0 / 0 / 0 / 0** | 1055.562083 |
+
+| 실행·대조 항목 | 저장 로그 및 Batch 편집 전 읽기 전용 대조 결과 |
+| --- | --- |
+| 실행 branch·HEAD | `feat/decoder`, 실행 전후 `60bb3d561b889594ce5837088d74f072de4fd6a2`. Single 관련 9개 미커밋 경로를 포함한 worktree에서 실행 |
+| 현재 구현 커밋·착수 상태 | 사용자 커밋 `66af65c6bbe0adb6f8fbb9941aac729ec330b801`. Batch 편집 전 `feat/decoder`, 이 HEAD, 작업 트리 깨끗함을 확인. 이 커밋을 실제 실행 HEAD로 대체하지 않음 |
+| 입력 대응 | `inputs-before.sha256`의 41개가 **Batch 편집 전 현재 파일 및 `66af65c` Git blob과 모두 일치**. 실행 후 입력 41개 검사도 모두 OK |
+| 전후 변경 대응 | `tracked-before.patch`와 `tracked-after.patch` 바이트 동일. 전후 Git 상태·HEAD도 동일 |
+| 실제 도구 | Node `v25.9.0`, npm `11.12.1` |
+| Single 시각(UTC) | `2026-09-12T06:46:09Z` → `2026-09-12T06:46:10Z` |
+| 통합 시각(UTC) | `2026-09-12T06:46:10Z` → `2026-09-12T06:46:11Z` |
+| 종료 상태 | `verification_exit=0`, `input_hash_exit=0`, `artifact_hash_exit=0` |
+| 실제 resolved JCS digest | Single `0x902d101222980bc78defec8450859402f9f3c968be30ff532c9c547b41806127`. 로그의 callkey 9·typed 5·selector 0·네 체인 참조 검사 통과 |
+| WASM 재사용 | 재빌드 없이 DEC-04의 검증된 JS/WASM 쌍 재사용. 두 산출물 전후 hash 검사 OK, Batch 편집 전 현재 파일과도 일치 |
+
+재사용 JS SHA-256은 `628e1a7956b3d82ec203c17af83cb3b06a915d45df070166c6de49a843207043`, WASM SHA-256은 `c39531dabb7f6f81b0cfa7b0324f33a2b5e906c569ddc15063ec1d170f6177b9`다. 새 Rust 빌드·Native 시험이 있었다고 기록하지 않는다. `permit2-single.log`의 진단은 signed nonce와 tuple/LiveField·시간 결과를 구분하며 unsafe JS 값을 무손실 원문으로 취급하지 않는다. raw u64 포화값은 worker JSON.parse 이전 값을 직접 읽은 결과가 아니므로 정적 분석 근거를 유지한다.
+
+### DEC-05a 과거 검증 명령 — 실행 완료
+
+**아래 블록은 이미 사용자 실행을 완료한 Single의 과거 안내다. 재실행을 요구하지 않는다.** 당시 에이전트는 빌드·시험·의존성 설치·Git 변경 명령을 실행하지 않았다. Rust·worker·빌드 입력을 변경하지 않았고 DEC-04 저장 로그의 Rust/빌드 입력 9개와 당시 파일을 읽기 전용으로 대조해 일치를 확인했다. 현재 JS/WASM hash도 아래 DEC-04b 저장 로그의 검증된 쌍과 일치한다. 따라서 **WASM 재빌드 없이** Single 개별 시험 → 기존 273개를 포함한 통합 시험을 실행한다. 아래 블록은 실행 전후 입력/산출물 hash·Git 상태·patch와 종료 상태를 `/tmp`에 저장하며 `tee`가 시험 실패를 숨기지 않게 한다. 산출물이 기록값과 다르면 이 블록은 시험 전에 중단하므로 출처를 먼저 확인한다.
 
 ```bash
 bash <<'BASH'
@@ -132,9 +333,9 @@ BASH
 
 사용자 실행 후 위 로그 경로의 개별·통합 결과, 전후 입력/산출물 hash 및 실제 코드를 대조하고 네 문서의 실행 상태를 갱신한다. 입력 목록은 이번 실행을 대조하는 목록이며 전체 SDK 소스 독립 빌드의 증거가 아니다. 기존 Registry 의존성이 없다는 오류가 나오면 시험은 실패로 남기고 `npm ci --prefix registryV2`가 필요한지 사용자가 확인한다. 새 dependency를 추가하지 않는다.
 
-### DEC-05a 검증 결과 반영 후 로컬 커밋 명령
+### DEC-05a 과거 로컬 커밋 명령 — 커밋 확인 완료
 
-아래는 사용자 실행 검증과 결과 문서 갱신 이후 사용자가 실행할 명령이다. 변경 내용을 검토하고 이번 아홉 경로만 stage한다. 기존 staged 변경이 있으면 중단하고, stage 이후에도 목록이 아홉 경로와 정확히 일치해야 commit한다. Batch 파일·WASM·pkg·target·node_modules·임시 로그와 push는 포함하지 않는다.
+**아래는 Single의 과거 커밋 안내이며 사용자 커밋 `66af65c`의 존재와 입력 일치를 확인했다. 다시 실행할 명령이 아니다.** 변경 내용을 검토하고 이번 아홉 경로만 stage한다. 기존 staged 변경이 있으면 중단하고, stage 이후에도 목록이 아홉 경로와 정확히 일치해야 commit한다. Batch 파일·WASM·pkg·target·node_modules·임시 로그와 push는 포함하지 않는다.
 
 ```bash
 bash <<'BASH'
@@ -174,7 +375,7 @@ BASH
 
 ## DEC-01~04 보존 기록
 
-아래의 “현재”, “이번”, DEC-05 미진행 및 과거 준비·빌드·커밋 명령은 **각 기록을 작성한 DEC-01~04 당시 문맥**이다. 과거 실행 결과·로그·hash·미제공 항목은 수정하지 않는다. 이번 실행에는 위 DEC-05a 명령을 사용한다.
+아래의 “현재”, “이번”, DEC-05 미진행 및 과거 준비·빌드·커밋 명령은 **각 기록을 작성한 DEC-01~04 당시 문맥**이다. 과거 실행 결과·로그·hash·미제공 항목은 수정하지 않는다. 이번 실행에는 위 DEC-05b 명령을 사용한다.
 
 이 디렉터리는 SDK 이관 전의 **DEC-01/02/03/04 기준 시험과 strict 입력 회귀** 이다. 실제 Registry source를 실제 builder로 확장하고 기존 WASM에 설치한 뒤, 고정된 원문 approve·transfer calldata와 typed permit 요청을 Action까지 해석한다. DEC-02는 approve 디코딩 결과를 기존 planner/evaluator에 전달해 실제 Cedar 정책 하나를 평가한다. **DEC-01/02는 사용자 실행 보고 기준 검증 완료**이며 통합 37개(30 + 7) 통과, 실패·취소·건너뛰기·todo 모두 0이다. **DEC-03도 사용자 실행 보고 기준 검증 완료**다. 제공된 터미널 로그에서 transfer 개별 21개와 통합 회귀 58개가 모두 통과했으며 실패·취소·건너뛰기·todo는 모두 0이다. 04a는 사용자 제공 전체 로그 기준 typed permit **47/47 통과**(`duration_ms=801.277375`), 당시 통합 **105/105 통과**(`duration_ms=690.439291`)다. 두 실행 모두 suites·fail·cancelled·skipped·todo는 0이다. 04a 당시 실행 HEAD·시각·도구 버전·JS/WASM hash·새 빌드 로그는 미제공이며 이전 기록으로 채우지 않는다. 04a 사용자 실행 결과를 반영했고, 합의된 04b v4 DTO·strict validator·실행부·Rust/Node 회귀 시험을 별도 변경으로 작성했다. 04b 사용자 실행의 저장 로그를 직접 확인했다. Native 181개와 새 WASM 빌드, Node strict 168개·기존 typed 47개·통합 273개가 모두 통과하여 **DEC-04 전체 검증 완료**다. 에이전트가 빌드·시험을 재실행한 결과는 아니다.
 

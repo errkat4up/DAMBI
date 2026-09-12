@@ -1,0 +1,1749 @@
+{
+  "registry_source": "manifests/uniswap/permit2/permitBatch@1.0.0.json",
+  "scope": "DEC-05b actual Batch manifest -> strict Registry -> typed index/JCS -> actual WASM v3. Not full EIP-712 validation, signature verification, nonce RPC or policy evaluation.",
+  "execution_status": "구현 완료·사용자 실행 대기",
+  "case_input_rules": "Clone defaults; optional detail_order selects/repeats baseline details by index; apply set paths, then omit paths; optionally reverse object keys. Expected child_order and child overrides independently select fixed ActionBody fixtures, not WASM output.",
+  "nonce_scope": "Signed decimal nonce is currently split into [word,bit] and wrapped with nonceBitmap source, ttl 12, synced_at=submitted_at. AllowanceTransfer sequential uint48 semantics and unqueried state remain unresolved under selected scope A.",
+  "diagnostic_scope": "legacy_diagnostic and empty_observation characterize existing behavior only. Width overflow/fallback is not approved as valid Permit2 input. Large sigDeadline can fit uint256 but exceed Action/JS projection. The worker parses raw JSON; raw saturation is a static finding.",
+  "defaults": {
+    "chain_id": 1,
+    "verifying_contract": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+    "primary_type": "PermitBatch",
+    "domain_name": "Permit2",
+    "message": {
+      "details": [
+        {
+          "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+          "amount": "1000000",
+          "expiration": "1739000000",
+          "nonce": "513"
+        },
+        {
+          "token": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+          "amount": "2000000000000000000",
+          "expiration": "1740000000",
+          "nonce": "770"
+        }
+      ],
+      "spender": "0x111122223333444455556666777788889999abcd",
+      "sigDeadline": "1738002000"
+    },
+    "submitter": "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+    "submitted_at": 1700000000
+  },
+  "expected_action": {
+    "body": {
+      "domain": "multicall",
+      "actions": [
+        {
+          "domain": "token",
+          "action": "permit2_sign_allowance",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:1",
+              "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            }
+          },
+          "spender": "0x111122223333444455556666777788889999abcd",
+          "amount": "0xf4240",
+          "expires_at": 1739000000,
+          "sig_deadline": 1738002000,
+          "nonce": {
+            "value": [
+              "0x2",
+              1
+            ],
+            "source": {
+              "kind": "onchain_view",
+              "chain": "eip155:1",
+              "contract": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+              "function": "nonceBitmap(address,uint256)",
+              "decoder_id": "permit2_nonce_bitmap"
+            },
+            "synced_at": 1700000000,
+            "ttl": 12
+          }
+        },
+        {
+          "domain": "token",
+          "action": "permit2_sign_allowance",
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "eip155:1",
+              "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+            }
+          },
+          "spender": "0x111122223333444455556666777788889999abcd",
+          "amount": "0x1bc16d674ec80000",
+          "expires_at": 1740000000,
+          "sig_deadline": 1738002000,
+          "nonce": {
+            "value": [
+              "0x3",
+              2
+            ],
+            "source": {
+              "kind": "onchain_view",
+              "chain": "eip155:1",
+              "contract": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+              "function": "nonceBitmap(address,uint256)",
+              "decoder_id": "permit2_nonce_bitmap"
+            },
+            "synced_at": 1700000000,
+            "ttl": 12
+          }
+        }
+      ]
+    },
+    "meta": {
+      "submitted_at": 1700000000,
+      "submitter": "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+      "nature": {
+        "kind": "offchain_sig",
+        "domain": {
+          "name": "Permit2",
+          "chain_id": 1,
+          "verifying_contract": "0x000000000022d473030f116ddee9f6b43ac78ba3"
+        },
+        "deadline": 1738002000
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "two-distinct-details",
+      "group": "normal",
+      "expected": {}
+    },
+    {
+      "id": "reversed-details",
+      "group": "normal",
+      "detail_order": [
+        1,
+        0
+      ],
+      "expected": {
+        "child_order": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "object-key-order",
+      "group": "normal",
+      "reverse_object_keys": true,
+      "expected": {}
+    },
+    {
+      "id": "duplicate-token-distinct-values",
+      "group": "normal",
+      "detail_order": [
+        0,
+        1,
+        0
+      ],
+      "set": {
+        "message.details.2.amount": "5",
+        "message.details.2.expiration": "1741000000",
+        "message.details.2.nonce": "1027"
+      },
+      "expected": {
+        "child_order": [
+          0,
+          1,
+          0
+        ],
+        "children": {
+          "2": {
+            "amount": "0x5",
+            "expires_at": "1741000000",
+            "nonce": [
+              "0x4",
+              3
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "one-detail-still-multicall",
+      "group": "normal",
+      "detail_order": [
+        1
+      ],
+      "expected": {
+        "child_order": [
+          1
+        ]
+      }
+    },
+    {
+      "id": "chain-10",
+      "group": "normal",
+      "set": {
+        "chain_id": 10
+      },
+      "expected": {
+        "chain_id": 10
+      }
+    },
+    {
+      "id": "chain-8453",
+      "group": "normal",
+      "set": {
+        "chain_id": 8453
+      },
+      "expected": {
+        "chain_id": 8453
+      }
+    },
+    {
+      "id": "chain-42161",
+      "group": "normal",
+      "set": {
+        "chain_id": 42161
+      },
+      "expected": {
+        "chain_id": 42161
+      }
+    },
+    {
+      "id": "mixed-case-addresses",
+      "group": "normal",
+      "set": {
+        "verifying_contract": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+        "message.details.0.token": "0xA0b86991c6218b36c1D19d4a2e9Eb0cE3606eB48",
+        "message.details.1.token": "0xC02aaa39b223FE8d0A0e5C4F27ead9083C756Cc2",
+        "message.spender": "0x111122223333444455556666777788889999aBcD",
+        "submitter": "0xAbcdefABcdefAbCdEfAbCdEfAbCdEfAbCdEfABcD"
+      },
+      "expected": {}
+    },
+    {
+      "id": "child-0-amount-zero",
+      "group": "normal",
+      "set": {
+        "message.details.0.amount": "0"
+      },
+      "expected": {
+        "children": {
+          "0": {
+            "amount": "0x0"
+          }
+        }
+      }
+    },
+    {
+      "id": "child-0-amount-max",
+      "group": "normal",
+      "set": {
+        "message.details.0.amount": "1461501637330902918203684832716283019655932542975"
+      },
+      "expected": {
+        "children": {
+          "0": {
+            "amount": "0xffffffffffffffffffffffffffffffffffffffff"
+          }
+        }
+      }
+    },
+    {
+      "id": "child-0-amount-declared-width-overflow",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.0.amount": "1461501637330902918203684832716283019655932542976"
+      },
+      "expected": {
+        "children": {
+          "0": {
+            "amount": "0x10000000000000000000000000000000000000000"
+          }
+        }
+      },
+      "observation": "v3 does not enforce declared uint160; accepted output does not establish valid Permit2 input. Contract correction is deferred by scope A."
+    },
+    {
+      "id": "child-0-expiration-zero",
+      "group": "normal",
+      "set": {
+        "message.details.0.expiration": "0"
+      },
+      "expected": {
+        "children": {
+          "0": {
+            "expires_at": "0"
+          }
+        }
+      }
+    },
+    {
+      "id": "child-0-expiration-max",
+      "group": "normal",
+      "set": {
+        "message.details.0.expiration": "281474976710655"
+      },
+      "expected": {
+        "children": {
+          "0": {
+            "expires_at": "281474976710655"
+          }
+        }
+      }
+    },
+    {
+      "id": "child-0-expiration-declared-width-overflow",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.0.expiration": "281474976710656"
+      },
+      "expected": {
+        "children": {
+          "0": {
+            "expires_at": "281474976710656"
+          }
+        }
+      },
+      "observation": "v3 does not enforce declared uint48; accepted output does not establish valid Permit2 input. Contract correction is deferred by scope A."
+    },
+    {
+      "id": "child-0-nonce-zero",
+      "group": "normal",
+      "set": {
+        "message.details.0.nonce": "0"
+      },
+      "expected": {
+        "children": {
+          "0": {
+            "nonce": [
+              "0x0",
+              0
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "child-0-nonce-max",
+      "group": "normal",
+      "set": {
+        "message.details.0.nonce": "281474976710655"
+      },
+      "expected": {
+        "children": {
+          "0": {
+            "nonce": [
+              "0xffffffffff",
+              255
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "child-0-nonce-declared-width-overflow",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.0.nonce": "281474976710656"
+      },
+      "expected": {
+        "children": {
+          "0": {
+            "nonce": [
+              "0x10000000000",
+              0
+            ]
+          }
+        }
+      },
+      "observation": "v3 does not enforce declared uint48; accepted output does not establish valid Permit2 input. Contract correction is deferred by scope A."
+    },
+    {
+      "id": "child-1-amount-zero",
+      "group": "normal",
+      "set": {
+        "message.details.1.amount": "0"
+      },
+      "expected": {
+        "children": {
+          "1": {
+            "amount": "0x0"
+          }
+        }
+      }
+    },
+    {
+      "id": "child-1-amount-max",
+      "group": "normal",
+      "set": {
+        "message.details.1.amount": "1461501637330902918203684832716283019655932542975"
+      },
+      "expected": {
+        "children": {
+          "1": {
+            "amount": "0xffffffffffffffffffffffffffffffffffffffff"
+          }
+        }
+      }
+    },
+    {
+      "id": "child-1-amount-declared-width-overflow",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.1.amount": "1461501637330902918203684832716283019655932542976"
+      },
+      "expected": {
+        "children": {
+          "1": {
+            "amount": "0x10000000000000000000000000000000000000000"
+          }
+        }
+      },
+      "observation": "v3 does not enforce declared uint160; accepted output does not establish valid Permit2 input. Contract correction is deferred by scope A."
+    },
+    {
+      "id": "child-1-expiration-zero",
+      "group": "normal",
+      "set": {
+        "message.details.1.expiration": "0"
+      },
+      "expected": {
+        "children": {
+          "1": {
+            "expires_at": "0"
+          }
+        }
+      }
+    },
+    {
+      "id": "child-1-expiration-max",
+      "group": "normal",
+      "set": {
+        "message.details.1.expiration": "281474976710655"
+      },
+      "expected": {
+        "children": {
+          "1": {
+            "expires_at": "281474976710655"
+          }
+        }
+      }
+    },
+    {
+      "id": "child-1-expiration-declared-width-overflow",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.1.expiration": "281474976710656"
+      },
+      "expected": {
+        "children": {
+          "1": {
+            "expires_at": "281474976710656"
+          }
+        }
+      },
+      "observation": "v3 does not enforce declared uint48; accepted output does not establish valid Permit2 input. Contract correction is deferred by scope A."
+    },
+    {
+      "id": "child-1-nonce-zero",
+      "group": "normal",
+      "set": {
+        "message.details.1.nonce": "0"
+      },
+      "expected": {
+        "children": {
+          "1": {
+            "nonce": [
+              "0x0",
+              0
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "child-1-nonce-max",
+      "group": "normal",
+      "set": {
+        "message.details.1.nonce": "281474976710655"
+      },
+      "expected": {
+        "children": {
+          "1": {
+            "nonce": [
+              "0xffffffffff",
+              255
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "child-1-nonce-declared-width-overflow",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.1.nonce": "281474976710656"
+      },
+      "expected": {
+        "children": {
+          "1": {
+            "nonce": [
+              "0x10000000000",
+              0
+            ]
+          }
+        }
+      },
+      "observation": "v3 does not enforce declared uint48; accepted output does not establish valid Permit2 input. Contract correction is deferred by scope A."
+    },
+    {
+      "id": "nonce-255-and-256",
+      "group": "normal",
+      "set": {
+        "message.details.0.nonce": "255",
+        "message.details.1.nonce": "256"
+      },
+      "expected": {
+        "children": {
+          "0": {
+            "nonce": [
+              "0x0",
+              255
+            ]
+          },
+          "1": {
+            "nonce": [
+              "0x1",
+              0
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "safe-number-scalars",
+      "group": "normal",
+      "set": {
+        "message.details.0.amount": 1000000,
+        "message.details.0.expiration": 1739000000,
+        "message.details.0.nonce": 513,
+        "message.sigDeadline": 1738002000
+      },
+      "expected": {}
+    },
+    {
+      "id": "sig-deadline-js-safe-max",
+      "group": "normal",
+      "set": {
+        "message.sigDeadline": "9007199254740991"
+      },
+      "expected": {
+        "sig_deadline": "9007199254740991"
+      }
+    },
+    {
+      "id": "common-context-applied-to-every-child",
+      "group": "normal",
+      "set": {
+        "message.spender": "0x22223333444455556666777788889999aaaabbbb",
+        "message.sigDeadline": "1738003000",
+        "submitted_at": 1700000123
+      },
+      "expected": {
+        "spender": "0x22223333444455556666777788889999aaaabbbb",
+        "sig_deadline": "1738003000",
+        "submitted_at": "1700000123"
+      }
+    },
+    {
+      "id": "details-64",
+      "group": "limit_boundary",
+      "detail_order": [
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1
+      ],
+      "expected": {
+        "child_order": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "details-65",
+      "group": "limit_error",
+      "detail_order": [
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0
+      ],
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "error_message": "array_emit array_source $args.permitBatch[0] has 65 element(s), exceeding max_elements=64"
+      }
+    },
+    {
+      "id": "details-65-before-malformed-first",
+      "group": "limit_error",
+      "detail_order": [
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0
+      ],
+      "omit": [
+        "message.details.0.token"
+      ],
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "error_message": "array_emit array_source $args.permitBatch[0] has 65 element(s), exceeding max_elements=64"
+      }
+    },
+    {
+      "id": "details-64-malformed-last",
+      "group": "limit_error",
+      "detail_order": [
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1
+      ],
+      "omit": [
+        "message.details.63.token"
+      ],
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "empty-details",
+      "group": "empty_observation",
+      "set": {
+        "message.details": []
+      },
+      "expected": {
+        "unknown": true
+      },
+      "observation": "Empty typed Batch becomes Unknown, not a completed empty Multicall or a policy verdict."
+    },
+    {
+      "id": "missing-details",
+      "group": "emit_error",
+      "omit": [
+        "message.details"
+      ],
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "error_message": "array_emit array_source did not resolve to an array: $args.permitBatch[0]"
+      }
+    },
+    {
+      "id": "null-details",
+      "group": "emit_error",
+      "set": {
+        "message.details": null
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "error_message": "array_emit array_source did not resolve to an array: $args.permitBatch[0]"
+      }
+    },
+    {
+      "id": "object-details",
+      "group": "emit_error",
+      "set": {
+        "message.details": {}
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "error_message": "array_emit array_source did not resolve to an array: $args.permitBatch[0]"
+      }
+    },
+    {
+      "id": "string-details",
+      "group": "emit_error",
+      "set": {
+        "message.details": "bad"
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "error_message": "array_emit array_source did not resolve to an array: $args.permitBatch[0]"
+      }
+    },
+    {
+      "id": "number-details",
+      "group": "emit_error",
+      "set": {
+        "message.details": 7
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "error_message": "array_emit array_source did not resolve to an array: $args.permitBatch[0]"
+      }
+    },
+    {
+      "id": "boolean-details",
+      "group": "emit_error",
+      "set": {
+        "message.details": true
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "error_message": "array_emit array_source did not resolve to an array: $args.permitBatch[0]"
+      }
+    },
+    {
+      "id": "child-0-missing-token",
+      "group": "emit_error",
+      "omit": [
+        "message.details.0.token"
+      ],
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "child-0-null-token",
+      "group": "emit_error",
+      "set": {
+        "message.details.0.token": null
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "child-0-invalid-token",
+      "group": "emit_error",
+      "set": {
+        "message.details.0.token": "bad"
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "child-0-missing-amount",
+      "group": "emit_error",
+      "omit": [
+        "message.details.0.amount"
+      ],
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "child-0-null-amount",
+      "group": "emit_error",
+      "set": {
+        "message.details.0.amount": null
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "child-0-invalid-amount",
+      "group": "emit_error",
+      "set": {
+        "message.details.0.amount": "bad"
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "child-0-missing-expiration",
+      "group": "emit_error",
+      "omit": [
+        "message.details.0.expiration"
+      ],
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "child-0-null-expiration",
+      "group": "emit_error",
+      "set": {
+        "message.details.0.expiration": null
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "child-0-invalid-expiration",
+      "group": "emit_error",
+      "set": {
+        "message.details.0.expiration": "bad"
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "child-0-missing-nonce",
+      "group": "legacy_diagnostic",
+      "omit": [
+        "message.details.0.nonce"
+      ],
+      "expected": {
+        "children": {
+          "0": {
+            "nonce": [
+              "0x0",
+              0
+            ]
+          }
+        }
+      },
+      "observation": "Missing/null/unparsable signed nonce becomes [0,0] for this child only; other children survive unchanged. Existing fallback is an unresolved model/input gap, not valid request validation."
+    },
+    {
+      "id": "child-0-null-nonce",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.0.nonce": null
+      },
+      "expected": {
+        "children": {
+          "0": {
+            "nonce": [
+              "0x0",
+              0
+            ]
+          }
+        }
+      },
+      "observation": "Missing/null/unparsable signed nonce becomes [0,0] for this child only; other children survive unchanged. Existing fallback is an unresolved model/input gap, not valid request validation."
+    },
+    {
+      "id": "child-0-invalid-nonce",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.0.nonce": "bad"
+      },
+      "expected": {
+        "children": {
+          "0": {
+            "nonce": [
+              "0x0",
+              0
+            ]
+          }
+        }
+      },
+      "observation": "Missing/null/unparsable signed nonce becomes [0,0] for this child only; other children survive unchanged. Existing fallback is an unresolved model/input gap, not valid request validation."
+    },
+    {
+      "id": "child-0-negative-nonce",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.0.nonce": "-1"
+      },
+      "expected": {
+        "children": {
+          "0": {
+            "nonce": [
+              "0x0",
+              0
+            ]
+          }
+        }
+      },
+      "observation": "Unparsable signed nonce falls back to [0,0] for this child. Removing fallback is outside selected scope A."
+    },
+    {
+      "id": "child-0-boolean-nonce",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.0.nonce": true
+      },
+      "expected": {
+        "children": {
+          "0": {
+            "nonce": [
+              "0x0",
+              0
+            ]
+          }
+        }
+      },
+      "observation": "Unparsable signed nonce falls back to [0,0] for this child. Removing fallback is outside selected scope A."
+    },
+    {
+      "id": "child-0-object-nonce",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.0.nonce": {}
+      },
+      "expected": {
+        "children": {
+          "0": {
+            "nonce": [
+              "0x0",
+              0
+            ]
+          }
+        }
+      },
+      "observation": "Unparsable signed nonce falls back to [0,0] for this child. Removing fallback is outside selected scope A."
+    },
+    {
+      "id": "child-0-array-nonce",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.0.nonce": []
+      },
+      "expected": {
+        "children": {
+          "0": {
+            "nonce": [
+              "0x0",
+              0
+            ]
+          }
+        }
+      },
+      "observation": "Unparsable signed nonce falls back to [0,0] for this child. Removing fallback is outside selected scope A."
+    },
+    {
+      "id": "child-0-null-element",
+      "group": "emit_error",
+      "set": {
+        "message.details.0": null
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "indexed access on non-array"
+      }
+    },
+    {
+      "id": "child-0-scalar-element",
+      "group": "emit_error",
+      "set": {
+        "message.details.0": "bad"
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "indexed access on non-array"
+      }
+    },
+    {
+      "id": "child-1-missing-token",
+      "group": "emit_error",
+      "omit": [
+        "message.details.1.token"
+      ],
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "child-1-null-token",
+      "group": "emit_error",
+      "set": {
+        "message.details.1.token": null
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "child-1-invalid-token",
+      "group": "emit_error",
+      "set": {
+        "message.details.1.token": "bad"
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "child-1-missing-amount",
+      "group": "emit_error",
+      "omit": [
+        "message.details.1.amount"
+      ],
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "child-1-null-amount",
+      "group": "emit_error",
+      "set": {
+        "message.details.1.amount": null
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "child-1-invalid-amount",
+      "group": "emit_error",
+      "set": {
+        "message.details.1.amount": "bad"
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "child-1-missing-expiration",
+      "group": "emit_error",
+      "omit": [
+        "message.details.1.expiration"
+      ],
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "child-1-null-expiration",
+      "group": "emit_error",
+      "set": {
+        "message.details.1.expiration": null
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "child-1-invalid-expiration",
+      "group": "emit_error",
+      "set": {
+        "message.details.1.expiration": "bad"
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "child-1-missing-nonce",
+      "group": "legacy_diagnostic",
+      "omit": [
+        "message.details.1.nonce"
+      ],
+      "expected": {
+        "children": {
+          "1": {
+            "nonce": [
+              "0x0",
+              0
+            ]
+          }
+        }
+      },
+      "observation": "Missing/null/unparsable signed nonce becomes [0,0] for this child only; other children survive unchanged. Existing fallback is an unresolved model/input gap, not valid request validation."
+    },
+    {
+      "id": "child-1-null-nonce",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.1.nonce": null
+      },
+      "expected": {
+        "children": {
+          "1": {
+            "nonce": [
+              "0x0",
+              0
+            ]
+          }
+        }
+      },
+      "observation": "Missing/null/unparsable signed nonce becomes [0,0] for this child only; other children survive unchanged. Existing fallback is an unresolved model/input gap, not valid request validation."
+    },
+    {
+      "id": "child-1-invalid-nonce",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.1.nonce": "bad"
+      },
+      "expected": {
+        "children": {
+          "1": {
+            "nonce": [
+              "0x0",
+              0
+            ]
+          }
+        }
+      },
+      "observation": "Missing/null/unparsable signed nonce becomes [0,0] for this child only; other children survive unchanged. Existing fallback is an unresolved model/input gap, not valid request validation."
+    },
+    {
+      "id": "child-1-negative-nonce",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.1.nonce": "-1"
+      },
+      "expected": {
+        "children": {
+          "1": {
+            "nonce": [
+              "0x0",
+              0
+            ]
+          }
+        }
+      },
+      "observation": "Unparsable signed nonce falls back to [0,0] for this child. Removing fallback is outside selected scope A."
+    },
+    {
+      "id": "child-1-boolean-nonce",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.1.nonce": true
+      },
+      "expected": {
+        "children": {
+          "1": {
+            "nonce": [
+              "0x0",
+              0
+            ]
+          }
+        }
+      },
+      "observation": "Unparsable signed nonce falls back to [0,0] for this child. Removing fallback is outside selected scope A."
+    },
+    {
+      "id": "child-1-object-nonce",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.1.nonce": {}
+      },
+      "expected": {
+        "children": {
+          "1": {
+            "nonce": [
+              "0x0",
+              0
+            ]
+          }
+        }
+      },
+      "observation": "Unparsable signed nonce falls back to [0,0] for this child. Removing fallback is outside selected scope A."
+    },
+    {
+      "id": "child-1-array-nonce",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.1.nonce": []
+      },
+      "expected": {
+        "children": {
+          "1": {
+            "nonce": [
+              "0x0",
+              0
+            ]
+          }
+        }
+      },
+      "observation": "Unparsable signed nonce falls back to [0,0] for this child. Removing fallback is outside selected scope A."
+    },
+    {
+      "id": "child-1-null-element",
+      "group": "emit_error",
+      "set": {
+        "message.details.1": null
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "indexed access on non-array"
+      }
+    },
+    {
+      "id": "child-1-scalar-element",
+      "group": "emit_error",
+      "set": {
+        "message.details.1": "bad"
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "indexed access on non-array"
+      }
+    },
+    {
+      "id": "missing-common-spender",
+      "group": "emit_error",
+      "omit": [
+        "message.spender"
+      ],
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "null-common-spender",
+      "group": "emit_error",
+      "set": {
+        "message.spender": null
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "invalid-common-spender",
+      "group": "emit_error",
+      "set": {
+        "message.spender": "bad"
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "missing-common-sigDeadline",
+      "group": "emit_error",
+      "omit": [
+        "message.sigDeadline"
+      ],
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "null-common-sigDeadline",
+      "group": "emit_error",
+      "set": {
+        "message.sigDeadline": null
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "invalid-common-sigDeadline",
+      "group": "emit_error",
+      "set": {
+        "message.sigDeadline": "bad"
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed",
+        "message_includes": "serde from_value:"
+      }
+    },
+    {
+      "id": "null-message",
+      "group": "emit_error",
+      "set": {
+        "message": null
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed"
+      }
+    },
+    {
+      "id": "scalar-message",
+      "group": "emit_error",
+      "set": {
+        "message": "bad"
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed"
+      }
+    },
+    {
+      "id": "empty-array-message",
+      "group": "emit_error",
+      "set": {
+        "message": []
+      },
+      "expected": {
+        "error_kind": "build_array_emit_failed"
+      }
+    },
+    {
+      "id": "missing-chain-id",
+      "group": "input_error",
+      "omit": [
+        "chain_id"
+      ],
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "missing-verifying-contract",
+      "group": "input_error",
+      "omit": [
+        "verifying_contract"
+      ],
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "missing-primary-type",
+      "group": "input_error",
+      "omit": [
+        "primary_type"
+      ],
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "missing-message",
+      "group": "input_error",
+      "omit": [
+        "message"
+      ],
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "missing-submitter",
+      "group": "input_error",
+      "omit": [
+        "submitter"
+      ],
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "missing-submitted-at",
+      "group": "input_error",
+      "omit": [
+        "submitted_at"
+      ],
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "invalid-contract",
+      "group": "input_error",
+      "set": {
+        "verifying_contract": "0x1234"
+      },
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "negative-chain",
+      "group": "input_error",
+      "set": {
+        "chain_id": -1
+      },
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "unregistered-chain",
+      "group": "routing_miss",
+      "set": {
+        "chain_id": 137
+      },
+      "expected": {
+        "error_kind": "no_typed_data_mapper"
+      }
+    },
+    {
+      "id": "unregistered-contract",
+      "group": "routing_miss",
+      "set": {
+        "verifying_contract": "0x9999888877776666555544443333222211110000"
+      },
+      "expected": {
+        "error_kind": "no_typed_data_mapper"
+      }
+    },
+    {
+      "id": "unregistered-primary-type",
+      "group": "routing_miss",
+      "set": {
+        "primary_type": "PermitOther"
+      },
+      "expected": {
+        "error_kind": "no_typed_data_mapper"
+      }
+    },
+    {
+      "id": "unregistered-witness",
+      "group": "routing_miss",
+      "set": {
+        "witness_type": "OrderWitness"
+      },
+      "expected": {
+        "error_kind": "no_typed_data_mapper"
+      }
+    },
+    {
+      "id": "lookup-before-malformed-details",
+      "group": "routing_miss",
+      "set": {
+        "chain_id": 137,
+        "message.details": null
+      },
+      "expected": {
+        "error_kind": "no_typed_data_mapper"
+      }
+    },
+    {
+      "id": "sig-deadline-js-precision",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.sigDeadline": "9007199254740993"
+      },
+      "expected": {
+        "time_diagnostic": "unsafe-js-roundtrip"
+      },
+      "observation": "Valid uint256 timestamp cannot survive current JSON Number projection exactly. Compare parsed unsafe output, never manufacture a rounded expected integer."
+    },
+    {
+      "id": "sig-deadline-u64-overflow",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.sigDeadline": "18446744073709551616"
+      },
+      "expected": {
+        "time_diagnostic": "u64-saturation-meta-zero"
+      },
+      "observation": "Static source predicts each child body u64::MAX, outer meta 0. Worker JSON.parse loses raw precision too; this probe checks unsafe body/meta mismatch, not raw saturation."
+    }
+  ]
+}

@@ -15,6 +15,10 @@
     "path": "manifests/uniswap/permit2/permitSingle@1.0.0.json",
     "sha256": "0x6657c04696e97d08aaa80cc842d3d7976df7515953e7506fa97e50bd2812e696"
   },
+  "permit2_batch_manifest": {
+    "path": "manifests/uniswap/permit2/permitBatch@1.0.0.json",
+    "sha256": "0x0343bc44659b2b1e7e184a39e7e17acd642ec52f2776adca963df4d8d3bd35ee"
+  },
   "tokens": [
     {
       "path": "tokens/1/0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.json",
