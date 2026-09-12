@@ -1,4 +1,43 @@
-# DEC-01~06: 실제 Registry·WASM Decoder 기준 시험
+# DEC-01~07: 실제 Registry·WASM Decoder 기준 시험
+
+## DEC-07 — Decoder 인계
+
+**구현·정적 검토 완료, 사용자 실행 대기.** 착수 HEAD `a0fd27a`, 작업 트리 깨끗함을 확인했다. 이번 변경은 인계 목록·시험 helper·Registry 검사·CI와 단계 상태 문서다. MJS 15파일의 구문 검사, 변경 TS의 AST 구문 검토, JSON 파싱과 `git diff --check`에서 오류가 없었다. 설치 시나리오와 workflow 연결도 소스로 대조했다. 실행한 빌드·시험·설치·커밋·푸시는 없으며, 실행 통과/실패 수는 아직 없다. 사용자 검증 결과와 검증한 변경 범위는 이 절에만 짧게 추가하고 DEC-07 인계 완료 여부를 판단한다.
+
+[handoff-index.json](handoff-index.json)이 단일 인계 목록이다. `artifacts.source_key`로 [선택 목록](registry-selection.json)의 원본 경로·SHA와 연결하고, 원본 ID의 `@` 버전 → `suites.build_options` → resolved bundle ID·JCS digest → `index_paths` → `suites.fixture`의 case ID·`scenarios.installs` 순으로 추적한다. 선택 원본 11개와 token 4개, 시험 파일 10개, 설치 시나리오 32개를 담았다. 요청·Action은 fixture와 `verification`의 기존 기대값/조립 함수를 참조하며 복제하지 않는다. `case_ids: "all"`은 해당 fixture의 모든 case ID이고, 교대·변형 요청은 `generated_cases_ref`의 기존 코드에서 확인한다.
+
+예를 들어 `multicall-call-array`의 `approve-transfer`는 `all`, `parent-only`, `without-transfer` 등에 동일 요청으로 연결되지만 설치 목록이 다르다. 설치 목록의 source key를 `artifacts`에서 찾아 실제 설치 객체의 digest를 확인한다. worker가 설치 직전에 그 조합·순서·JCS digest·필수 case ID를 검사하며 기존 시험이 각 시나리오의 Action·오류를 비교한다.
+
+인계하는 결과는 `data.actions`, `data.decoder_id`, 선택적인 `data.decoding = {status, diagnostics}` 및 진단 `{code, path, decoder_id}` 그대로다. route 결과에는 bundle digest가 없으므로 **실제 설치 artifact**에 연결한다. 미등록 자식의 ID/digest는 추정하지 않으며, typed·구형 결과에서 없는 `decoding`에 complete를 넣지 않는다. 필요한 live-input은 각 artifact의 `live_inputs_ref`로 원본 `emit.live_inputs` 선언에 연결한다.
+
+| 구분 | 인계 범위 |
+| --- | --- |
+| 정상 지원 | 선택 원본에 대한 approve·transfer, USDC Permit v4, Permit2 v3, NFPM self·Bundler3 Call[]·callback의 기존 fixture 기대값. 구체 범위는 [coverage](coverage.md) 참조 |
+| 기존 동작 진단 | Permit2의 `legacy_observation`/`legacy_diagnostic` 사례와 nonce·숫자·시간 표현 한계, multicall의 Unknown·partial·한도 진단. 성공 envelope만으로 의미 검증 완료를 뜻하지 않음 |
+| 미지원·미검증 | Permit2 strict EIP-712, 호스트의 동적 bundle 발견·설치, `context_ref`·`materialization`, 발행자 서명 검증. 이 fixture artifact는 서명 검증 없이 설치하는 시험 자료이며 npm 제품 snapshot이나 원격 Registry root가 아님 |
+
+생성 입력은 index의 `generation_inputs`에 연결했다. manifest·token은 `registry-selection.json`, builder는 `registryV2/scripts/build-index.ts`, 실제 import하는 resolver는 `scripts/resolvers/index.ts` 및 그 하위 모듈이다. 선택 원본은 `tokens:erc20`/concrete 경로만 사용하며 protocol RPC/cache 조회를 요구하지 않는다. builder가 **자신의 위치 기준 상대 경로**로 항상 읽는 `crates/adapters/mappers/src/declarative/fn_whitelist.json`도 포함한다. Registry `package.json`·`package-lock.json`·`tsconfig.json`, fixture의 `build-registry.mjs`·`handoff.mjs`·`wasm-worker.mjs`가 현재 진입점이다. `registry-api/src/server.ts`는 해소 의미를 대조했던 참고 원본이며 helper의 런타임 import가 아니다.
+
+원본 저장소의 builder/resolver/whitelist와 `registryV2/node_modules`, 기존 `crates/policy-engine-wasm/pkg`, 정책 회귀용 확장 아래 Cedar/manifest 경로 의존이 남아 있다. 읽기 경로의 상세는 [기존 의존 목록](#남아-있는-임시-경로-의존)을 따른다. 새 helper도 Registry 복사본·index·bundle과 시나리오 JSON을 OS 임시 디렉터리에 쓰며 시험 종료 시 정리한다. 이를 제거하는 SDK 소스·빌드 독립화는 C2c·C5 범위로 남긴다.
+
+새 인계 검사는 동일 선택·token·명시 옵션으로 서로 다른 임시 디렉터리에서 두 번 빌드해 정렬된 index, JCS bundle, 실제 `bundles/` 파일을 비교한다. 32 callkey·9 typed key, 서로 다른 bundle 11개 중 `3-ref`의 물리 파일 2개를 연결하며 inline과 구분한다. 로그의 경로·실행 시간은 비교 산출물에 포함하지 않는다. 두 빌드와 모든 비교가 성공해야 artifact를 반환하고, 실패한 빌드의 일부 파일은 기존 cleanup과 새 wrapper가 폐기한다.
+
+기존 `build-index.test.ts`의 검사를 재사용해 strict concrete 충돌·동일 digest 중복·concrete 우선순위를 보강했다. 확장 Vitest 설치에 의존하던 이 파일은 기존 Registry `tsx`와 Node test runner로 실행하도록 옮겼다. CI는 Registry 검사와 새 인계 검사를 연결하고, 기존 wasm job에서 **같은 실행에 빌드한 pkg**로 Node Decoder 회귀를 실행한다. Decoder 시험에 확장 실행·서버 기동은 필요 없다. workflow는 수정했으며 GitHub 실행은 하지 않았다.
+
+사용자 실행 명령은 아래와 같다. Node 20 이상과 기존 Registry 의존성, DEC-06c에서 검증한 JS/WASM 쌍을 재사용한다. 이번에 Rust·빌드 입력은 바뀌지 않았으므로 Native·WASM 재빌드를 반복할 필요가 없다. Registry 의존성이 없는 새 checkout에서만 `npm ci --prefix registryV2`로 준비한다. 예상 검사 정의는 Registry 20개, 인계 1개, helper/worker 경로가 바뀐 Node 통합 589개이며 통과 수가 아니다.
+
+```bash
+cd /Users/spu/SDKdambi/DAMBI
+(cd registryV2 && node --import tsx --test scripts/__tests__/build-index.test.ts)
+npm run decoder:test:handoff
+npm run decoder:test
+```
+
+인계 artifact를 실제 파일로 보관해야 할 때만 아래 명령을 실행한다. 같은 재현성 검사를 수행한 뒤 성공한 한 임시 Registry 경로를 출력해 보관하고, 다른 한 경로는 정리한다. 출력 경로 기준으로 index의 `index_paths`를 열면 된다. 정상 시험은 두 경로 모두 정리하므로 파일 보관이 필요 없다면 이 추가 빌드는 생략한다.
+
+```bash
+npm run decoder:build:handoff
+```
 
 ## DEC-06c — 사용자 검증 완료, DEC-06 완료
 
@@ -6,7 +45,7 @@
 
 기존 self/Call[] 기대값의 실질 Action 변경은 self `nested-depth-4`의 깊이 4 자식 두 개, 두 `children-65`의 65번째 자식이다. 이들은 원문 Unknown과 한도 진단을 요구하며 정상 prefix를 유지한다. 나머지 성공 multicall은 전체 Action/meta와 새 complete/partial 진단을 함께 검사한다. 소비자 route 시험은 2개를 추가하고 기존 audit 시험 2개를 확장했다.
 
-**사용자 실행 로그 확인:** [`/private/tmp/dambi-dec06c.jBh0Cs/verify.log`](/private/tmp/dambi-dec06c.jBh0Cs/verify.log)에서 Native `declarative_exports::tests` **29/29**(필터 제외 66개), `declarative_v3_route` **138/138**, 새 `multicall_limits` **5/5** 통과를 확인했다. 이어서 **새 Rust의 WASM release 빌드와 확장 경로 복사 완료**, limits 개별 **26/26**, 통합 **589/589** 통과를 확인했다. 두 Node 실행의 실패·취소·건너뛰기·todo는 모두 0이다. `tsc --noEmit`은 별도 진단 출력 없이, 실패 시 중단하는 스크립트의 다음 단계인 Vitest로 이어졌으며 관련 **3파일 82/82**가 통과했다. wasm-pack 업데이트 안내와 Node `--localstorage-file` 경고는 있었으나 검사는 통과했다. 이 결과로 **DEC-06 구현·사용자 검증을 완료**한다. 사전 설치 bundle을 사용하는 Node 결과는 호스트의 동적 발견·설치 검증을 뜻하지 않는다. 06b·06c 커밋은 아직 사용자 실행 전이며 DEC-07은 다음 단계다.
+**사용자 실행 로그 확인:** [`/private/tmp/dambi-dec06c.jBh0Cs/verify.log`](/private/tmp/dambi-dec06c.jBh0Cs/verify.log)에서 Native `declarative_exports::tests` **29/29**(필터 제외 66개), `declarative_v3_route` **138/138**, 새 `multicall_limits` **5/5** 통과를 확인했다. 이어서 **새 Rust의 WASM release 빌드와 확장 경로 복사 완료**, limits 개별 **26/26**, 통합 **589/589** 통과를 확인했다. 두 Node 실행의 실패·취소·건너뛰기·todo는 모두 0이다. `tsc --noEmit`은 별도 진단 출력 없이, 실패 시 중단하는 스크립트의 다음 단계인 Vitest로 이어졌으며 관련 **3파일 82/82**가 통과했다. wasm-pack 업데이트 안내와 Node `--localstorage-file` 경고는 있었으나 검사는 통과했다. 이 결과로 **DEC-06 구현·사용자 검증을 완료**한다. 사전 설치 bundle을 사용하는 Node 결과는 호스트의 동적 발견·설치 검증을 뜻하지 않는다. 06b는 `8be510b`, 06c는 `a0fd27a`에 커밋됐다. DEC-07 상태는 문서 첫 절을 따른다.
 
 아래는 사용자가 완료한 검증의 재현 명령이다. **Native → 새 WASM → limits 개별 → 통합 → TS 소비자** 순서이며 `SKIP_WASM_BUILD=0`으로 이전 WASM 재사용을 막고 실패 시 후속 단계를 중단한다. 이번 기록 반영에서는 빌드·시험을 다시 실행하지 않았다.
 
@@ -39,7 +78,7 @@ dec06c_run() { "$@" || exit "$?"; }
 
 ### 06b와 06c의 사용자 커밋 경계
 
-착수 HEAD는 `9923487`이며 06b 아홉 경로가 아직 미커밋이었다. 그 변경과 06b 사용자 통합 결과의 짧은 기록만 [별도 patch](/private/tmp/dambi-dec06b-before-dec06c.lkjck_jr.patch)에 보관했다. 검증 기록 반영 후에도 HEAD는 같고 index는 비어 있다. 사용자가 이 patch를 index에 적용해 06b를 커밋하고, 실제 06c 경로를 두 번째 커밋으로 stage한다. 작업 트리를 되돌리는 절차나 기록 전용 커밋은 필요 없다. 이제 `bash /private/tmp/dambi-dec06c-commit.sh`로 아래 명령을 실행할 수 있다. 생성물은 경로 목록에 포함하지 않는다. 이미 첫 커밋을 수행했다면 다시 patch를 적용하지 않고 남은 06c stage/commit 단계만 사용한다.
+06b `8be510b`와 06c `a0fd27a` 커밋을 확인했다. 아래 patch·커밋 명령은 완료된 당시 절차를 보존한 기록이며 다시 실행하지 않는다.
 
 ```bash
 #!/usr/bin/env bash

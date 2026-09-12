@@ -1,6 +1,6 @@
 # Dambi Decoder 상세 설계·구현 계획
 
-**DEC-06c·DEC-06 현재 상태:** 구현·정적 검토·사용자 검증 완료. [확정 계약](#dec-06c--확정-계약과-실행-상태)을 유지하며 실행 근거는 [README 검증 기록](../../fixtures/decoder-policy/README.md#dec-06c--사용자-검증-완료-dec-06-완료) 한 곳을 따른다. 아래 06a/06b 상세는 해당 단계의 기존 기록이다. DEC-07·SDK 소스 이관은 미착수다.
+**DEC-06c·DEC-06 현재 상태:** 구현·정적 검토·사용자 검증 완료. [확정 계약](#dec-06c--확정-계약과-실행-상태)을 유지하며 실행 근거는 [README 검증 기록](../../fixtures/decoder-policy/README.md#dec-06c--사용자-검증-완료-dec-06-완료) 한 곳을 따른다. 아래 06a/06b 상세는 해당 단계의 기존 기록이다. DEC-07은 구현·정적 검토 완료, 사용자 실행 대기다. SDK 소스 이관은 미착수다.
 
 **2026-09-12 DEC-06b 구현 당시 상태:** 실제 Bundler3 Call[] 연결 **구현·정적 검토 완료, 사용자 실행 대기**다. 요청 43개 + 구조 6개 = **49개**, 기존 514개 포함 통합 **563개 정의**이며 통과 수가 아니다. DEC-06a는 self 48/48·통합 514/514 및 분리 커밋 `9923487`까지 확인했다. 06c는 별도 미구현이며 06b 사용자 검증 후 진행한다.
 
@@ -722,7 +722,7 @@ Call tuple `(to,data,value,skipRevert,callbackHash)`의 순서·동적 offset/le
 
 ### DEC-06c — 확정 계약과 실행 상태
 
-**사용자 계약 확정, 구현·정적 검토·사용자 검증 완료. DEC-06 전체 완료.** 새 Rust의 Native 회귀·WASM 빌드, 실제 Registry/Node 회귀와 TS 소비자 전달 검증을 마쳤다. 실행 수치·로그는 [README 검증 기록](../../fixtures/decoder-policy/README.md#dec-06c--사용자-검증-완료-dec-06-완료)에만 기록한다. 아래 확정 계약과 범위 제한은 유지하며 DEC-07은 미착수다.
+**사용자 계약 확정, 구현·정적 검토·사용자 검증 완료. DEC-06 전체 완료.** 새 Rust의 Native 회귀·WASM 빌드, 실제 Registry/Node 회귀와 TS 소비자 전달 검증을 마쳤다. 실행 수치·로그는 [README 검증 기록](../../fixtures/decoder-policy/README.md#dec-06c--사용자-검증-완료-dec-06-완료)에만 기록한다. 아래 확정 계약과 범위 제한은 유지하며 DEC-07은 사용자 실행 대기다.
 
 - `multicall_recurse`·`multicall_call_array` 또는 manifest callback이 참여한 성공 **transaction만** 선택 필드 `data.decoding = {status: "complete" | "partial", diagnostics: [...]}`를 추가한다. 기존 Action/meta·오류 envelope는 유지한다. 공유 DTO의 typed/v3·Permit2 Batch는 필드를 생략하고, 소비자는 구형 응답에 complete를 채워 넣지 않는다.
 - 진단은 `{code, path, decoder_id}`다. `path`는 루트 `[]`에서 `{kind:"self",index}`·`{kind:"call",index}`·`{kind:"callback"}`을 순서대로 붙인 원본 호출 경로다. decoder ID는 해당 호출의 실제 일치 ID, 미등록·미조회는 null이다. callback 구간에는 원문을 제공한 manifest ID를 기록한다.
@@ -734,6 +734,8 @@ Call tuple `(to,data,value,skipRevert,callbackHash)`의 순서·동적 offset/le
 - 소비자의 타입 및 route→audit 전달만 수정한다. TS bundle 발견/사전 설치 한도는 별도이며 미리 설치한 실제 WASM 시험으로 그 범위를 검증했다고 표시하지 않는다. UI·정책 판정·Core/RPC·서명·SDK 이관·DEC-07은 범위 밖이다.
 
 ### DEC-07 — Decoder 인계물 고정 · 전체 계획 D2 및 D4의 Decoder 부분
+
+**상태:** 구현·정적 검토 완료, 사용자 실행 대기. [인계 자료·실행 기록](../../fixtures/decoder-policy/README.md#dec-07--decoder-인계)을 따른다.
 
 **수정:** coverage/README/선택 목록, 필요한 최소 산출물 검증 스크립트·CI 단계. 정책 payload 계약이나 Core 실행부를 함께 작성하지 않는다.
 
@@ -850,7 +852,8 @@ SDK와 무관한 과거 코드 설명 링크가 문서에 남는 것과 실제 �
 | DEC-06a self | 사용자 재실행 self 48/48·통합 514/514 통과. 최초 준비 훅 실패 기록은 별도 보존; 실행 HEAD `1326fb5`의 미커밋 작업 트리와 이후 구현 커밋 `9923487`을 구분. 분리 커밋 완료 |
 | DEC-06b Call[] | 사용자 통합 검증 완료. 실행 결과는 README에 기록 |
 | DEC-06c·DEC-06 전체 | 구현·정적 검토·사용자 검증 완료. [실행 근거](../../fixtures/decoder-policy/README.md#dec-06c--사용자-검증-완료-dec-06-완료) |
-| DEC-07·소스 이관 | 미착수 |
+| DEC-07 | 구현·정적 검토 완료, 사용자 실행 대기 |
+| SDK 소스 이관 | 미착수 |
 | SDK 전체 소스·빌드 독립화 | 미완료. 기존 WASM 실행부와 서버 아래 공통 타입 등 임시 의존이 남음. C2c·C5 및 전체 계획 §7.1 검증 필요 |
 
 04a 결과를 네 문서에 반영하고, 네 계약 답변에 따라 별도 v4 full-input DTO·strict validator·emit 연결·Rust/Node 회귀 시험을 작성했다. 04b 사용자 실행의 저장 로그를 직접 확인했다. Native 181개와 새 WASM 빌드, Node strict 168개·기존 typed 47개·통합 273개가 모두 통과하여 **DEC-04 전체 검증 완료**다. 에이전트가 빌드·시험을 재실행한 결과는 아니다. 기존 DEC-01/02/03 사용자 통과 기록(30/37/58)과 미제공 항목을 보존하고 04a 47/105 통과 결과를 네 문서에 반영했다. 에이전트는 빌드·시험·설치·Git 변경 명령을 실행하지 않았다. 현재 DEC-05a는 **사용자 실행 검증 완료**이며 사용자가 **A — 연결 시험·교정 설계만 마무리**를 선택해 이번 범위는 확정됐다. B/C 런타임 계약 교정은 별도 범위의 미구현 제안이다. DEC-05b도 사용자 실행 108/108·통합 466/466 통과를 확인하여 DEC-05 A안 범위는 검증 완료다. nonce·입력 범위/형식·시간·v4 교정과 SDK 소스·빌드 독립화는 후속 범위다.

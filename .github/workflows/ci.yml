@@ -50,6 +50,10 @@ jobs:
           # adapter and skip a dangerous action's policy).
           npm run build -- --summary-only --representative-source-refs --strict-callkeys
 
+      - name: Registry builder tests (index + strict callkey conflicts)
+        working-directory: registryV2
+        run: node --import tsx --test scripts/__tests__/build-index.test.ts
+
       # Surface-completeness + token-graph gates: a missed/dropped state-changing
       # selector or a dangling token reference is a pre-sign decode gap, so these
       # designed-machine-checked invariants run in CI rather than trust-only.
@@ -106,6 +110,21 @@ jobs:
             --release \
             --out-dir pkg \
             --out-name policy_engine_wasm
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Registry fixture dependencies
+        run: npm ci --prefix registryV2
+
+      # The Node worker imports the JS/WASM pair built above directly. Decoder
+      # checks require neither an extension build nor a running policy server.
+      - name: Decoder handoff (reproducibility + index consistency)
+        run: npm run decoder:test:handoff
+
+      - name: Decoder fixtures (Node + real WASM)
+        run: npm run decoder:test
 
       - name: Upload wasm pkg (reused by the extension build)
         uses: actions/upload-artifact@v4
