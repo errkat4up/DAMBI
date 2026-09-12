@@ -44,5 +44,17 @@
       "chain_id": 42161,
       "address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831"
     }
-  ]
+  ],
+  "nfpm_multicall_manifest": {
+    "path": "manifests/uniswap/v3-nfpm/multicall@1.0.0.json",
+    "sha256": "0xe19586381d2c72dbeda01b9ca30fc3af19296334c797bd75d18b012a226a6430"
+  },
+  "nfpm_mint_manifest": {
+    "path": "manifests/uniswap/v3-nfpm/mint@1.0.0.json",
+    "sha256": "0xc19f0c9b64a296f0893b4594d71502c881074206c34329dbf9a3f38500b1b93c"
+  },
+  "nfpm_refund_eth_manifest": {
+    "path": "manifests/uniswap/v3-nfpm/refundETH@1.0.0.json",
+    "sha256": "0x2684b33185f8b5128582b1afca36fa5b7ff9ea8cdc691e6bc3879cdc12375f78"
+  }
 }

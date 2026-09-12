@@ -39,12 +39,13 @@ async function copyPinnedFile(root, selected) {
 // Existing callers remain approve-only; later fixtures explicitly opt in.
 export async function buildRegistry(selection, {
   includeTransfer = false, includePermit = false, includePermit2Single = false,
-  includePermit2Batch = false,
+  includePermit2Batch = false, includeNfpmSelf = false,
 } = {}) {
   assert.equal(typeof includeTransfer, "boolean");
   assert.equal(typeof includePermit, "boolean");
   assert.equal(typeof includePermit2Single, "boolean");
   assert.equal(typeof includePermit2Batch, "boolean");
+  assert.equal(typeof includeNfpmSelf, "boolean");
   const tsx = join(registryRoot, "node_modules/.bin/tsx");
   await access(tsx).catch(() => {
     throw new Error("Registry dependencies missing; run npm ci --prefix registryV2 first.");
@@ -151,6 +152,29 @@ export async function buildRegistry(selection, {
         },
       });
     }
+    const nfpmSources = {};
+    if (includeNfpmSelf) {
+      for (const [key, selected, id, selector] of [
+        ["nfpmMulticallSource", selection.nfpm_multicall_manifest, "multicall", "0xac9650d8"],
+        ["nfpmMintSource", selection.nfpm_mint_manifest, "mint", "0x88316456"],
+        ["nfpmRefundEthSource", selection.nfpm_refund_eth_manifest, "refundETH", "0x12210e8a"],
+      ]) {
+        const nfpm = await copyPinnedFile(root, selected);
+        assert.equal(nfpm.id, `uniswap/v3-nfpm/${id}@1.0.0`);
+        assert.deepEqual(nfpm.match, {
+          selector,
+          // Concrete source bytes and address casing remain unchanged. Token
+          // fixtures expand approve only; Base has its own NFPM deployment.
+          chain_to_addresses: {
+            "1": ["0xC36442b4a4522E871399CD717aBDD847Ab11FE88"],
+            "10": ["0xC36442b4a4522E871399CD717aBDD847Ab11FE88"],
+            "42161": ["0xC36442b4a4522E871399CD717aBDD847Ab11FE88"],
+            "8453": ["0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1"],
+          },
+        });
+        nfpmSources[key] = nfpm;
+      }
+    }
     assert.equal(selection.tokens.length, 4, "DEC-01 pins one token per chain");
     const tokens = [];
     for (const selected of selection.tokens) {
@@ -172,7 +196,7 @@ export async function buildRegistry(selection, {
         maxBuffer: 4 * 1024 * 1024,
       });
     } catch (error) {
-      throw new Error(`${includePermit2Batch ? "DEC-05b" : includePermit2Single ? "DEC-05a" : includePermit ? "DEC-04a" : includeTransfer ? "DEC-03" : "DEC-01"} Registry build failed; all output is discarded.\n${error.stderr ?? ""}\n${error.message}`, { cause: error });
+      throw new Error(`${includeNfpmSelf ? "DEC-06a" : includePermit2Batch ? "DEC-05b" : includePermit2Single ? "DEC-05a" : includePermit ? "DEC-04a" : includeTransfer ? "DEC-03" : "DEC-01"} Registry build failed; all output is discarded.\n${error.stderr ?? ""}\n${error.message}`, { cause: error });
     }
     return {
       root, source, tokens, cleanup,
@@ -180,6 +204,7 @@ export async function buildRegistry(selection, {
       ...(includePermit ? { permitSource } : {}),
       ...(includePermit2Single ? { permit2SingleSource } : {}),
       ...(includePermit2Batch ? { permit2BatchSource } : {}),
+      ...nfpmSources,
     };
   } catch (error) {
     await cleanup();

@@ -1,4 +1,387 @@
-# DEC-01~05: 실제 Registry·WASM Decoder 기준 시험
+# DEC-01~06: 실제 Registry·WASM Decoder 기준 시험
+
+## DEC-06a 현재 상태 — 사용자 재실행 검증 완료, 분리 커밋 대기
+
+DEC-05는 아래 저장 로그에 따라 **A안 범위에서 검증 완료**다. 실제 NFPM self-multicall도 성공한 재실행 로그에서 **self 48/48·통합 514/514 사용자 검증 완료**를 확인했다. self는 고정 요청 43개와 구조 검사 5개이며 기존 466개를 포함한 통합 514개가 모두 통과했다. 최초 공통 준비 훅 실패는 별도 과거 기록으로 보존한다. 현재 HEAD는 `1326fb5`이고 06a 관련 9개 경로가 미커밋이므로, 아래 완료 기록을 포함해 사용자가 분리 커밋한 뒤 실제 커밋을 확인하고 06b를 진행한다. 기존 시험·원본 fixture·worker·Rust·빌드 입력은 유지했다.
+
+| 변경 파일 | 목적 |
+| --- | --- |
+| `multicall-self.cases.json`, `multicall-self.test.mjs` | 실제 NFPM 원본 → strict Registry → 참조/JCS → 실제 WASM transaction route. 독립 작성한 전체 Action/meta·고정 ABI·오류·상태 격리 검사 |
+| `registry-selection.json` | NFPM multicall·mint·refundETH 세 원본의 경로·바이트 SHA-256 고정 |
+| `helpers/build-registry.mjs` | 기본 false인 `includeNfpmSelf` 하나로 세 원본을 명시 선택. 기존 기본값·반환·정리 동작 보존 |
+| 루트 `package.json` | `decoder:test:multicall-self` 개별 script 및 기존 일곱 파일을 유지한 통합 script에 self 파일만 추가 |
+| README·coverage·두 SDK migration 계획서 | DEC-05 완료 증거, DEC-06a 작성/실행 상태·의미/한계, 후속 06b·06c와 사용자 명령 구분 |
+
+`buildRegistry(selection, { includeNfpmSelf: true })`는 **approve + NFPM multicall/mint/refundETH**를 선택한다. index는 **callkey 16개**(각 4), typed **0개**, selector **0개**다. approve 4개는 `3-ref`, NFPM 12개는 `schema_version` 없이 `bundle`을 직접 담은 inline 형식으로 구분한다. 별도 `bundles/` 파일은 approve 1개이며, 설치할 서로 다른 bundle 객체·JCS digest는 4개다. 정확한 key·형식·참조·각 digest를 모두 대조한다. 세 체인 `1/10/42161`의 공통 NFPM은 `0xC36442b4a4522E871399CD717aBDD847Ab11FE88`, Base `8453`은 `0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1`다. 원본의 주소와 대소문자를 유지하고 USDC token 목록은 기존 approve 확장에만 사용한다. 하위 bundle 전체·일부·미설치 조합을 구분하며 기존 worker transaction 분기를 재사용한다.
+
+정상 mint·refundETH 단독/조합, 순서·중복, 작은 깊이 2/3/4와 트리 구조, known/Unknown 혼합·전부 Unknown, 빈 배열·짧은 자식·등록된 mint의 잘린 ABI·외부 bytes[] offset/length/절단, 64/65, 정상 ABI 뒤 추가 바이트 허용을 검사하도록 작성했다. self 자식 target은 부모 NFPM이며 일반 ERC-20 approve를 정상 approve Action으로 기대하지 않는다. 정상/실패/미지원 교대 요청과 별도 프로세스 설치 상태를 확인한다. 상세 검사·정적 근거는 [coverage](coverage.md#dec-06a--self-multicall-연결과-현재-한계)를 따른다.
+
+mint는 `amm/add_liquidity`, `params.kind=concentrated_mint`다. token pair·desired/min 수량·signed tick·recipient를 대조하며 `fee_tier_bp`는 현재 원본 fee `3000`을 그대로 담는다. pool은 **로컬 CREATE2 계산값**이며 존재·유동성·mint 실행 성공을 확인한 값이 아니다. pool_state의 `xy_constant`·zero reserve와 current_price `"0"`은 현재 placeholder이며 live source 표시는 실제 RPC 조회를 뜻하지 않는다. ABI의 deadline은 현재 Action에 투영되지 않는 정보 보존 한계다. refundETH는 `token/refund_native`이고 recipient는 submitter이며 calldata에 없는 amount를 생성하지 않는다. 최상위 meta 아래에는 자식 ActionBody만 있으므로 내부 meta/decoder ID가 모두 보존되는 구조로 설명하지 않는다. self 자식 요청의 value `"0"`은 현재 route 입력 관찰이며 실제 EVM `msg.value` 의미의 검증이 아니다.
+
+manifest의 `max_depth: 3`은 현재 self builder가 읽지 않는다. public route 재진입으로 깊이 4도 중첩될 수 있으며 현재 직접 적용되는 한도는 **단계별 자식 수 64개**다. 65개·malformed는 현재 전체 오류이고 Unknown에는 reason/path/complete/partial이 없다. 06a는 이 현행 계약을 관찰한다. 호스트 TS의 self 사전 설치는 직계 selector만 검색하고 별도 `MAX_REENTER_DEPTH = 4`는 Call[]의 `installCallTree` 경로에 적용된다. 이 Node 시험은 호스트 동적 발견·설치를 검증하지 않는다.
+
+| 다음 단계 | 현재 상태·진행 조건 |
+| --- | --- |
+| DEC-06b Call[] | 미구현. 06a 사용자 검증 완료; 실제 06a 분리 커밋 확인 후 실제 Morpho Bundler3 원본과 자식별 to/data/value·approve/transfer, 순서/미지원/malformed/empty/64·65를 별도 작성 |
+| DEC-06c 진단·한도 | 미구현. 06b 사용자 검증 후 재귀 문맥·callback 생략·진단/호환 계약 보완. **해석한 호출 보존 + 남은 구간 Unknown/한도 사유**라는 기존 사용자 결정을 유지 |
+| DEC-06 전체 | 06c까지 구현·사용자 검증을 마쳐야 완료. 새 제한값·정확한 wire 구조·소비자 호환은 구체 사례/영향과 함께 06c에서 확정 |
+
+### DEC-06a 사용자 재실행 기록 — 검증 완료
+
+**사용자 재실행 검증 완료:** `/private/tmp/dambi-dec06a-verify.AsBmk6/`에서 self **48/48 통과**(`duration_ms=860.220167`), 기존 466개를 포함한 통합 **514/514 통과**(`duration_ms=1337.026125`)를 확인했다. 두 실행 모두 suites/fail/cancelled/skipped/todo는 0이다. self는 UTC `2026-09-12T07:53:21Z–07:53:22Z`, 통합은 `07:53:22Z–07:53:24Z`이며 command/tee/hash/inventory/Git/final exit 모두 0이다. 실행 전후 HEAD는 `1326fb5ac0c61e9552d952b748a3d09c2b236b35`, branch는 `feat/decoder`이고 **06a 관련 9개 미커밋 경로를 포함한 작업 트리**에서 실행했다. 이번 완료 기록 편집 전에 입력 **1356개 모두 현재 파일과 일치**, JS/WASM 2개 hash도 일치함을 확인했다. 입력·산출물·HEAD/branch/status·tracked/staged patch는 실행 전후 및 편집 전 작업 트리와 동일하다. 최초 실패 `kJih6u`는 아래 과거 기록으로 보존하며 성공 결과로 덮어쓰지 않는다. 에이전트가 빌드·시험을 재실행한 결과가 아니다.
+
+**커밋 경계:** DEC-06a는 사용자 검증 완료지만 아직 미커밋이다. 현재 HEAD에는 DEC-05 Batch 구현만 있으며 DEC-05 완료 기록과 DEC-06a는 별도 커밋으로 정리한다. 먼저 저장된 DEC-05 기록 전용 patch, 다음으로 검증 완료 기록을 포함한 실제 06a 9개 경로를 사용자가 커밋한다. **실제 06a 커밋을 확인한 후 06b 구현을 시작**한다. 06b·06c 파일/시험은 아직 작성하지 않았고 DEC-06 전체는 미완료다. 완료 기록 갱신을 위한 재시험·재빌드는 요구하지 않는다.
+
+| 사용자 실행 | tests / pass | suites / fail / cancelled / skipped / todo | duration_ms |
+| --- | --- | --- | --- |
+| `npm run decoder:test:multicall-self` | **48 / 48** | **0 / 0 / 0 / 0 / 0** | 860.220167 |
+| `npm run decoder:test` | **514 / 514** | **0 / 0 / 0 / 0 / 0** | 1337.026125 |
+
+실행 도구는 Node `v25.9.0`, npm `11.12.1`, Python `3.14.6`이며 `NODE_OPTIONS`는 비어 있었다. 전체 실행 UTC는 `2026-09-12T07:53:21Z–07:53:24Z`다. `reuse-source.log`는 Rust·빌드 입력 **1279개**가 `e487805`와 같음을 확인했고 사후 입력 검사는 **1356개 모두 OK**다. JS SHA-256은 `628e1a7956b3d82ec203c17af83cb3b06a915d45df070166c6de49a843207043`, WASM SHA-256은 `c39531dabb7f6f81b0cfa7b0324f33a2b5e906c569ddc15063ec1d170f6177b9`로 기존 검증 쌍과 같다. 실제 WASM 설치·transaction route·Action/meta 비교가 이번 재실행에서 통과했으며, 로그의 실행 HEAD를 이후 생성할 커밋으로 소급하지 않는다.
+
+### DEC-06a 첫 사용자 실행 — 공통 준비 훅 실패와 수정
+
+저장 로그 `/private/tmp/dambi-dec06a-verify.kJih6u/`를 읽기 전용으로 확인했다. 최초 정적 검토에서 NFPM의 concrete inline index와 approve의 sourced `3-ref` index 차이를 놓쳤다. 시험이 모든 index의 `schema_version`을 `"3-ref"`로 가정하여 당시 `multicall-self.test.mjs:93`에서 실제 `undefined`와 불일치했다. **48개의 독립적인 ABI/Action 실패가 아니라 공통 before hook 실패가 전체 등록 시험에 전파된 결과**다. 임시 strict Registry 빌드 후 index 검사에서 중단돼 실제 WASM 설치·route 요청은 시작하지 않았고, self 종료 코드 1에 따라 통합 시험도 시작하지 않았다.
+
+| 첫 사용자 실행 | 실제 기록 |
+| --- | --- |
+| self 시험 | tests **48**, pass **0**, fail **48**; suites/cancelled/skipped/todo 모두 **0**; `duration_ms=659.926875` |
+| 통합 시험 | **미실행**, `integrated.log` 및 통합 시작 표식 없음. 514개는 작성한 정의 수 |
+| 실행 HEAD·상태 | 전후 `feat/decoder`, `1326fb5ac0c61e9552d952b748a3d09c2b236b35`; DEC-06a 관련 9개 미커밋 경로 |
+| 실행 시각(UTC) | 전체 `2026-09-12T07:45:32Z–07:45:34Z`; self `07:45:33Z–07:45:34Z` |
+| 도구 | Node `v25.9.0`, npm `11.12.1`, Python `3.14.6`, `NODE_OPTIONS` 비어 있음 |
+| 종료 상태 | `multicall-self_command_exit=1`, tee exit 0; 최종 `command_exit=1`, `final_exit=1`; input/artifact hash·inventory·Git record exit 모두 0 |
+| 실행 전후 대응 | 입력 목록·hash **1356개** 바이트 동일, 사후 1356개 모두 OK. HEAD/branch/status·tracked/staged patch 및 JS/WASM hash 모두 전후 동일 |
+| 수정 직전 대조 | 문서 수정 전 현재 파일은 로그 1356개 중 **1355개 일치**. 나머지 `multicall-self.test.mjs`는 이번 형식 수정으로 달라졌으며 당시 untracked 파일이다. 현재 tracked patch는 당시 patch와 일치했음. 수정된 파일을 최초 실행 입력으로 소급하지 않음 |
+| 산출물 재사용 | 저장 로그에서 `e487805` 대비 Rust·빌드 입력 **1279개 일치**. 검증된 JS/WASM 쌍은 실행 전후·현재 hash 모두 동일 |
+
+수정한 기대 구조는 **approve sourced index 4개=`3-ref` + 별도 bundle 파일 1개**, **NFPM concrete index 12개=inline bundle**이다. inline에는 `schema_version`·`bundle_ref`가 없고 원본 NFPM 객체가 그대로 들어간다. 기존 helper의 inline/ref 해소를 재사용하며 exact key·형식·참조/원본·JCS 검사를 유지한다. 네 개의 서로 다른 bundle digest를 네 개의 별도 파일로 잘못 가정했던 검사도 approve 파일 1개로 바로잡았다. 기대 Action·calldata·43요청/5구조·48/514 정의는 유지한다.
+
+이 시점에는 형식 수정·정적 검토를 마치고 재실행 대기 상태였다. 이후 성공한 `AsBmk6` 실행은 위 별도 기록으로 확인했다. Rust·manifest·builder·worker·검증된 JS/WASM은 이 오류 수정으로 바뀌지 않았으며 최초 실패 로그와 DEC-05 기록 전용 patch를 보존한다. 현재는 사용자 재실행 검증 완료 상태다.
+
+### DEC-06a 사용자가 직접 실행할 검증 명령
+
+아래는 성공한 재실행에 사용한 절차의 보존 기록이다. **DEC-06a 완료 기록 갱신을 위해 다시 실행할 필요는 없다.** 현재 필요한 사용자 작업은 다음 절의 분리 커밋이다.
+
+DEC-04b에서 직접 빌드하고 DEC-05a·05b에서 검증한 JS/WASM 쌍을 재사용한다. 현재 Rust·schema·Cargo·WASM 빌드 입력에는 `e487805` 이후 차이가 없다. 아래 사전 검사는 이 구현 커밋과 현재 빌드 입력, 저장된 DEC-04b/05b 산출물 hash, 실제 JS/WASM hash를 다시 대조한다. DEC-04 당시 입력 hash 목록은 24개였으므로 **당시 모든 소스의 SHA-256을 기록했다고 주장하지 않는다**. 당시 source/build 로그와 미커밋 patch, 이후 구현 커밋, 현재 입력을 연결한 재사용 판단이다. 이번에 전체 관련 로컬 입력 목록·hash를 새로 저장한다.
+
+빌드 입력이나 산출물이 달라 사전 판정이 실패하면 시험은 시작하지 않는다. 그 경우 로그에서 변경 원인을 확인하고 재사용 여부를 다시 판단한다. 이번 변경에는 Native 회귀나 새 WASM 빌드가 필요하지 않으며, 아래 명령도 WASM을 빌드하지 않는다. Node 시험 내부의 임시 strict Registry 빌드는 실제로 실행된다. 기존 Registry 의존성이 준비된 현재 환경을 사용하며 설치 명령은 포함하지 않는다.
+
+```bash
+bash <<'BASH'
+set -euo pipefail
+cd /Users/spu/SDKdambi/DAMBI
+export GIT_OPTIONAL_LOCKS=0
+export LC_ALL=C
+dec06a_log_dir="$(mktemp -d /tmp/dambi-dec06a-verify.XXXXXX)"
+printf 'dec06a_log_dir=%s\n' "$dec06a_log_dir"
+dec06a_build_commit=e487805bdb86451a6c9688f7b2dcce399cc13892
+dec06a_build_roots=(
+  Cargo.toml Cargo.lock rust-toolchain.toml .cargo scripts/wasm-build.sh
+  crates/policy-engine crates/policy-engine-wasm
+  crates/adapters/abi-resolver crates/adapters/mappers
+  crates/policy-server/asset-model/state
+  crates/policy-server/asset-model/action
+  crates/policy-server/asset-model/transition
+  schema
+)
+dec06a_artifacts=(
+  crates/policy-engine-wasm/pkg/policy_engine_wasm.js
+  crates/policy-engine-wasm/pkg/policy_engine_wasm_bg.wasm
+)
+dec06a_snapshot_git() {
+  git rev-parse HEAD > "$dec06a_log_dir/head-$1.log" &&
+  git branch --show-current > "$dec06a_log_dir/branch-$1.log" &&
+  git status --porcelain=v1 --untracked-files=all > "$dec06a_log_dir/status-$1.log" &&
+  git diff --binary > "$dec06a_log_dir/tracked-$1.patch" &&
+  git diff --cached --binary > "$dec06a_log_dir/staged-$1.patch"
+}
+dec06a_finish() {
+  dec06a_run_exit=$?
+  trap - EXIT
+  set +e
+  dec06a_post_exit=0
+  dec06a_snapshot_git after || dec06a_post_exit=1
+  for dec06a_name in head branch status tracked staged; do
+    case "$dec06a_name" in tracked|staged) dec06a_ext=patch ;; *) dec06a_ext=log ;; esac
+    cmp "$dec06a_log_dir/$dec06a_name-before.$dec06a_ext" \
+      "$dec06a_log_dir/$dec06a_name-after.$dec06a_ext" \
+      >> "$dec06a_log_dir/git-after-check.log" 2>&1 || dec06a_post_exit=1
+  done
+  shasum -a 256 -c "$dec06a_log_dir/inputs-before.sha256" \
+    > "$dec06a_log_dir/inputs-after-check.log" 2>&1
+  dec06a_input_exit=$?
+  shasum -a 256 -c "$dec06a_log_dir/artifacts-before.sha256" \
+    > "$dec06a_log_dir/artifacts-after-check.log" 2>&1
+  dec06a_artifact_exit=$?
+  python3 "$dec06a_log_dir/snapshot-inputs.py" snapshot "${dec06a_build_roots[@]}" \
+    > "$dec06a_log_dir/inputs-after.sha256" 2> "$dec06a_log_dir/inventory-after.log"
+  dec06a_inventory_exit=$?
+  cmp "$dec06a_log_dir/inputs-before.sha256" "$dec06a_log_dir/inputs-after.sha256" \
+    >> "$dec06a_log_dir/inventory-after.log" 2>&1 || dec06a_inventory_exit=1
+  shasum -a 256 "${dec06a_artifacts[@]}" \
+    > "$dec06a_log_dir/artifacts-after.sha256" 2>&1 || dec06a_post_exit=1
+  dec06a_final_exit=$dec06a_run_exit
+  if [ "$dec06a_final_exit" -eq 0 ] && {
+    [ "$dec06a_post_exit" -ne 0 ] || [ "$dec06a_input_exit" -ne 0 ] ||
+    [ "$dec06a_artifact_exit" -ne 0 ] || [ "$dec06a_inventory_exit" -ne 0 ];
+  }; then
+    dec06a_final_exit=1
+  fi
+  # Keep an earlier command's exact nonzero status if final logging also fails.
+  date -u '+finished_utc=%Y-%m-%dT%H:%M:%SZ' \
+    >> "$dec06a_log_dir/timeline.log" || {
+      if [ "$dec06a_final_exit" -eq 0 ]; then dec06a_final_exit=1; fi
+    }
+  printf 'command_exit=%s input_hash_exit=%s artifact_hash_exit=%s inventory_exit=%s git_record_exit=%s final_exit=%s\n' \
+    "$dec06a_run_exit" "$dec06a_input_exit" "$dec06a_artifact_exit" \
+    "$dec06a_inventory_exit" "$dec06a_post_exit" "$dec06a_final_exit" \
+    | tee -a "$dec06a_log_dir/timeline.log" || {
+      if [ "$dec06a_final_exit" -eq 0 ]; then dec06a_final_exit=1; fi
+    }
+  printf 'dec06a_log_dir=%s\n' "$dec06a_log_dir" || {
+    if [ "$dec06a_final_exit" -eq 0 ]; then dec06a_final_exit=1; fi
+  }
+  exit "$dec06a_final_exit"
+}
+trap dec06a_finish EXIT
+# Preserve the actual command status even if tee also fails.
+dec06a_logged() {
+  local dec06a_label=$1
+  shift
+  local dec06a_pipe_status dec06a_log_exit=0
+  date -u "+${dec06a_label}_started_utc=%Y-%m-%dT%H:%M:%SZ" >> "$dec06a_log_dir/timeline.log"
+  if "$@" 2>&1 | tee "$dec06a_log_dir/$dec06a_label.log"; then
+    dec06a_pipe_status=("${PIPESTATUS[@]}")
+  else
+    dec06a_pipe_status=("${PIPESTATUS[@]}")
+  fi
+  date -u "+${dec06a_label}_finished_utc=%Y-%m-%dT%H:%M:%SZ" \
+    >> "$dec06a_log_dir/timeline.log" || dec06a_log_exit=$?
+  printf '%s_command_exit=%s %s_tee_exit=%s\n' \
+    "$dec06a_label" "${dec06a_pipe_status[0]}" "$dec06a_label" "${dec06a_pipe_status[1]}" \
+    >> "$dec06a_log_dir/timeline.log" || dec06a_log_exit=$?
+  if [ "${dec06a_pipe_status[0]}" -ne 0 ]; then return "${dec06a_pipe_status[0]}"; fi
+  if [ "${dec06a_pipe_status[1]}" -ne 0 ]; then return "${dec06a_pipe_status[1]}"; fi
+  return "$dec06a_log_exit"
+}
+cat > "$dec06a_log_dir/snapshot-inputs.py" <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+mode, *build_roots = sys.argv[1:]
+skip = {'.git', 'target', 'pkg', 'node_modules', '__pycache__'}
+def files_under(roots):
+    result = set()
+    for value in roots:
+        root = Path(value)
+        if root.is_file():
+            result.add(root.as_posix())
+        elif root.is_dir():
+            for current, dirs, names in os.walk(root):
+                dirs[:] = sorted(d for d in dirs if d not in skip)
+                for name in names:
+                    path = Path(current, name)
+                    if path.is_symlink():
+                        raise SystemExit(f'Inspect symlink input before reuse: {path}')
+                    result.add(path.as_posix())
+    return result
+
+build_files = files_under(build_roots)
+if mode == 'reuse':
+    commit = 'e487805bdb86451a6c9688f7b2dcce399cc13892'
+    raw = subprocess.check_output(['git', 'ls-tree', '-r', '-z', '--name-only', commit, '--', *build_roots])
+    expected = {p.decode() for p in raw.split(b'\0') if p}
+    if build_files != expected:
+        raise SystemExit(f'Build input inventory changed: added={sorted(build_files - expected)}; removed={sorted(expected - build_files)}')
+    subprocess.run(['git', 'diff', '--exit-code', commit, '--', *build_roots], check=True)
+    print(f'Build-input inventory and tracked contents match {commit}: {len(build_files)} files')
+else:
+    paths = build_files | files_under([
+        'fixtures/decoder-policy', 'registryV2/scripts',
+        'browser-extension/default-bundles/day1-safety/policies/unlimited-approval-deny',
+    ])
+    paths.update([
+        'package.json', 'yarn.lock', '.yarnrc.yml',
+        'registryV2/package.json', 'registryV2/package-lock.json', 'registryV2/tsconfig.json',
+        'docs/sdk-migration/decoder-design-plan.md',
+        'docs/sdk-migration/decoder-core-adapters-plan.md',
+    ])
+    # Resolve the original manifests and tokens pinned by every selected fixture.
+    selection = json.loads(Path('fixtures/decoder-policy/registry-selection.json').read_text())
+    def selected(value):
+        if isinstance(value, dict):
+            if isinstance(value.get('path'), str) and 'sha256' in value:
+                path = Path('registryV2', value['path'])
+                if not path.resolve().is_relative_to(Path('registryV2').resolve()):
+                    raise SystemExit(f'Selection path escapes Registry: {path}')
+                paths.add(path.as_posix())
+            for child in value.values():
+                selected(child)
+        elif isinstance(value, list):
+            for child in value:
+                selected(child)
+    selected(selection)
+    # npm's installed lock records the already prepared Registry dependency tree.
+    installed_lock = Path('registryV2/node_modules/.package-lock.json')
+    if installed_lock.is_file():
+        paths.add(installed_lock.as_posix())
+    for value in sorted(paths):
+        path = Path(value)
+        print(f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {value}')
+PY
+date -u '+started_utc=%Y-%m-%dT%H:%M:%SZ' | tee "$dec06a_log_dir/timeline.log"
+dec06a_snapshot_git before
+{
+  printf 'build_source_commit=%s\n' "$dec06a_build_commit" &&
+  git branch --show-current &&
+  git rev-parse HEAD &&
+  git status --short &&
+  command -v node npm python3 &&
+  node --version &&
+  npm --version &&
+  python3 --version &&
+  printf 'NODE_OPTIONS=%s\n' "${NODE_OPTIONS-}"
+} | tee "$dec06a_log_dir/source-and-tools.log"
+python3 "$dec06a_log_dir/snapshot-inputs.py" snapshot "${dec06a_build_roots[@]}" \
+  > "$dec06a_log_dir/inputs-before.sha256"
+shasum -a 256 "${dec06a_artifacts[@]}" > "$dec06a_log_dir/artifacts-before.sha256"
+cat > "$dec06a_log_dir/expected-artifacts.sha256" <<'HASHES'
+628e1a7956b3d82ec203c17af83cb3b06a915d45df070166c6de49a843207043  crates/policy-engine-wasm/pkg/policy_engine_wasm.js
+c39531dabb7f6f81b0cfa7b0324f33a2b5e906c569ddc15063ec1d170f6177b9  crates/policy-engine-wasm/pkg/policy_engine_wasm_bg.wasm
+HASHES
+mkdir "$dec06a_log_dir/dec04b-evidence" "$dec06a_log_dir/dec05b-evidence"
+for dec06a_file in source-and-tools.log timeline.log build.log test-inputs.sha256 artifacts.sha256 tracked-before.patch tracked-after.patch; do
+  cp "/private/tmp/dambi-dec04b-verify.OepBZF/$dec06a_file" "$dec06a_log_dir/dec04b-evidence/"
+done
+for dec06a_file in source-and-tools.log timeline.log inputs-before.sha256 artifacts-before.sha256; do
+  cp "/private/tmp/dambi-dec05b-verify.WCHZDj/$dec06a_file" "$dec06a_log_dir/dec05b-evidence/"
+done
+cmp "$dec06a_log_dir/expected-artifacts.sha256" "$dec06a_log_dir/dec04b-evidence/artifacts.sha256"
+cmp "$dec06a_log_dir/expected-artifacts.sha256" "$dec06a_log_dir/dec05b-evidence/artifacts-before.sha256"
+dec06a_logged reuse-source python3 "$dec06a_log_dir/snapshot-inputs.py" reuse "${dec06a_build_roots[@]}"
+dec06a_logged reuse-artifacts shasum -a 256 -c "$dec06a_log_dir/expected-artifacts.sha256"
+dec06a_logged diff-check git diff --check
+dec06a_logged staged-diff-check git diff --cached --check
+test -x registryV2/node_modules/.bin/tsx
+dec06a_logged multicall-self npm run decoder:test:multicall-self
+dec06a_logged integrated npm run decoder:test
+BASH
+```
+
+표시된 `/tmp/dambi-dec06a-verify.*` 디렉터리의 `multicall-self.log`, `integrated.log`, `timeline.log`, 입력·산출물 hash와 Git 전후 기록을 전달한다. 첫 시험 실패 시 통합 시험을 시작하지 않으며 사후 입력·산출물·파일 목록·Git 기록 오류도 최종 실패에 포함한다. 실행 전후 입력 목록 재생성은 기존 파일의 수정·삭제뿐 아니라 새로운 입력 파일 추가도 검출한다. 이 입력 목록은 관련 로컬 소스와 lockfile 기록이며 전체 외부 toolchain·설치된 모든 npm 패키지의 재현성 보증은 아니다.
+
+### DEC-05 기록과 DEC-06a를 구분한 사용자 로컬 커밋 명령
+
+성공한 06a 재실행 결과를 위 네 문서에 반영했다. 다음 명령은 완료된 DEC-05 Batch 구현 커밋 `1326fb5`를 다시 만들지 않고, 아직 미커밋인 **DEC-05 검증 기록**과 **DEC-06a 구현·검증 기록**만 분리한다. 06b 파일은 포함하지 않는다. 같은 내용을 `/private/tmp/dambi-dec06a-commit.sh`에 저장했으며 사용자는 `bash /private/tmp/dambi-dec06a-commit.sh`로 실행할 수 있다.
+
+현재 `feat/decoder` HEAD `1326fb5ac0c61e9552d952b748a3d09c2b236b35`에는 DEC-05 기록과 DEC-06a 구현이 아직 커밋되지 않았다. 아래 블록은 **DEC-05 기록만의 커밋 → 검증한 DEC-06a 구현·실행 기록 커밋**을 순서대로 만든다. 초기 HEAD·빈 index·정확한 아홉 변경 경로·사용자 성공 로그 `AsBmk6`에 기록한 구현 다섯 파일 hash를 검사한다. 첫 커밋은 고정 hash의 patch와 네 문서의 예상 blob을 대조한다. 동일 블록을 다시 실행하면 초기 HEAD 검사에서 멈추므로 완료한 커밋을 중복 생성하지 않는다. 에이전트는 이 Git 쓰기 명령을 실행하지 않았다.
+
+```bash
+bash <<'BASH'
+set -euo pipefail
+cd /Users/spu/SDKdambi/DAMBI
+dec06a_base=1326fb5ac0c61e9552d952b748a3d09c2b236b35
+dec05_patch=/private/tmp/dambi-dec05-records-1326fb5.ym8j8kc_.patch
+test "$(git branch --show-current)" = feat/decoder
+test "$(git rev-parse HEAD)" = "$dec06a_base" || {
+  printf 'HEAD changed or a stage is already committed; inspect git log before continuing.\n' >&2
+  exit 1
+}
+git diff --cached --quiet || { printf 'Existing staged changes require review.\n' >&2; exit 1; }
+dec06a_stage_dir="$(mktemp -d /tmp/dambi-dec06a-stage.XXXXXX)"
+printf 'dec06a_stage_dir=%s\n' "$dec06a_stage_dir"
+cat > "$dec06a_stage_dir/expected-all-paths.txt" <<'PATHS'
+docs/sdk-migration/decoder-core-adapters-plan.md
+docs/sdk-migration/decoder-design-plan.md
+fixtures/decoder-policy/README.md
+fixtures/decoder-policy/coverage.md
+fixtures/decoder-policy/helpers/build-registry.mjs
+fixtures/decoder-policy/multicall-self.cases.json
+fixtures/decoder-policy/multicall-self.test.mjs
+fixtures/decoder-policy/registry-selection.json
+package.json
+PATHS
+head -n 4 "$dec06a_stage_dir/expected-all-paths.txt" > "$dec06a_stage_dir/expected-dec05-paths.txt"
+{ git diff --name-only HEAD && git ls-files --others --exclude-standard; } \
+  | LC_ALL=C sort -u > "$dec06a_stage_dir/actual-all-paths.txt"
+diff -u "$dec06a_stage_dir/expected-all-paths.txt" "$dec06a_stage_dir/actual-all-paths.txt"
+dec06a_check_implementation() {
+  shasum -a 256 -c - <<'HASHES'
+2daa50bb67d73e2703b21322098153184345abdf99c31aaefcd60e35506e28a3  fixtures/decoder-policy/helpers/build-registry.mjs
+f1b4df37d808f2be49fbf6322afc99bb5edd182b91071ffc10415f0900e6d627  fixtures/decoder-policy/multicall-self.cases.json
+d5a4437fb3e86979acad1d09c755b1989dc6b106e528f46962ec3dd90ddfb2f3  fixtures/decoder-policy/multicall-self.test.mjs
+9241e2fdba02508fc48ed1fc6c0d232b75fd1308e36e1df98903f520f2b8c8ed  fixtures/decoder-policy/registry-selection.json
+7077c832fb600d57fe6553409c3c7d1990dddbf428b0e7db9c2ad65e872d9167  package.json
+HASHES
+}
+dec05_check_blobs() {
+  local dec05_revision=$1 dec05_blob dec05_path
+  while read -r dec05_blob dec05_path; do
+    test "$(git rev-parse "${dec05_revision}:$dec05_path")" = "$dec05_blob"
+  done <<'BLOBS'
+a23fb7e7aa3d5822a776ebac32765fb162bd434b  docs/sdk-migration/decoder-core-adapters-plan.md
+e3a8ff9e88269985e1ac2a3280ff26342bd84e00  docs/sdk-migration/decoder-design-plan.md
+d4b25f40a72bd545c250a419ae566a4cb848630c  fixtures/decoder-policy/README.md
+a0469d9087bc82abfca574f67420bb751a200b17  fixtures/decoder-policy/coverage.md
+BLOBS
+}
+dec06a_check_implementation
+printf '%s  %s\n' \
+  1a3b150a0b57ca74b7aeb093533dd2b8ae69ed56ed2d80f43abc9a24bcb5b986 \
+  "$dec05_patch" | shasum -a 256 -c -
+git diff --check
+# Stage and commit only the saved DEC-05 documentation patch.
+git apply --cached --check "$dec05_patch"
+git apply --cached "$dec05_patch"
+git diff --cached --name-only | LC_ALL=C sort > "$dec06a_stage_dir/dec05-staged-paths.txt"
+diff -u "$dec06a_stage_dir/expected-dec05-paths.txt" "$dec06a_stage_dir/dec05-staged-paths.txt"
+dec05_check_blobs ''
+git diff --cached --check
+git diff --cached --stat
+# No path arguments: take only the DEC-05 patch staged in the index.
+git commit -m "docs(decoder): record verified DEC-05 A-scope results"
+dec05_commit="$(git rev-parse HEAD)"
+test "$(git show -s --format=%P HEAD)" = "$dec06a_base"
+test "$(git show -s --format=%s HEAD)" = 'docs(decoder): record verified DEC-05 A-scope results'
+git diff-tree --no-commit-id --name-only -r HEAD | LC_ALL=C sort > "$dec06a_stage_dir/dec05-committed-paths.txt"
+diff -u "$dec06a_stage_dir/expected-dec05-paths.txt" "$dec06a_stage_dir/dec05-committed-paths.txt"
+dec05_check_blobs HEAD
+# Verify the remaining work, then commit the DEC-06a implementation and records.
+git diff --cached --quiet
+dec06a_check_implementation
+{ git diff --name-only HEAD && git ls-files --others --exclude-standard; } \
+  | LC_ALL=C sort -u > "$dec06a_stage_dir/remaining-paths.txt"
+diff -u "$dec06a_stage_dir/expected-all-paths.txt" "$dec06a_stage_dir/remaining-paths.txt"
+git diff --check
+dec06a_files=(
+  fixtures/decoder-policy/multicall-self.cases.json
+  fixtures/decoder-policy/multicall-self.test.mjs
+  fixtures/decoder-policy/registry-selection.json
+  fixtures/decoder-policy/helpers/build-registry.mjs
+  package.json
+  fixtures/decoder-policy/README.md
+  fixtures/decoder-policy/coverage.md
+  docs/sdk-migration/decoder-design-plan.md
+  docs/sdk-migration/decoder-core-adapters-plan.md
+)
+git add -- "${dec06a_files[@]}"
+git diff --cached --check
+git diff --cached --name-only | LC_ALL=C sort > "$dec06a_stage_dir/dec06a-staged-paths.txt"
+diff -u "$dec06a_stage_dir/expected-all-paths.txt" "$dec06a_stage_dir/dec06a-staged-paths.txt"
+git diff --cached --stat
+git commit -m "test(decoder): connect real NFPM self-multicall decoding"
+test "$(git show -s --format=%P HEAD)" = "$dec05_commit"
+git log -2 --oneline | tee "$dec06a_stage_dir/commits.log"
+git status --short | tee "$dec06a_stage_dir/status-after.log"
+BASH
+```
+
+최근 두 커밋 ID와 `git status --short` 결과를 확인한 뒤 DEC-06b를 진행한다. 이번 기록·커밋에 빌드·재시험·설치·push는 필요하지 않다. 중간 실패로 첫 커밋이나 staging이 이미 완료됐다면 처음부터 재실행하거나 reset하지 않고 현재 HEAD·index에서 남은 단계만 확인한다.
 
 ## DEC-05b 상태 — 사용자 실행 검증 완료
 
