@@ -1,0 +1,922 @@
+{
+  "registry_source": "manifests/uniswap/permit2/permitSingle@1.0.0.json",
+  "scope": "DEC-05a real manifest -> strict Registry build -> verified typed index -> actual WASM v3 conversion. Not full EIP-712 validation, signature verification, nonce RPC or policy evaluation.",
+  "execution_status": "구현 완료, 사용자 실행 대기",
+  "case_input_rules": "Clone defaults, apply set paths, remove omit paths, optionally reverse JSON object key insertion order. All cases invoke v3 typed directly. No calldata or owner is invented.",
+  "nonce_scope": "Current mapper derives [word, bit] from the signed nonce, then wraps it with manifest nonceBitmap source / ttl 12 / synced_at=submitted_at. This is not a chain result or a constant zero stub. AllowanceTransfer sequential uint48 nonce and SignatureTransfer bitmap semantics differ; model correction is unresolved.",
+  "diagnostic_scope": "legacy_diagnostic asserts explicitly identified current behavior only, never a Permit2 validity claim or resolved contract. Large sigDeadline values may fit uint256 but exceed the Action/JS projection. Large-time checks see the worker JSON.parse result; raw u64 saturation remains a static finding.",
+  "defaults": {
+    "chain_id": 1,
+    "verifying_contract": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+    "primary_type": "PermitSingle",
+    "domain_name": "Permit2",
+    "message": {
+      "details": {
+        "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "amount": "1000000",
+        "expiration": "1739000000",
+        "nonce": "513"
+      },
+      "spender": "0x111122223333444455556666777788889999abcd",
+      "sigDeadline": "1738002000"
+    },
+    "submitter": "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+    "submitted_at": 1700000000
+  },
+  "expected_action": {
+    "body": {
+      "domain": "token",
+      "action": "permit2_sign_allowance",
+      "token": {
+        "key": {
+          "standard": "erc20",
+          "chain": "eip155:1",
+          "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        }
+      },
+      "spender": "0x111122223333444455556666777788889999abcd",
+      "amount": "0xf4240",
+      "expires_at": 1739000000,
+      "sig_deadline": 1738002000,
+      "nonce": {
+        "value": [
+          "0x2",
+          1
+        ],
+        "source": {
+          "kind": "onchain_view",
+          "chain": "eip155:1",
+          "contract": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+          "function": "nonceBitmap(address,uint256)",
+          "decoder_id": "permit2_nonce_bitmap"
+        },
+        "synced_at": 1700000000,
+        "ttl": 12
+      }
+    },
+    "meta": {
+      "submitted_at": 1700000000,
+      "submitter": "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+      "nature": {
+        "kind": "offchain_sig",
+        "domain": {
+          "name": "Permit2",
+          "chain_id": 1,
+          "verifying_contract": "0x000000000022d473030f116ddee9f6b43ac78ba3"
+        },
+        "deadline": 1738002000
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "named-normal",
+      "group": "normal",
+      "expected": {}
+    },
+    {
+      "id": "object-key-order",
+      "group": "normal",
+      "reverse_object_keys": true,
+      "expected": {}
+    },
+    {
+      "id": "amount-zero",
+      "group": "normal",
+      "set": {
+        "message.details.amount": "0"
+      },
+      "expected": {
+        "amount": "0x0"
+      }
+    },
+    {
+      "id": "amount-max",
+      "group": "normal",
+      "set": {
+        "message.details.amount": "1461501637330902918203684832716283019655932542975"
+      },
+      "expected": {
+        "amount": "0xffffffffffffffffffffffffffffffffffffffff"
+      }
+    },
+    {
+      "id": "expiration-zero",
+      "group": "normal",
+      "set": {
+        "message.details.expiration": "0"
+      },
+      "expected": {
+        "expires_at": "0"
+      }
+    },
+    {
+      "id": "expiration-max",
+      "group": "normal",
+      "set": {
+        "message.details.expiration": "281474976710655"
+      },
+      "expected": {
+        "expires_at": "281474976710655"
+      }
+    },
+    {
+      "id": "nonce-zero",
+      "group": "normal",
+      "set": {
+        "message.details.nonce": "0"
+      },
+      "expected": {
+        "nonce": [
+          "0x0",
+          0
+        ]
+      }
+    },
+    {
+      "id": "nonce-max",
+      "group": "normal",
+      "set": {
+        "message.details.nonce": "281474976710655"
+      },
+      "expected": {
+        "nonce": [
+          "0xffffffffff",
+          255
+        ]
+      }
+    },
+    {
+      "id": "nonce-255",
+      "group": "normal",
+      "set": {
+        "message.details.nonce": "255"
+      },
+      "expected": {
+        "nonce": [
+          "0x0",
+          255
+        ]
+      }
+    },
+    {
+      "id": "nonce-256",
+      "group": "normal",
+      "set": {
+        "message.details.nonce": "256"
+      },
+      "expected": {
+        "nonce": [
+          "0x1",
+          0
+        ]
+      }
+    },
+    {
+      "id": "safe-number-scalars",
+      "group": "normal",
+      "set": {
+        "message.details.amount": 1000000,
+        "message.details.expiration": 1739000000,
+        "message.details.nonce": 513,
+        "message.sigDeadline": 1738002000
+      },
+      "expected": {}
+    },
+    {
+      "id": "sig-deadline-zero",
+      "group": "normal",
+      "set": {
+        "message.sigDeadline": "0"
+      },
+      "expected": {
+        "sig_deadline": "0"
+      }
+    },
+    {
+      "id": "sig-deadline-js-safe-max",
+      "group": "normal",
+      "set": {
+        "message.sigDeadline": "9007199254740991"
+      },
+      "expected": {
+        "sig_deadline": "9007199254740991"
+      }
+    },
+    {
+      "id": "mixed-case-addresses",
+      "group": "normal",
+      "set": {
+        "verifying_contract": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+        "message.details.token": "0xA0b86991c6218b36c1D19d4a2e9Eb0cE3606eB48",
+        "message.spender": "0x111122223333444455556666777788889999aBcD",
+        "submitter": "0xAbcdefABcdefAbCdEfAbCdEfAbCdEfAbCdEfABcD"
+      },
+      "expected": {}
+    },
+    {
+      "id": "null-witness",
+      "group": "normal",
+      "set": {
+        "witness_type": null
+      },
+      "expected": {}
+    },
+    {
+      "id": "different-submitted-at",
+      "group": "normal",
+      "set": {
+        "submitted_at": 1700000123
+      },
+      "expected": {
+        "submitted_at": "1700000123"
+      }
+    },
+    {
+      "id": "chain-10",
+      "group": "normal",
+      "set": {
+        "chain_id": 10
+      },
+      "expected": {
+        "chain_id": 10
+      }
+    },
+    {
+      "id": "chain-8453",
+      "group": "normal",
+      "set": {
+        "chain_id": 8453
+      },
+      "expected": {
+        "chain_id": 8453
+      }
+    },
+    {
+      "id": "chain-42161",
+      "group": "normal",
+      "set": {
+        "chain_id": 42161
+      },
+      "expected": {
+        "chain_id": 42161
+      }
+    },
+    {
+      "id": "unregistered-chain",
+      "group": "routing_miss",
+      "set": {
+        "chain_id": 137
+      },
+      "expected": {
+        "error_kind": "no_typed_data_mapper"
+      }
+    },
+    {
+      "id": "unregistered-contract",
+      "group": "routing_miss",
+      "set": {
+        "verifying_contract": "0x9999888877776666555544443333222211110000"
+      },
+      "expected": {
+        "error_kind": "no_typed_data_mapper"
+      }
+    },
+    {
+      "id": "unregistered-primary-type",
+      "group": "routing_miss",
+      "set": {
+        "primary_type": "PermitOther"
+      },
+      "expected": {
+        "error_kind": "no_typed_data_mapper"
+      }
+    },
+    {
+      "id": "batch-not-installed",
+      "group": "routing_miss",
+      "set": {
+        "primary_type": "PermitBatch"
+      },
+      "expected": {
+        "error_kind": "no_typed_data_mapper"
+      }
+    },
+    {
+      "id": "unregistered-witness",
+      "group": "routing_miss",
+      "set": {
+        "witness_type": "OrderWitness"
+      },
+      "expected": {
+        "error_kind": "no_typed_data_mapper"
+      }
+    },
+    {
+      "id": "lookup-miss-before-bad-details",
+      "group": "routing_miss",
+      "set": {
+        "chain_id": 137,
+        "message.details": null
+      },
+      "expected": {
+        "error_kind": "no_typed_data_mapper"
+      }
+    },
+    {
+      "id": "missing-chain-id",
+      "group": "input_error",
+      "omit": [
+        "chain_id"
+      ],
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "missing-verifying-contract",
+      "group": "input_error",
+      "omit": [
+        "verifying_contract"
+      ],
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "missing-primary-type",
+      "group": "input_error",
+      "omit": [
+        "primary_type"
+      ],
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "missing-message",
+      "group": "input_error",
+      "omit": [
+        "message"
+      ],
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "missing-submitter",
+      "group": "input_error",
+      "omit": [
+        "submitter"
+      ],
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "missing-submitted-at",
+      "group": "input_error",
+      "omit": [
+        "submitted_at"
+      ],
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "null-chain",
+      "group": "input_error",
+      "set": {
+        "chain_id": null
+      },
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "string-chain",
+      "group": "input_error",
+      "set": {
+        "chain_id": "1"
+      },
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "invalid-contract",
+      "group": "input_error",
+      "set": {
+        "verifying_contract": "0x1234"
+      },
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "null-primary-type",
+      "group": "input_error",
+      "set": {
+        "primary_type": null
+      },
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "invalid-submitter",
+      "group": "input_error",
+      "set": {
+        "submitter": "invalid"
+      },
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "negative-submitted-at",
+      "group": "input_error",
+      "set": {
+        "submitted_at": -1
+      },
+      "expected": {
+        "error_kind": "invalid_input_json"
+      }
+    },
+    {
+      "id": "missing-token",
+      "group": "emit_error",
+      "omit": [
+        "message.details.token"
+      ],
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "null-token",
+      "group": "emit_error",
+      "set": {
+        "message.details.token": null
+      },
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "invalid-token",
+      "group": "emit_error",
+      "set": {
+        "message.details.token": "bad"
+      },
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "missing-amount",
+      "group": "emit_error",
+      "omit": [
+        "message.details.amount"
+      ],
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "null-amount",
+      "group": "emit_error",
+      "set": {
+        "message.details.amount": null
+      },
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "invalid-amount",
+      "group": "emit_error",
+      "set": {
+        "message.details.amount": "bad"
+      },
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "missing-expiration",
+      "group": "emit_error",
+      "omit": [
+        "message.details.expiration"
+      ],
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "null-expiration",
+      "group": "emit_error",
+      "set": {
+        "message.details.expiration": null
+      },
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "invalid-expiration",
+      "group": "emit_error",
+      "set": {
+        "message.details.expiration": "bad"
+      },
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "missing-spender",
+      "group": "emit_error",
+      "omit": [
+        "message.spender"
+      ],
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "null-spender",
+      "group": "emit_error",
+      "set": {
+        "message.spender": null
+      },
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "invalid-spender",
+      "group": "emit_error",
+      "set": {
+        "message.spender": "bad"
+      },
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "missing-sig-deadline",
+      "group": "emit_error",
+      "omit": [
+        "message.sigDeadline"
+      ],
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "null-sig-deadline",
+      "group": "emit_error",
+      "set": {
+        "message.sigDeadline": null
+      },
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "invalid-sig-deadline",
+      "group": "emit_error",
+      "set": {
+        "message.sigDeadline": "bad"
+      },
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "missing-details",
+      "group": "emit_error",
+      "omit": [
+        "message.details"
+      ],
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "null-details",
+      "group": "emit_error",
+      "set": {
+        "message.details": null
+      },
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "invalid-details",
+      "group": "emit_error",
+      "set": {
+        "message.details": "bad"
+      },
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "null-message",
+      "group": "emit_error",
+      "set": {
+        "message": null
+      },
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "scalar-message",
+      "group": "emit_error",
+      "set": {
+        "message": "bad"
+      },
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "empty-details-array",
+      "group": "emit_error",
+      "set": {
+        "message.details": []
+      },
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "empty-message-array",
+      "group": "emit_error",
+      "set": {
+        "message": []
+      },
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "negative-amount",
+      "group": "emit_error",
+      "set": {
+        "message.details.amount": "-1"
+      },
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "amount-uint256-overflow",
+      "group": "emit_error",
+      "set": {
+        "message.details.amount": "115792089237316195423570985008687907853269984665640564039457584007913129639936"
+      },
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "negative-expiration",
+      "group": "emit_error",
+      "set": {
+        "message.details.expiration": "-1"
+      },
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "fractional-sig-deadline",
+      "group": "emit_error",
+      "set": {
+        "message.sigDeadline": 1.5
+      },
+      "expected": {
+        "error_kind": "build_action_body_failed"
+      }
+    },
+    {
+      "id": "amount-declared-width-overflow",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.amount": "1461501637330902918203684832716283019655932542976"
+      },
+      "expected": {
+        "amount": "0x10000000000000000000000000000000000000000"
+      },
+      "unresolved_issue": "v3 scalar conversion does not enforce declared uint160; accepted output is not valid Permit2 input. Range rejection is a pending contract decision."
+    },
+    {
+      "id": "expiration-declared-width-overflow",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.expiration": "281474976710656"
+      },
+      "expected": {
+        "expires_at": "281474976710656"
+      },
+      "unresolved_issue": "v3 scalar conversion does not enforce declared uint48; accepted output is not valid Permit2 input. Range rejection is a pending contract decision."
+    },
+    {
+      "id": "nonce-declared-width-overflow",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.nonce": "281474976710656"
+      },
+      "expected": {
+        "nonce": [
+          "0x10000000000",
+          0
+        ]
+      },
+      "unresolved_issue": "v3 scalar conversion does not enforce declared uint48; accepted output is not valid Permit2 input. Range rejection is a pending contract decision."
+    },
+    {
+      "id": "missing-nonce-fallback",
+      "group": "legacy_diagnostic",
+      "omit": [
+        "message.details.nonce"
+      ],
+      "expected": {
+        "nonce": [
+          "0x0",
+          0
+        ]
+      },
+      "unresolved_issue": "Missing or unparsable signed nonce becomes the zero tuple through reshape/null and live_input_default fallback. Explicit input error and nonce model correction are pending; not a valid request."
+    },
+    {
+      "id": "null-nonce-fallback",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.nonce": null
+      },
+      "expected": {
+        "nonce": [
+          "0x0",
+          0
+        ]
+      },
+      "unresolved_issue": "Missing or unparsable signed nonce becomes the zero tuple through reshape/null and live_input_default fallback. Explicit input error and nonce model correction are pending; not a valid request."
+    },
+    {
+      "id": "invalid-nonce-fallback",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.nonce": "bad"
+      },
+      "expected": {
+        "nonce": [
+          "0x0",
+          0
+        ]
+      },
+      "unresolved_issue": "Missing or unparsable signed nonce becomes the zero tuple through reshape/null and live_input_default fallback. Explicit input error and nonce model correction are pending; not a valid request."
+    },
+    {
+      "id": "negative-nonce-fallback",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.nonce": "-1"
+      },
+      "expected": {
+        "nonce": [
+          "0x0",
+          0
+        ]
+      },
+      "unresolved_issue": "Missing or unparsable signed nonce becomes the zero tuple through reshape/null and live_input_default fallback. Explicit input error and nonce model correction are pending; not a valid request."
+    },
+    {
+      "id": "boolean-nonce-fallback",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.nonce": true
+      },
+      "expected": {
+        "nonce": [
+          "0x0",
+          0
+        ]
+      },
+      "unresolved_issue": "Missing or unparsable signed nonce becomes the zero tuple through reshape/null and live_input_default fallback. Explicit input error and nonce model correction are pending; not a valid request."
+    },
+    {
+      "id": "object-nonce-fallback",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.nonce": {}
+      },
+      "expected": {
+        "nonce": [
+          "0x0",
+          0
+        ]
+      },
+      "unresolved_issue": "Missing or unparsable signed nonce becomes the zero tuple through reshape/null and live_input_default fallback. Explicit input error and nonce model correction are pending; not a valid request."
+    },
+    {
+      "id": "array-nonce-fallback",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.nonce": []
+      },
+      "expected": {
+        "nonce": [
+          "0x0",
+          0
+        ]
+      },
+      "unresolved_issue": "Missing or unparsable signed nonce becomes the zero tuple through reshape/null and live_input_default fallback. Explicit input error and nonce model correction are pending; not a valid request."
+    },
+    {
+      "id": "uint256-overflow-nonce-fallback",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.details.nonce": "115792089237316195423570985008687907853269984665640564039457584007913129639936"
+      },
+      "expected": {
+        "nonce": [
+          "0x0",
+          0
+        ]
+      },
+      "unresolved_issue": "Missing or unparsable signed nonce becomes the zero tuple through reshape/null and live_input_default fallback. Explicit input error and nonce model correction are pending; not a valid request."
+    },
+    {
+      "id": "sig-deadline-js-precision",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.sigDeadline": "9007199254740993"
+      },
+      "expected": {
+        "time_diagnostic": "unsafe-js-roundtrip"
+      },
+      "unresolved_issue": "Time is u64 JSON number. Worker JSON.parse loses 2^53+1 precision although body/meta agree. Raw uint256 preservation and JS-safe projection remain unresolved for Permit2 v3."
+    },
+    {
+      "id": "sig-deadline-u64-overflow",
+      "group": "legacy_diagnostic",
+      "set": {
+        "message.sigDeadline": "18446744073709551616"
+      },
+      "expected": {
+        "time_diagnostic": "u64-saturation-meta-zero"
+      },
+      "unresolved_issue": "Static source predicts body u64::MAX and meta 0. Worker parses body as unsafe Number, so this probe checks unsafe representation and body/meta mismatch only, not raw saturation. Contract unresolved."
+    },
+    {
+      "id": "domain-name-unchecked",
+      "group": "legacy_diagnostic",
+      "set": {
+        "domain_name": "Other Domain"
+      },
+      "expected": {
+        "domain_name": "Other Domain"
+      },
+      "unresolved_issue": "v3 echoes optional domain_name without enforcing the Permit2 manifest domain. Full domain/types validation and v4 Permit2 are unsupported."
+    },
+    {
+      "id": "positional-details",
+      "group": "compatibility",
+      "set": {
+        "message.details": [
+          "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+          "1000000",
+          "1739000000",
+          "513"
+        ]
+      },
+      "compatibility_note": "Internal array compatibility only. Named root keeps sigDeadline available to meta; not a standard named EIP-712 object.",
+      "expected": {}
+    },
+    {
+      "id": "positional-message",
+      "group": "compatibility",
+      "set": {
+        "message": [
+          [
+            "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            "1000000",
+            "1739000000",
+            "513"
+          ],
+          "0x111122223333444455556666777788889999abcd",
+          "1738002000"
+        ]
+      },
+      "compatibility_note": "Internal array compatibility only. Body uses positional tuple; current meta reads named sigDeadline and becomes 0. Not equivalent to a valid named EIP-712 request.",
+      "expected": {
+        "meta_deadline": "0"
+      }
+    }
+  ]
+}

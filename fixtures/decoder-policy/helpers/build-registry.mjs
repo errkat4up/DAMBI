@@ -37,9 +37,12 @@ async function copyPinnedFile(root, selected) {
 }
 
 // Existing callers remain approve-only; later fixtures explicitly opt in.
-export async function buildRegistry(selection, { includeTransfer = false, includePermit = false } = {}) {
+export async function buildRegistry(selection, {
+  includeTransfer = false, includePermit = false, includePermit2Single = false,
+} = {}) {
   assert.equal(typeof includeTransfer, "boolean");
   assert.equal(typeof includePermit, "boolean");
+  assert.equal(typeof includePermit2Single, "boolean");
   const tsx = join(registryRoot, "node_modules/.bin/tsx");
   await access(tsx).catch(() => {
     throw new Error("Registry dependencies missing; run npm ci --prefix registryV2 first.");
@@ -84,6 +87,38 @@ export async function buildRegistry(selection, { includeTransfer = false, includ
         },
       });
     }
+    let permit2SingleSource;
+    if (includePermit2Single) {
+      permit2SingleSource = await copyPinnedFile(root, selection.permit2_single_manifest);
+      assert.equal(permit2SingleSource.id, "uniswap/permit2/permitSingle@1.0.0");
+      assert.equal(permit2SingleSource.match.selector, "0x2b67b570");
+      // Permit2 has concrete deployment addresses; token files only expand the
+      // existing approve/transfer manifests, never this typed-data registry.
+      assert.equal(permit2SingleSource.match.chain_to_addresses_source, undefined);
+      assert.equal(permit2SingleSource.match.chain_ids, undefined);
+      const permit2 = "0x000000000022d473030f116ddee9f6b43ac78ba3";
+      assert.deepEqual(permit2SingleSource.match.chain_to_addresses, {
+        "1": [permit2], "10": [permit2], "8453": [permit2], "42161": [permit2],
+      });
+      assert.deepEqual(permit2SingleSource.match.typed_data, {
+        domain_name: "Permit2",
+        verifying_contract: permit2,
+        primary_type: "PermitSingle",
+        types: {
+          PermitSingle: [
+            { name: "details", type: "PermitDetails" },
+            { name: "spender", type: "address" },
+            { name: "sigDeadline", type: "uint256" },
+          ],
+          PermitDetails: [
+            { name: "token", type: "address" },
+            { name: "amount", type: "uint160" },
+            { name: "expiration", type: "uint48" },
+            { name: "nonce", type: "uint48" },
+          ],
+        },
+      });
+    }
     assert.equal(selection.tokens.length, 4, "DEC-01 pins one token per chain");
     const tokens = [];
     for (const selected of selection.tokens) {
@@ -105,12 +140,13 @@ export async function buildRegistry(selection, { includeTransfer = false, includ
         maxBuffer: 4 * 1024 * 1024,
       });
     } catch (error) {
-      throw new Error(`${includePermit ? "DEC-04a" : includeTransfer ? "DEC-03" : "DEC-01"} Registry build failed; all output is discarded.\n${error.stderr ?? ""}\n${error.message}`, { cause: error });
+      throw new Error(`${includePermit2Single ? "DEC-05a" : includePermit ? "DEC-04a" : includeTransfer ? "DEC-03" : "DEC-01"} Registry build failed; all output is discarded.\n${error.stderr ?? ""}\n${error.message}`, { cause: error });
     }
     return {
       root, source, tokens, cleanup,
       ...(includeTransfer ? { transferSource } : {}),
       ...(includePermit ? { permitSource } : {}),
+      ...(includePermit2Single ? { permit2SingleSource } : {}),
     };
   } catch (error) {
     await cleanup();

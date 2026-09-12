@@ -1,5 +1,9 @@
 # Dambi Decoder 상세 설계·구현 계획
 
+**2026-09-12 DEC-05 최신 상태:** DEC-05a Permit2 Single은 **구현 완료, 사용자 실행 대기**다. 실제 원본의 v3 연결 fixture·시험, 명시적 builder 선택, 개별/통합 script와 문서를 작성했다. Rust·worker·기존 273개 기대값을 유지하고 검증된 DEC-04 JS/WASM을 재사용한다. DEC-05b Batch는 **미착수**이며 Single 실행 결과를 확인한 뒤 진행한다. 사용자는 교정안 구체화 후 **A — 연결 시험·교정 설계만 마무리**를 선택했다. nonce 모델·malformed fallback·uint160/uint48 폭·큰 시간 표현·v4 교정은 별도 범위의 미결 문제로 남긴다. v4는 여전히 USDC EIP-2612만 지원하며 Permit2 v3 성공을 full EIP-712 검증으로 표시하지 않는다. 상세 원본 대응·범위는 [DEC-05](#dec-05--permit2-single--batch--전체-계획-d2), 사용자 실행 명령은 [README](../../fixtures/decoder-policy/README.md#dec-05a-사용자가-직접-실행할-검증-명령)를 따른다.
+
+이하 DEC-01~04의 “현재/이번”과 DEC-05 미진행 문구는 각 과거 기록의 시점이다. DEC-04 로그·273개 통과 기록·미제공 항목은 보존하고 새 실행 결과로 소급 대체하지 않는다. 이번에도 파일 읽기·수정·정적 검토만 허용하며 빌드·시험·설치·Git 변경 명령은 실행하지 않는다.
+
 작성일: 2026-09-11 · 작업 브랜치: `feat/decoder`
 
 설계의 코드 기준 및 DEC-01 사용자 보고 빌드 대상 HEAD: `23eaaa6992f21fcd48ba6eb79762ec5db3ad6615`. DEC-02 시작 시 실제 Git 상태는 `feat/decoder`, HEAD `3066f0c` (`test(decoder): verify real approve decoding baseline`), 작업 트리 깨끗함이다. DEC-01 구현과 **Rust 소스 직접 빌드 후 연결 시험 30개 통과를 사용자 실행 보고 기준으로 확인**한 기존 기록은 유지한다. 최초 시험과 재빌드 후 시험은 별도 기록이다. DEC-02 구현은 `26df736`에 커밋됐고, **사용자 실행 보고 기준으로 통합 37개 통과·검증 완료**다. DEC-01 회귀 30개와 DEC-02 정책 7개가 통과했으며 실패·취소·건너뛰기·todo는 모두 0이다. 에이전트는 빌드·시험을 직접 실행하지 않았다.
@@ -224,7 +228,7 @@ typedData: { domain, types, primaryType, message }
 
 ## 5. 새 시험 파일 설계
 
-아래는 전체 시험의 목표 구조다. DEC-01의 `README.md`, `registry-selection.json`, `helpers/build-registry.mjs`, `helpers/wasm-worker.mjs`, `approve.cases.json`, `approve.test.mjs`와 DEC-02의 `approve-policy.test.mjs`·기존 worker의 선택적 정책 평가 경로는 구현 및 사용자 실행 보고 기준 검증을 완료했다. DEC-03의 `transfer.cases.json`, `transfer.test.mjs`, `coverage.md`와 selection/helper의 명시적 transfer 선택 확장도 구현 및 사용자 실행 보고 기준 검증을 완료했다. DEC-04a의 `typed-permit.cases.json`, `typed-permit.test.mjs`와 helper/worker 최소 확장은 사용자 실행 기준 47/47·당시 통합 105/105 통과했다. 04b strict fixture/test와 Rust validator/export도 사용자 실행 로그 기준 검증 완료다. `assertions.mjs`와 DEC-05 이후 파일은 아직 작성하지 않았다.
+아래는 전체 시험의 목표 구조다. DEC-01의 `README.md`, `registry-selection.json`, `helpers/build-registry.mjs`, `helpers/wasm-worker.mjs`, `approve.cases.json`, `approve.test.mjs`와 DEC-02의 `approve-policy.test.mjs`·기존 worker의 선택적 정책 평가 경로는 구현 및 사용자 실행 보고 기준 검증을 완료했다. DEC-03의 `transfer.cases.json`, `transfer.test.mjs`, `coverage.md`와 selection/helper의 명시적 transfer 선택 확장도 구현 및 사용자 실행 보고 기준 검증을 완료했다. DEC-04a의 `typed-permit.cases.json`, `typed-permit.test.mjs`와 helper/worker 최소 확장은 사용자 실행 기준 47/47·당시 통합 105/105 통과했다. 04b strict fixture/test와 Rust validator/export도 사용자 실행 로그 기준 검증 완료다. DEC-05a의 `permit2-single.cases.json`, `permit2-single.test.mjs`는 구현 완료, 사용자 실행 대기다. `assertions.mjs`·Batch 및 DEC-06 이후 파일은 아직 작성하지 않았다.
 
 ```text
 fixtures/decoder-policy/
@@ -549,13 +553,102 @@ DEC-05 자동 진행, transaction selector 개선, Permit2/multicall/Core/네트
 
 ### DEC-05 — Permit2 Single → Batch · 전체 계획 D2
 
-**05a:** 실제 `uniswap/permit2/permitSingle@1.0.0.json`과 `build_typed_data_args_json` 경로. token/spender/amount/expiration/nonce/sigDeadline을 검사하고 `uint160/uint48` 경계, 객체 키 순서 변화, flat/tuple 변환을 확인한다.
+**05a: 구현 완료, 사용자 실행 대기.** 실제 [`registryV2/manifests/uniswap/permit2/permitSingle@1.0.0.json`](../../registryV2/manifests/uniswap/permit2/permitSingle@1.0.0.json)의 바이트 SHA-256 `0x6657c04696e97d08aaa80cc842d3d7976df7515953e7506fa97e50bd2812e696`를 selection에 고정했다. approve + USDC permit + Single을 `includePermit: true, includePermit2Single: true`로 선택한다. 기존 builder 기본값·선택별 반환 구조·원본 hash 검사·실패 시 임시 정리를 유지하며 Single 선택 때만 `permit2SingleSource`를 더한다. worker의 기존 typed 분기와 실제 WASM v3 경로를 재사용한다. Rust/manifest 변경은 없다.
 
-**05b:** 실제 `permitBatch@1.0.0.json` 및 `array_emit`. 서로 다른 token/amount의 순서, 공통 spender/deadline, 일부 원소의 필수 필드 누락을 확인한다. 현재 빈 typed batch는 Unknown이므로 empty를 complete한 정상 동작으로 자동 바꾸지 않는다.
+선택된 실제 원본 → `--strict-callkeys` Registry builder → typed index 참조 해소 → resolved bundle JCS digest → 실제 `declarative_install_v3_json` → `declarative_route_typed_data_v3_json`을 연결하도록 작성했다. callkey는 9개(approve 4 + USDC 1 + Single 4), typed index는 5개(USDC 1 + Single 4), selector index는 0개다. Permit2 두 실제 manifest는 체인 `1/10/8453/42161`의 구체 주소 `0x000000000022d473030f116ddee9f6b43ac78ba3`를 직접 선언한다. USDC token 목록은 approve 확장용이며 Permit2 주소를 확장하지 않는다.
 
-**수정:** 각 fixture·시험과 필요한 mapper helper만. witness·venue 주문 기능 확대를 섞지 않는다.
+| 실제 파일 / 기존 Rust 상수 | 정적 대조한 차이·새 시험의 원본 선택 |
+| --- | --- |
+| 실제 Single `permitSingle@1.0.0.json` | `adapter_action`, schema 3, `@1.0.0`, 네 체인, 완전한 `PermitSingle`/`PermitDetails` 선언. emit은 `$args.permitSingle[0][0..3]`, `[1]`, `[2]`의 positional 경로로 token/amount/expiration/**nonce**·spender/sigDeadline 전달 |
+| Rust `PERMIT2_PERMIT_SINGLE_V3` | [`declarative_v3_typed_data_install.rs`](../../crates/policy-engine-wasm/tests/declarative_v3_typed_data_install.rs)의 synthetic JSON literal. `adapter_function`, schema 2, `@2.0.0`, chain 1만, `PermitDetails` 정의 없음. named emit 경로이며 body nonce 없음. 실제 파일을 읽는 시험이 아님 |
+| 실제 Batch `permitBatch@1.0.0.json` | 같은 schema 3·네 체인·완전한 types. `array_source: "$args.permitBatch[0]"`, `$inputs[0..3]`로 token/amount/expiration/**nonce**, 공통 spender/sigDeadline은 `$args.permitBatch[1..2]` |
+| Rust `PERMIT2_PERMIT_BATCH_V3` | Single synthetic와 같은 schema 2·`@2.0.0`·chain 1 및 type 정의 차이. named emit·body nonce 누락 |
+| Rust `PERMIT2_PERMIT_BATCH_ON_DISK_V3` | 이름과 “verbatim” 주석이 있어도 `include_str!`가 아닌 JSON literal. header/types/chains는 현재 원본과 같지만 `array_source: "$args.permitBatch.details"`, `$inputs.token` 등의 named emit과 body nonce 누락으로 실제 원본 바이트/의미와 다름 |
 
-**완료:** Single과 Batch를 별도 결과로 보고한다. 하나가 통과했다고 다른 하나를 완료로 표시하지 않는다. 외부 nonce 조회는 미연결 상태임을 명시한다.
+`build_typed_data_args_json`은 이미 emit의 positional root 참조를 감지하고 ABI components 순서로 named object를 tuple로 변환한다. 누락 component는 null이다. 객체 key 삽입 순서와 무관한 변환, EIP-2612 flat 경로 보존, 내부 positional 호환 입력을 검사한다. Single message에는 owner가 없으며 token·Permit2 verifying contract·spender·submitter를 구분한다. 수량/nonce/expiration의 `0`·일반·선언 MAX·MAX+1, nonce `255/256/513`, 필수 필드의 누락/null/잘못된 형식, 정상/큰 sigDeadline, lookup miss와 매칭 후 입력 오류를 정상·관찰·오류별로 나눴다. decimal string·BigInt로 기대값을 독립 검산하고 JS Number로 큰 정수 기대값을 만들지 않는다. 자세한 최소 입력·기대값·관련 소스는 [coverage의 미결 계약](../../fixtures/decoder-policy/coverage.md#dec-05a--작성한-검사와-미결-계약)을 따른다.
+
+**nonce 계약 진단:** 실제 mapper는 signed U256 nonce를 `(word=floor(n/256), bit=n%256)`로 나눠 `LiveField<(U256,u8)>`에 넣는다. `513`의 현재 표현은 `["0x2",1]`이고 source는 `onchain_view`·해당 chain·Permit2 contract·`nonceBitmap(address,uint256)`·`permit2_nonce_bitmap`, ttl은 12, synced_at은 submitted_at이다. 서명 원문을 분해한 값으로 실제 조회값이나 단순 zero stub이 아니다. PermitSingle/PermitBatch AllowanceTransfer는 owner/token/spender별 순차 uint48 nonce이고 unordered bitmap은 SignatureTransfer다. [AllowanceTransfer 공식 문서](https://developers.uniswap.org/docs/protocols/permit2/concepts/allowance-transfer), [SignatureTransfer 공식 문서](https://developers.uniswap.org/docs/protocols/permit2/concepts/signature-transfer).
+
+nonce 누락/null/파싱 실패가 `["0x0",0]`으로 fallback할 수 있고 v3 변환은 `uint160/uint48` 선언 폭을 검사하지 않는다. `sigDeadline = "18446744073709551616"`은 body의 u64 MAX 포화와 meta 0으로 갈라지고, u64 안의 `"9007199254740993"`도 JSON→JS 단계에서 정밀도가 손실된다. DEC-04 strict의 원문 보존/JS 안전 투영 계약과 연관된 미결 문제다. 이 값들을 정상 Permit2 계약으로 고정하지 않는다.
+
+**현재 결정:** 사용자는 교정안 구체화 후 **A — 연결 시험·교정 설계만 마무리**를 선택했다. 이번 범위는 확정됐고 런타임 계약 교정은 별도 범위로 남긴다. nonce 교정은 `Permit2SignAction`뿐 아니라 sync args·transition의 bitmap 소비에 영향을 준다. malformed/폭 거절은 기존 성공을 오류로 바꾸므로 구체 오류와 호환성 범위를 결정해야 한다. 아래 B/C는 미구현 제안이며 향후 별도 범위를 선택하면 필요한 최소 구현과 새 Rust/WASM 검증 절차를 다시 명시한다. v4 strict는 현재 USDC EIP-2612만 지원하며 ID만 추가하거나 실패 시 v3로 재시도하지 않는다.
+
+#### DEC-05 계약 교정안 (A안 확정·B/C 미구현 제안)
+
+사용자의 요청에 따라 교정안을 구체화했고 사용자가 **A를 선택**했다. 이번에는 v3 Single 연결 시험·진단과 교정 설계를 마무리한다. 아래 B/C의 Action tag·조회 decoder·오류 이름·새 지원 범위는 미구현 제안이며 확정 계약이 아니다. Rust·원본 manifest·worker·소비자를 변경하지 않는다.
+
+| 선택지 | 구체 변경 범위 | 해결하는 문제·남는 문제 | 권장·검증 영향 |
+| --- | --- | --- | --- |
+| **A — 현재 baseline + 교정 설계 (사용자 확정)** | 실제 v3 Single 연결/진단 85개와 이 설계를 유지하고 사용자 실행 검증 | 실제 원본 연결과 현행 동작을 확인. nonce 모델·fallback·선언 폭·시간·v4 Permit2 미지원은 명시적 미결 | **사용자 선택 완료.** 검증된 JS/WASM 재사용, Single → 통합 358개 정의. 런타임 계약 교정은 별도 범위로 남김 |
+| **B — v4 Single 입력 검증** | 기존 v3/USDC를 보존하고 별도 Permit2 full validator·원문/request 문맥·오류·시간 투영 검증 추가. emit 결과는 기존 `permit2_sign_allowance` | malformed nonce fallback·uint160/48 초과·시간 표현을 새 v4 입력에서 거절. **Action nonce bitmap/source/freshness 모델은 그대로이므로 의미 교정은 미완료** | 입력 검증까지만 해결하려는 선택. Rust 변경 후 Native → 새 WASM → 새 strict Single → 기존 통합 검증 필요. 기존 273개 기대값은 유지 |
+| **C — v4 + 버전이 명시된 allowance Action·소비자 교정** | B에 새 `permit2_sign_allowance_v2` Action, signed/current nonce 분리, owner/Permit2 명시, sync args·transition·projection·직렬화 소비자 대응 추가 | AllowanceTransfer 의미와 조회 전 상태를 교정. 실제 RPC 연결·서명 검증은 여전히 별도이며 수행된 것처럼 표시하지 않음 | 의미 교정의 완성안이지만 Action wire와 소비자 변경 범위가 큼. 명시 선택 후 관련 Native/직렬화/소비자 및 새 WASM 회귀 필요 |
+
+향후 별도 범위로 B 또는 C를 선택하면 현재 신규 Single 시험의 “v4는 unsupported” guard는 의도적으로 달라진다. **이번 85개에 포함된 해당 guard만 승인된 지원 경계에 맞춰 갱신**하고 새 v4 정상/오류 회귀를 별도로 추가한다. DEC-01~04 기존 273개와 v3 Single 진단을 strict 입력에 맞춰 바꾸지 않는다. 어떤 선택에서도 v4 실패 후 v3 자동 재시도는 없다.
+
+**B/C의 입력·검증 순서 제안:** DEC-04의 full-input DTO·원문 보존·routing/domain 충돌 검사를 재사용한 뒤 lookup한다. 정상 형식의 미등록 조합은 상세 message가 malformed여도 lookup miss를 유지한다. 매칭된 PermitSingle에서 실제 manifest의 `PermitSingle(details: PermitDetails, spender: address, sigDeadline: uint256)`과 `PermitDetails(token: address, amount: uint160, expiration: uint48, nonce: uint48)`를 type 이름·필드 배열 순서·타입까지 대조한다. message/details는 객체를 요구하고 누락/null/잘못된 형식과 추가 `owner` 필드를 거절한다. owner는 signed message에 넣지 않는다.
+
+숫자는 `[0-9]+` decimal string, 비어 있지 않은 `0x` hex 또는 JS 안전 정수 Number만 받고 원문과 정규화 decimal 값을 각각 보존한다. amount≤`2^160−1`, expiration/nonce≤`2^48−1`, sigDeadline≤`2^256−1`을 먼저 검증한 뒤 sigDeadline≤`2^53−1`의 출력 투영 한도를 적용한다. 유효한 정수 어휘와 선언 폭 초과를 다른 오류로 구분한다. body/meta의 deadline은 하나의 검증된 정규값으로 만들고 일치 여부를 재검사한다. expiration/nonce는 uint48 자체가 JS 안전 범위 안이다.
+
+Permit2 domain은 `name: "Permit2"`, chainId, verifyingContract 세 필드를 정확히 대조하며 version/salt가 없는 계약을 제안한다. `types.EIP712Domain`이 있으면 같은 세 필드의 선언을 대조한다. 이는 현재 USDC v4의 version/salt 원문 보존 호환을 바꾸는 규칙이 아니다. 근거는 Permit2가 name·chainId·verifyingContract로 domain type hash를 정의한 [공식 EIP712.sol](https://github.com/Uniswap/permit2/blob/main/src/EIP712.sol)이다.
+
+`requested_signer`가 allowance owner의 출처이며 `request.validated.owner_source: "requested_signer"`로 명시하는 안이다. submitter 기본값은 requested_signer이고 명시적으로 다른 submitter도 허용한다. message owner 일치 검사는 만들지 않는다. `nonce_lookup`과 `signature_verification`은 `"not_performed"`로 남긴다. 주소가 같다는 이유로 실제 서명을 검증했다고 표시하지 않는다.
+
+| 입력/내부 문제 | 제안 오류 계약 | 현재 구현과의 구분 |
+| --- | --- | --- |
+| 필수 필드 누락/null/bool/배열/비정수/음수/어휘 오류/extra field | 기존 `invalid_typed_data`와 정확한 `typed_data.message.details.nonce` 등의 path 재사용 | v3 fallback을 바꾸지 않고 새 v4 Permit2에서 거절 |
+| amount/expiration/nonce/sigDeadline의 선언 uintN 초과 | **신규 제안** `typed_integer_out_of_range`, 필드 path와 message에 선언 폭 기재 | 현재 발생하는 오류가 아님. envelope에 `declared_bits` 필드는 추가하지 않는 최소안 |
+| uint256 안이지만 sigDeadline이 JS 안전 투영 한도 초과 | 기존 `typed_deadline_out_of_range`를 Permit2 path로 확장 | raw 정수를 먼저 보존하며 포화/반올림 정상 완료 금지 |
+| domain 값·허용 필드 불일치 | 기존 `typed_domain_mismatch` 확장 | types 구조/선언 불일치는 `invalid_typed_data` 유지 |
+| validator 정규값과 최종 Action identity/nonce/source/deadline 불일치 | 기존 `typed_interpretation_failed` 재사용 | 출력 소비 전 검사. 새 source 표시를 조회 성공으로 승격하지 않음 |
+
+**C의 Action 출력 예시 제안:** 기존 tag와 구조를 변경하지 않고 새 `permit2_sign_allowance_v2`를 opt-in strict projection에 사용한다. 수량은 기존 U256 hex 표현을 유지하고 signed_nonce는 검증된 uint48 decimal string으로 고정하는 안이다. 아래 객체는 body 예시이며 meta에는 별도 submitter·submitted_at·offchain_sig domain/deadline을 둔다.
+
+```json
+{
+  "domain": "token",
+  "action": "permit2_sign_allowance_v2",
+  "owner": "0x1111111111111111111111111111111111111111",
+  "permit2": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+  "token": {"key": {"standard": "erc20", "chain": "eip155:1", "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"}},
+  "spender": "0x2222222222222222222222222222222222222222",
+  "amount": "0xf4240",
+  "expires_at": 1738003000,
+  "sig_deadline": 1738002000,
+  "signed_nonce": "513",
+  "current_nonce": {
+    "status": "not_queried",
+    "source": {
+      "kind": "onchain_view",
+      "chain": "eip155:1",
+      "contract": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+      "function": "allowance(address,address,address)",
+      "decoder_id": "permit2_allowance_nonce"
+    },
+    "ttl": 12
+  }
+}
+```
+
+current_nonce는 Action 전용 tagged enum을 제안한다. `not_queried`에는 **value와 synced_at이 없으며**, 실제 조회를 연결한 후 fetched 상태에만 `LiveField<U256>`를 넣는다. fetched scalar도 **uint48 범위 검증**을 통과해야 하며 저장 타입 U256의 폭을 프로토콜 허용 폭으로 간주하지 않는다. 공통 `LiveField`의 계약은 변경하지 않는다. 조회 argument는 owner/token/spender이고 결과의 allowance nonce scalar를 사용한다. `permit2_allowance_nonce` decoder는 아직 구현되지 않은 명칭 제안이며 실제 조회 전에는 nonce 비교·nonce mismatch 판정·신선도 주장을 하지 않는다. signed nonce를 bitmap 좌표로 바꾸거나 submitted_at을 실제 조회 시각으로 쓰지 않는다.
+
+| 변경 대상 | B | C에서 추가되는 소비자 영향 |
+| --- | --- | --- |
+| `crates/policy-engine-wasm/src/typed_data_validation.rs`, `dto.rs`, `declarative_exports.rs` | Permit2 validator 분기, 검증 문맥/오류, 안전 투영 및 해석 결과 대조 | 새 Action projection 연결·owner/Permit2/signed/current nonce 전달 |
+| `crates/policy-engine-wasm/tests/` 및 새 strict Single fixture/Node 시험 | 기존 USDC/v3를 유지한 별도 full PermitSingle 정상·오류·우선순위 회귀 | 새 tag/필드/조회 전 상태·직렬화 회귀 추가 |
+| `crates/policy-server/asset-model/action/src/token/permit2_sign.rs` 및 Action enum/export | 변경 없음 | 기존 타입/tag를 보존하고 새 모델·tag 등록; Action 역직렬화·생성 TS/enum 소비자 영향 확인 |
+| `crates/adapters/mappers/src/declarative/action_builder.rs` | 기존 v3 경로 변경 없음; v4 검증 후 현재 emit 재사용 | 새 명시 projection 경로만 연결. 기존 blanket nonce tuple fallback 변경 금지 |
+| `crates/policy-server/asset-model/state/src/pending/{kind.rs,nonce.rs}`, `crates/policy-server/asset-model/transition/src/effect/token.rs` | 현재 의미 유지, 미교정으로 문서화 | owner/token/spender/chain/Permit2를 포함하는 nonce key·pending ID와 scalar nonce effect. 기존 SignatureTransfer bitmap 경로 유지 |
+| `crates/policy-server/sync/src/actions/args.rs`, `crates/policy-server/sync/src/runtime/orchestrator.rs`, 같은 sync crate의 `live/walker.rs`·`sources/fetchers/decoder.rs` | 변경 없음 | allowance 조회 args·scalar 결과·최초 미조회 상태 처리. signed nonce를 조회값으로 덮어쓰지 않음 |
+| `crates/policy-engine/src/lowering_v2/token/permit2_sign_allowance.rs`, `schema/policy-schema/actions/token/permit2_sign_allowance.cedarschema`, schema action enum·등록부 | 변경 없음 | 새 Action lowering/schema 및 기존 allowance 정책의 catalog/trigger 규칙 적용 범위를 함께 대응해 정책 누락 방지. 정책 severity 변경은 포함하지 않음 |
+| `crates/policy-server/server/src/write_handlers.rs`, `browser-extension/backend/service-worker/permit-report.ts`, `browser-extension/backend/service-worker/dambi-auth/client.ts` | 변경 없음 | 수집/보고/인증 소비자의 새 버전 명시 분기 |
+
+단순히 manifest ID를 `@2`로 올리는 것만으로 호환성을 보존할 수 없다. 현재 typed bridge는 chain/contract/primary type/witness key로 등록하므로 같은 key의 새 manifest가 기존 entry를 덮어쓸 수 있다. 별도 Registry namespace를 필수로 추가하는 대신 **명시 v4 projection 분기와 새 Action tag**를 우선 검토한다. 실제 registry 형식/선택 변경이 필요해지면 그 추가 범위도 승인 대상에 포함한다.
+
+현재 README 명령은 **A의 Rust 무변경 상태**에만 해당한다. B/C 선택으로 소스를 수정하면 Native 회귀 → 새 WASM 빌드 → 새 개별 시험 → 기존 포함 통합 시험 순서와 입력/산출물 대응 로그 명령을 변경 후 파일 목록에 맞춰 다시 제공한다. 새 원본/Action을 기존 baseline에 조용히 덮어씌우지 않는다.
+
+**05b: 미착수.** 실제 [`permitBatch@1.0.0.json`](../../registryV2/manifests/uniswap/permit2/permitBatch@1.0.0.json)은 원본 대응만 읽었다. Single 사용자 실행 로그 확인 이후 별도 fixture/test/script로 복수 원소의 서로 다른 token/amount/expiration/nonce, 순서·역순·중복 token 보존, 공통 spender/sigDeadline, 첫째·둘째 필수 필드 누락, empty/비배열/64·65 경계와 같은 WASM 프로세스의 Single/Batch 구분을 작성한다. 출력은 최상위 Action 하나 아래 Multicall의 자식 ActionBody 구조다. 현재 empty typed Batch는 Unknown이고 일부 오류는 전체 실패로 전파될 수 있다. 정상 원소만 남기거나 empty를 complete로 처리하거나 65번째 이후를 조용히 생략하지 않는다. 새로운 한도 계약이 필요하면 DEC-06 진단 계획과 함께 질문한다.
+
+**완료 조건과 현재 한계:** Single과 Batch의 코드 작성·사용자 실행 결과를 각각 기록한다. 이번에는 Single 실행 결과가 없고 DEC-05 전체는 미완료다. 새 요청 79개(normal 19, routing_miss 6, input_error 12, emit_error 26, legacy_diagnostic 14, compatibility 2) + 구조 검사 6개인 85개를 작성했다. 기존 다섯 Node 시험 파일의 273개 기대값을 유지하고 실제 작성한 Single만 더한 통합은 358개 정의다. 이 수는 실행 통과 수가 아니다. 외부 nonce 조회·서명 유효성·정책 판정·witness/SignatureTransfer 기능·venue·Core·SDK 소스 이관은 미구현이다. 현재 원본과 실제 WASM의 연결 성공을 full EIP-712 검증이나 SDK 독립화 완료로 확대하지 않는다.
 
 ### DEC-06 — multicall 종류별 전개와 진단 · 전체 계획 D2
 
@@ -686,7 +779,8 @@ SDK와 무관한 과거 코드 설명 링크가 문서에 남는 것과 실제 �
 | DEC-04a 작성·정적 검토 | 실제 permit 원본·approve+permit 선택·5 callkey/1 typed 기대 검사·실제 typed WASM 경로 시험 작성. 요청 44개 + 구조 3개 = 47개 정의. 04a 사용자 실행 47개 통과 |
 | DEC-04a 실행 | 04a는 사용자 제공 로그 기준 개별 47/47 통과(`duration_ms=801.277375`), 당시 통합 105/105 통과(`duration_ms=690.439291`)다. 두 실행 모두 suites·fail·cancelled·skipped·todo는 0이다. 04a 당시 실행 HEAD·시각·도구 버전·JS/WASM hash·새 빌드 로그는 미제공이며 과거 값으로 채우지 않는다. |
 | DEC-04b·DEC-04 전체 | 네 계약 답변 반영·v4 구현·04a/04b 분리 커밋·사용자 실행 로그 검증 완료. Native 181개, Node strict 168개/기존 typed 47개/통합 273개 통과. DEC-04 완료 |
-| DEC-05부터 DEC-07·소스 이관 | 미착수 |
+| DEC-05a Permit2 Single | 구현 완료, 사용자 실행 대기. A 범위 확정: v3 연결·기존 한계 진단·교정 설계. 런타임 교정은 별도 범위 |
+| DEC-05b Batch·DEC-06/07·소스 이관 | 미착수. Single 사용자 실행 결과 확인 후 Batch 진행 |
 | SDK 전체 소스·빌드 독립화 | 미완료. 기존 WASM 실행부와 서버 아래 공통 타입 등 임시 의존이 남음. C2c·C5 및 전체 계획 §7.1 검증 필요 |
 
-04a 결과를 네 문서에 반영하고, 네 계약 답변에 따라 별도 v4 full-input DTO·strict validator·emit 연결·Rust/Node 회귀 시험을 작성했다. 04b 사용자 실행의 저장 로그를 직접 확인했다. Native 181개와 새 WASM 빌드, Node strict 168개·기존 typed 47개·통합 273개가 모두 통과하여 **DEC-04 전체 검증 완료**다. 에이전트가 빌드·시험을 재실행한 결과는 아니다. 기존 DEC-01/02/03 사용자 통과 기록(30/37/58)과 미제공 항목을 보존하고 04a 47/105 통과 결과를 네 문서에 반영했다. 에이전트는 빌드·시험·설치·Git 변경 명령을 실행하지 않았다. DEC-05는 진행하지 않으며 SDK 전체 소스·빌드 독립화는 미완료다.
+04a 결과를 네 문서에 반영하고, 네 계약 답변에 따라 별도 v4 full-input DTO·strict validator·emit 연결·Rust/Node 회귀 시험을 작성했다. 04b 사용자 실행의 저장 로그를 직접 확인했다. Native 181개와 새 WASM 빌드, Node strict 168개·기존 typed 47개·통합 273개가 모두 통과하여 **DEC-04 전체 검증 완료**다. 에이전트가 빌드·시험을 재실행한 결과는 아니다. 기존 DEC-01/02/03 사용자 통과 기록(30/37/58)과 미제공 항목을 보존하고 04a 47/105 통과 결과를 네 문서에 반영했다. 에이전트는 빌드·시험·설치·Git 변경 명령을 실행하지 않았다. 현재 DEC-05a는 **구현 완료, 사용자 실행 대기**이며 사용자가 **A — 연결 시험·교정 설계만 마무리**를 선택해 이번 범위는 확정됐다. B/C 런타임 계약 교정은 별도 범위의 미구현 제안이다. DEC-05b·SDK 전체 소스·빌드 독립화는 미완료다.
