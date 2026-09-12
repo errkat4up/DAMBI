@@ -1,8 +1,8 @@
 # DEC-01~05: 실제 Registry·WASM Decoder 기준 시험
 
-## DEC-05b 현재 상태 — 구현 완료, 사용자 실행 대기
+## DEC-05b 상태 — 사용자 실행 검증 완료
 
-Single의 저장 로그를 먼저 확인해 **85/85·당시 통합 358/358 사용자 실행 검증 완료**를 아래 기록에 반영했다. 실행 당시 HEAD `60bb3d5`와 이후 사용자 커밋 `66af65c6bbe0adb6f8fbb9941aac729ec330b801`을 구분하며, Batch 편집 전 로그 입력 41개·현재 파일·커밋 blob의 일치도 확인했다. 이번에는 확정된 **A안: 기존 v3 연결 시험·교정 설계** 범위로 DEC-05b를 작성했다. **Batch는 구현 완료, 사용자 실행 대기**다. 신규 요청 102개 + 구조 검사 6개 = **108개 정의**, 기존 358개를 포함한 통합은 **466개 정의**이며 실행 통과 수·로그·resolved digest는 아직 없다. DEC-04의 273개 및 Single의 85개 기존 기대값을 보존한다.
+Single의 **85/85·당시 통합 358/358 사용자 실행 검증 완료** 기록에 이어 Batch 저장 로그도 대조했다. Batch는 신규 요청 102개 + 구조 검사 6개 = **108/108 통과**, 기존 DEC-01~04의 273개와 Single 85개를 포함한 통합은 **466/466 통과**다. **DEC-05는 합의한 A안: 기존 v3 연결 시험·진단·교정 설계 범위에서 검증 완료**다. 실행 당시 HEAD `66af65c`의 Batch 미커밋 작업 트리와 이후 구현 커밋 `1326fb5`를 구분한다. 이 기록 갱신을 위해 빌드·시험을 다시 실행하지 않았다.
 
 | 이번 변경 파일 | 목적 |
 | --- | --- |
@@ -18,9 +18,33 @@ Batch 시험은 `buildRegistry(selection, { includePermit2Single: true, includeP
 
 A안에서 별도로 남긴 nonce 모델·malformed fallback·uint160/uint48 범위·큰 시간 표현 문제는 계속 미결이다. signed nonce를 분해한 tuple/LiveField는 실제 RPC 조회값이 아니고 v3 변환 통과는 full EIP-712 검증이 아니다. Rust·worker·원본 manifest를 변경하지 않았으며 v4는 USDC EIP-2612만 지원한다. nonce/RPC·서명·정책·Core·DEC-06/07·SDK 이관을 추가하지 않는다. 새 한도 계약 변경 없이 현재 64/65와 전체 오류 전파를 확인하는 단계다.
 
-### DEC-05b 사용자가 직접 실행할 검증 명령
+### DEC-05b 사용자 실행 기록 — 저장 로그 확인
 
-현재 Rust·worker·빌드 입력과 검증된 JS/WASM 쌍을 유지하므로 **새 WASM 빌드는 필요 없다**. 아래 명령은 **Batch 개별 → 기존 Single 및 DEC-01~04를 포함한 통합 시험** 순서다. Single 개별 재실행을 별도로 요구하지 않는다. 입력/산출물 hash와 HEAD·Git 상태·tracked patch를 실행 전후 `/tmp`에 저장하고 `set -euo pipefail`과 종료 trap으로 `tee` 사용 시에도 실패를 유지한다. 입력 44개는 이번 실행의 대조 목록이며 SDK 전체 독립 빌드 입력을 주장하지 않는다. 에이전트는 이 명령을 실행하지 않았다.
+`/private/tmp/dambi-dec05b-verify.WCHZDj/`의 저장 로그와 이후 커밋을 읽기 전용으로 대조했다. 아래 통과 수는 사용자 실행 결과이며 에이전트가 Registry·WASM 빌드나 시험을 재실행한 결과가 아니다.
+
+| 사용자 실행 | 전체 / 통과 | suites / fail / cancelled / skipped / todo | duration_ms |
+| --- | --- | --- | --- |
+| `npm run decoder:test:permit2-batch` | **108 / 108** | **0 / 0 / 0 / 0 / 0** | 817.124708 |
+| 당시 `npm run decoder:test` | **466 / 466** | **0 / 0 / 0 / 0 / 0** | 1198.186625 |
+
+| 실행·대조 항목 | 저장 로그 및 DEC-06a 편집 전 읽기 전용 대조 결과 |
+| --- | --- |
+| 실행 branch·HEAD | `feat/decoder`, 실행 전후 `66af65c6bbe0adb6f8fbb9941aac729ec330b801`. Batch 관련 9개 미커밋 경로를 포함한 작업 트리에서 실행 |
+| 이후 구현 커밋 | `1326fb5ac0c61e9552d952b748a3d09c2b236b35`. DEC-06a 착수 시 이 HEAD와 깨끗한 작업 트리를 확인. 이 커밋을 실제 실행 HEAD로 대신 기록하지 않음 |
+| 입력 대응 | `inputs-before.sha256`의 **44개 모두 DEC-06a 편집 전 파일 및 `1326fb5` Git blob과 일치**. 사후 입력 검사도 44개 모두 OK |
+| 전후 변경 | `tracked-before.patch`와 `tracked-after.patch` 바이트 동일. 전후 Git 상태·HEAD 동일. `diff-check.log`는 빈 성공 로그 |
+| 실제 도구 | Node `v25.9.0`, npm `11.12.1` |
+| Batch 시각(UTC) | `2026-09-12T07:10:27Z` → `2026-09-12T07:10:28Z` |
+| 통합 시각(UTC) | `2026-09-12T07:10:28Z` → `2026-09-12T07:10:30Z` |
+| 종료 상태 | `verification_exit=0`, `input_hash_exit=0`, `artifact_hash_exit=0` |
+| 실제 resolved JCS digest | Batch `0x161755caa54753a0064c023990f6af3a9698e45b74b414db1bb3a8946f45c0d5`, Single `0x902d101222980bc78defec8450859402f9f3c968be30ff532c9c547b41806127`. callkey 12·typed 8·selector 0·네 체인 참조 검사 통과 |
+| JS/WASM 대응 | DEC-04에서 빌드하고 Single에서도 검증한 같은 쌍을 재사용. 실행 전후 두 산출물 검사 OK, DEC-06a 편집 전 실제 파일 hash도 일치 |
+
+JS SHA-256은 `628e1a7956b3d82ec203c17af83cb3b06a915d45df070166c6de49a843207043`, WASM SHA-256은 `c39531dabb7f6f81b0cfa7b0324f33a2b5e906c569ddc15063ec1d170f6177b9`다. 이번 완료는 v3 원본 연결·진단·교정 설계인 A안 범위다. nonce 모델·입력 범위/형식·시간 표현·v4 교정은 기존 후속 항목으로 유지한다. full EIP-712·서명·실제 nonce 조회·정책 검증이나 D2 전체 완료를 뜻하지 않는다.
+
+### DEC-05b 과거 검증 명령 — 실행 완료
+
+아래는 저장 로그에서 성공을 확인한 **과거 실행 명령**이며 재시험 요청이 아니다. 당시 Rust·worker·빌드 입력을 유지해 새 WASM 빌드 없이 **Batch 개별 → 기존 Single 및 DEC-01~04 포함 통합**을 실행했다. 입력 44개는 해당 실행의 대조 목록이며 SDK 전체 독립 빌드 입력을 주장하지 않는다. 에이전트는 이 명령을 실행하지 않았다.
 
 ```bash
 bash <<'BASH'
@@ -133,9 +157,9 @@ BASH
 
 실행 후 표시된 `/tmp/dambi-dec05b-verify.*` 경로의 Batch·통합 로그, 종료 코드, 전후 hash·Git 기록을 실제 코드와 대조하여 네 문서를 갱신한다. 입력/산출물 확인 실패를 시험 통과로 대체하지 않는다. 검증된 산출물이 없거나 hash가 다르면 출처를 확인하기 전 과거 쌍으로 새 Rust 변경을 시험하지 않는다. 이번 작업에 dependency 설치·재빌드를 요구하는 소스 변경은 없다.
 
-### DEC-05b 검증 결과 반영 후 로컬 커밋 명령
+### DEC-05b 과거 로컬 커밋 명령 — 구현 커밋 확인 완료
 
-Batch 사용자 실행 결과를 확인하고 네 문서에 반영한 후 사용할 명령이다. 기존 staged 변경이 있으면 중단하고, stage한 경로가 **Batch 관련 아홉 파일과 정확히 일치**해야 commit한다. Single fixture/test는 이미 검증·커밋됐으므로 이번 stage 목록에 넣지 않는다. 출력은 `/tmp/dambi-dec05b-stage.*`의 `commit.log`에 저장하며 `pipefail`로 실패 상태를 보존한다. WASM·pkg·target·node_modules·임시 로그·push는 포함하지 않는다.
+아래는 Batch 구현을 위한 과거 안내다. 구현 커밋 `1326fb5`와 사용자 실행 당시 입력의 일치를 확인했으므로 다시 실행하지 않는다. 이번 DEC-05 완료 기록 및 DEC-06a 변경은 각 단계의 실제 변경 경로를 사용하는 별도 명령으로 커밋한다.
 
 ```bash
 bash <<'BASH'
@@ -375,7 +399,7 @@ BASH
 
 ## DEC-01~04 보존 기록
 
-아래의 “현재”, “이번”, DEC-05 미진행 및 과거 준비·빌드·커밋 명령은 **각 기록을 작성한 DEC-01~04 당시 문맥**이다. 과거 실행 결과·로그·hash·미제공 항목은 수정하지 않는다. 이번 실행에는 위 DEC-05b 명령을 사용한다.
+아래의 “현재”, “이번”, DEC-05 미진행 및 과거 준비·빌드·커밋 명령은 **각 기록을 작성한 DEC-01~04 당시 문맥**이다. 과거 실행 결과·로그·hash·미제공 항목은 수정하지 않는다. DEC-05b 실행 명령도 완료된 과거 기록이며 이번 DEC-06a 실행은 해당 단계의 명령을 따른다.
 
 이 디렉터리는 SDK 이관 전의 **DEC-01/02/03/04 기준 시험과 strict 입력 회귀** 이다. 실제 Registry source를 실제 builder로 확장하고 기존 WASM에 설치한 뒤, 고정된 원문 approve·transfer calldata와 typed permit 요청을 Action까지 해석한다. DEC-02는 approve 디코딩 결과를 기존 planner/evaluator에 전달해 실제 Cedar 정책 하나를 평가한다. **DEC-01/02는 사용자 실행 보고 기준 검증 완료**이며 통합 37개(30 + 7) 통과, 실패·취소·건너뛰기·todo 모두 0이다. **DEC-03도 사용자 실행 보고 기준 검증 완료**다. 제공된 터미널 로그에서 transfer 개별 21개와 통합 회귀 58개가 모두 통과했으며 실패·취소·건너뛰기·todo는 모두 0이다. 04a는 사용자 제공 전체 로그 기준 typed permit **47/47 통과**(`duration_ms=801.277375`), 당시 통합 **105/105 통과**(`duration_ms=690.439291`)다. 두 실행 모두 suites·fail·cancelled·skipped·todo는 0이다. 04a 당시 실행 HEAD·시각·도구 버전·JS/WASM hash·새 빌드 로그는 미제공이며 이전 기록으로 채우지 않는다. 04a 사용자 실행 결과를 반영했고, 합의된 04b v4 DTO·strict validator·실행부·Rust/Node 회귀 시험을 별도 변경으로 작성했다. 04b 사용자 실행의 저장 로그를 직접 확인했다. Native 181개와 새 WASM 빌드, Node strict 168개·기존 typed 47개·통합 273개가 모두 통과하여 **DEC-04 전체 검증 완료**다. 에이전트가 빌드·시험을 재실행한 결과는 아니다.
 

@@ -1,6 +1,6 @@
 # Dambi: Decoder·정책 → Core → Adapters 개발 계획
 
-**2026-09-12 현재 진행:** D2의 DEC-05a Permit2 Single은 저장 로그 기준 **사용자 실행 검증 완료**다. 실제 manifest의 v3 연결 fixture·시험 및 최소 선택 옵션을 작성했고 Rust·worker·기존 다섯 Node 시험의 273개 기대값을 유지했다. Single 사용자 실행은 요청 79개+구조 6개인 **85/85**, 당시 통합 **358/358 통과**다. 이 실행 로그·입력·산출물을 먼저 확인한 뒤 DEC-05b Batch를 작성했으며 **구현 완료, 사용자 실행 대기**다. 신규 102요청+6구조=108개·통합 466개는 정의 수이며 Batch 실행 결과는 아직 없다. 사용자는 계약 교정안 구체화 후 **A — 연결 시험·교정 설계만 마무리**를 선택했다. 이번 범위는 확정됐고 nonce·malformed·범위/시간·v4의 런타임 교정은 별도 범위의 미결 문제로 남긴다. 실행 명령은 [README](../../fixtures/decoder-policy/README.md#dec-05b-사용자가-직접-실행할-검증-명령), 상세 원본/교정안은 [DEC-05 설계](decoder-design-plan.md#dec-05--permit2-single--batch--전체-계획-d2)를 따른다.
+**2026-09-12 DEC-05 상태:** Single **85/85·당시 통합 358/358**, Batch **108/108·통합 466/466 사용자 실행 검증 완료**다. DEC-05b 저장 로그를 읽고 입력 44개·JS/WASM·전후 tracked patch를 대조했다. 실제 실행 HEAD `66af65c`의 미커밋 작업 트리와 이후 구현 커밋 `1326fb5`를 구분한다. **DEC-05는 합의한 A안의 기존 v3 연결·진단·교정 설계 범위에서 완료**다. nonce 모델·malformed fallback·uint160/uint48 범위·큰 시간 표현·v4 교정은 기존 후속 항목으로 유지한다. v4는 여전히 USDC EIP-2612만 지원하며 Permit2 v3 연결 성공은 full EIP-712 검증이 아니다. 상세 실행 근거는 [README](../../fixtures/decoder-policy/README.md#dec-05b-사용자-실행-기록--저장-로그-확인)를 따른다.
 
 아래 DEC-01~04의 “현재/이번”·DEC-05 미진행·문서만 변경했다는 설명은 당시 과거 기록이다. DEC-04의 저장 로그·Native 181개·Node 273개 검증 완료 기록과 미제공 항목을 보존한다. 이번에도 읽기·수정·정적 검토만 수행하고 빌드·시험·설치·Git 변경 명령은 실행하지 않는다.
 
@@ -213,12 +213,14 @@ worker 기본/transaction·선택적 정책 평가·typed v3 동작을 유지하
 
 #### DEC-05a / DEC-05b — Permit2 기존 v3 연결과 계약 교정 범위
 
+**DEC-05b 저장 로그 확인:** `/private/tmp/dambi-dec05b-verify.WCHZDj/`에서 Batch **108/108 통과**(`duration_ms=817.124708`), 기존 DEC-01~04의 273개와 Single 85개를 포함한 통합 **466/466 통과**(`duration_ms=1198.186625`)를 확인했다. 두 실행 모두 suites/fail/cancelled/skipped/todo는 0이다. 실제 실행 전후 HEAD는 `66af65c6bbe0adb6f8fbb9941aac729ec330b801`이며 Batch 관련 9개 미커밋 경로를 포함한 작업 트리다. 이후 구현 커밋 `1326fb5ac0c61e9552d952b748a3d09c2b236b35`와 DEC-06a 편집 전 파일을 읽기 전용으로 대조하여 입력 **44개 모두 Git blob 및 당시 현재 파일과 일치**함을 확인했다. 실행 후 입력 44개와 JS/WASM 2개 검사도 모두 OK이며 전후 tracked patch·Git 상태·HEAD가 동일하다. Node v25.9.0/npm 11.12.1, UTC Batch `2026-09-12T07:10:27Z–07:10:28Z`, 통합 `07:10:28Z–07:10:30Z`, verification/input hash/artifact hash exit는 모두 0이다. 실제 Batch resolved JCS digest는 `0x161755caa54753a0064c023990f6af3a9698e45b74b414db1bb3a8946f45c0d5`다. 현재 JS/WASM hash는 검증된 DEC-04·Single의 동일 쌍과 일치한다. **DEC-05는 A안의 기존 v3 연결·진단·교정 설계 범위에서 검증 완료**이며 nonce·입력 범위/형식·시간·v4 런타임 교정은 기존 후속 항목이다. 실행 HEAD를 이후 구현 커밋으로 바꾸지 않으며 기록 갱신을 위해 빌드·시험을 재실행하지 않았다.
+
 **DEC-05a 저장 로그 확인:** `/private/tmp/dambi-dec05a-verify.JPtwLZ/`에서 Single **85/85 통과**(`duration_ms=728.833416`), 당시 통합 **358/358 통과**(`duration_ms=1055.562083`)를 확인했다. 두 실행 모두 suites/fail/cancelled/skipped/todo는 0이다. 실제 실행 HEAD는 전후 `60bb3d561b889594ce5837088d74f072de4fd6a2`이며 9개 미커밋 경로가 있던 worktree다. 이후 사용자 커밋 `66af65c6bbe0adb6f8fbb9941aac729ec330b801`과 **Batch 편집 전** 파일을 대조하여 로그 입력 41개가 모두 현재 파일·Git blob에 일치함을 확인했다. 전후 tracked patch도 바이트 동일하고 입력 41개·산출물 2개 사후 검사는 모두 OK다. Node v25.9.0/npm 11.12.1, UTC Single `2026-09-12T06:46:09Z–06:46:10Z`, 통합 `06:46:10Z–06:46:11Z`, verification/input hash/artifact hash exit는 모두 0이다. DEC-04의 같은 JS/WASM 쌍을 재빌드 없이 사용했고 현재 산출물 hash도 일치한다. 실행 HEAD와 이후 구현 커밋을 구분한다. 에이전트 재실행이 아니며 full EIP-712·서명·외부 nonce 검증이나 A안에서 별도로 남긴 계약 교정의 완료가 아니다. 상세 로그·hash는 [README](../../fixtures/decoder-policy/README.md#dec-05a-사용자-실행-기록--저장-로그-확인)에 기록했다.
 
 | 단계 | 코드 작성·정적 검토 | 사용자 실행 검증·현재 범위 |
 | --- | --- | --- |
 | DEC-05a Single | 코드 작성·정적 검토·사용자 실행 검증 완료. 사용자 구현 커밋 `66af65c` | 저장 로그에서 **85/85·당시 통합 358/358 통과**. 실제 실행 HEAD `60bb3d5`와 이후 커밋 구분 |
-| DEC-05b Batch | **구현 완료, 사용자 실행 대기**. 실제 Batch 원본·fixture/test·최소 helper 선택·script·네 문서 | 미실행. 요청 102개+구조 6개=108개·통합 466개 정의. 통과 수·실행 로그 미제공 |
+| DEC-05b Batch | 코드 작성·정적 검토·사용자 실행 검증 완료. 이후 구현 커밋 `1326fb5` | 저장 로그 **108/108·통합 466/466 통과**. 실제 실행 HEAD `66af65c`와 이후 커밋 구분. DEC-05 A안 범위 완료 |
 | 계약 교정 | 사용자 요청에 따라 이번 단계에서 [교정안 A/B/C](decoder-design-plan.md#dec-05-계약-교정안-a안-확정bc-미구현-제안) 구체화 | **A baseline+설계 확정**. B v4 입력 검증, C allowance Action/소비자 교정은 별도 범위의 미구현 제안 |
 
 Single 원본은 [`registryV2/manifests/uniswap/permit2/permitSingle@1.0.0.json`](../../registryV2/manifests/uniswap/permit2/permitSingle@1.0.0.json), Batch는 [`permitBatch@1.0.0.json`](../../registryV2/manifests/uniswap/permit2/permitBatch@1.0.0.json)이다. 두 파일 모두 체인 `1/10/8453/42161`의 concrete Permit2 주소를 직접 선언하고 USDC token 목록을 통한 확장 대상이 아니다. 기존 Rust synthetic Single/Batch는 schema·ID·체인/types·emit이 다르며 `ON_DISK` Batch JSON literal도 현재 원본과 달리 named emit·nonce 누락이다. 새 연결 시험은 실제 파일을 사용한다. 상세 대응표는 [상세 계획 DEC-05](decoder-design-plan.md#dec-05--permit2-single--batch--전체-계획-d2)에 기록했다.
@@ -235,7 +237,7 @@ Batch는 별도 `permit2-batch.cases.json`/`.test.mjs`와 `includePermit2Batch: 
 
 작성 범위는 서로 다른 token/amount/expiration/nonce·순서/역순/중복 유지, 공통 spender/sigDeadline, 첫째/둘째 필수 필드 누락/null/불량, empty/비배열/64·65개, 동일 WASM Single/Batch primary type 구분이다. 최상위 Action 하나와 외부 meta 하나 아래 Multicall의 자식 ActionBody 구조를 검사한다. empty는 Unknown이며 65개는 명시적 `build_array_emit_failed` 전체 오류다. child 오류도 `data:null`인 전체 실패이며 정상 child만 남기거나 65번째 이후를 조용히 자르지 않는다. nonce 누락의 zero fallback·폭/시간은 별도 기존 한계 진단이며 A안의 교정을 이번에 구현하지 않는다. 현행 한도 오류를 관찰하므로 새 한도 계약 결정이 필요하지 않다.
 
-Batch의 **코드 작성·정적 검토는 구현 완료, 사용자 실행 대기**다. 요청은 normal 25, legacy_diagnostic 22, limit_boundary 1, limit_error 3, empty_observation 1, emit_error 37, input_error 8, routing_miss 5로 102개이며 구조 6개를 더한 108개·통합 466개는 아직 정의 수다. v4는 여전히 USDC만 지원하고 외부 nonce/RPC·서명·정책·witness/SignatureTransfer 기능·venue·Core·DEC-06/07·SDK 소스 이관을 추가하지 않는다. 실행은 [README](../../fixtures/decoder-policy/README.md#dec-05b-사용자가-직접-실행할-검증-명령)의 검증된 JS/WASM 재사용 → Batch 개별 → 기존 Single 포함 통합 순서다. Single 개별 재실행을 별도로 요구하지 않는다. 상세 오류·coverage는 [Batch 기록](../../fixtures/decoder-policy/coverage.md#dec-05b--작성한-검사와-미결-계약)을 따른다. Batch 실행 검증 전에는 DEC-05나 D2 전체를 완료 처리하지 않는다.
+Batch의 **코드 작성·정적 검토·사용자 실행 검증 완료**다. 요청은 normal 25, legacy_diagnostic 22, limit_boundary 1, limit_error 3, empty_observation 1, emit_error 37, input_error 8, routing_miss 5로 102개이며 구조 6개 포함 **108/108·통합 466/466 통과**를 저장 로그에서 확인했다. v4는 여전히 USDC만 지원하며 nonce·범위/형식·시간·v4 교정은 별도 후속 범위다. [README](../../fixtures/decoder-policy/README.md#dec-05b-사용자-실행-기록--저장-로그-확인)에 검증된 JS/WASM 재사용과 실제 실행 기록을 보존한다. 완료 기록을 위한 재빌드·재시험은 필요하지 않다. 상세 오류·coverage는 [Batch 기록](../../fixtures/decoder-policy/coverage.md#dec-05b--작성한-검사와-미결-계약)을 따른다. **DEC-05 A안 범위는 완료이며 D2 전체는 미완료**다.
 
 ### D3. 정책 콘텐츠와 manifest 정리
 

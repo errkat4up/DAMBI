@@ -1,6 +1,6 @@
 # Decoder 기준 시험 커버리지
 
-**DEC-05 최신 상태:** Single은 저장 로그 기준 **사용자 실행 검증 완료**다. 실제 원본을 선택하는 v3 연결 시험·최소 builder 옵션·개별/통합 script를 작성했다. Single 85/85·당시 통합 358/358 통과를 확인했다. Batch는 **구현 완료, 사용자 실행 대기**이며 신규 108개·통합 466개는 정의 수다. 기존 Node 다섯 시험 파일의 273개 검증 기록은 그대로 유지한다. 아래 DEC-01~04의 “현재/이번”·DEC-05 미진행 표현은 해당 과거 단계 기록이며, 현재 Batch 작성 범위는 [DEC-05b](#dec-05b--작성한-검사와-미결-계약), Single 사용자 실행 근거는 [DEC-05a](#dec-05a--작성한-검사와-미결-계약)를 따른다.
+**DEC-05 최신 상태:** Single **85/85·당시 통합 358/358**에 이어 Batch **108/108·통합 466/466 사용자 실행 검증 완료**다. 저장 로그 입력 44개를 실행 HEAD `66af65c`의 작업 트리와 이후 구현 커밋 `1326fb5`에 구분해 대응했다. DEC-05는 **A안의 기존 v3 연결·진단·교정 설계 범위에서 완료**하며 nonce·입력 범위/형식·시간·v4 교정은 후속 항목으로 유지한다. 아래 DEC-01~04의 “현재/이번”·DEC-05 미진행 표현은 해당 과거 기록이다. Batch 근거는 [DEC-05b](#dec-05b--작성한-검사와-미결-계약), Single 근거는 [DEC-05a](#dec-05a--작성한-검사와-미결-계약)를 따른다.
 
 **DEC-01/02의 과거 사용자 실행 기준 37개 통과(30 + 7) 기록을 유지하며, DEC-03도 사용자 실행 보고 기준 검증 완료다.** 새로 제공된 전체 로그에서 transfer 개별 21개와 통합 회귀 58개가 모두 통과했다. 두 실행 모두 실패·취소·건너뛰기·todo·suites는 0이며 `duration_ms`는 각각 `866.922333`, `635.086875`다. 에이전트의 독립 재실행 결과가 아니다. 04a는 사용자 제공 전체 로그 기준 typed permit **47/47 통과**(`duration_ms=801.277375`), 당시 통합 **105/105 통과**(`duration_ms=690.439291`)다. 두 실행 모두 suites·fail·cancelled·skipped·todo는 0이다. 04a 당시 실행 HEAD·시각·도구 버전·JS/WASM hash·새 빌드 로그는 미제공이며 이전 기록으로 채우지 않는다. 04a 사용자 실행 결과를 반영했고, 합의된 04b v4 DTO·strict validator·실행부·Rust/Node 회귀 시험을 별도 변경으로 작성했다. 04b 사용자 실행의 저장 로그를 직접 확인했다. Native 181개와 새 WASM 빌드, Node strict 168개·기존 typed 47개·통합 273개가 모두 통과하여 **DEC-04 전체 검증 완료**다. 에이전트가 빌드·시험을 재실행한 결과는 아니다. SDK 전체 소스·빌드 독립화도 미완료다.
 
@@ -272,7 +272,9 @@ PermitSingle/PermitBatch는 AllowanceTransfer이며 순차 nonce를 사용한다
 
 ## DEC-05b — 작성한 검사와 미결 계약
 
-**코드 작성·정적 검토: 구현 완료, 사용자 실행 대기. 사용자 실행 검증: 미실행·로그 미제공.** Single의 85/85·당시 통합 358/358 로그를 먼저 기록하고 실제 [`permitBatch@1.0.0.json`](../../registryV2/manifests/uniswap/permit2/permitBatch@1.0.0.json)을 연결하는 [`permit2-batch.cases.json`](permit2-batch.cases.json)과 [`permit2-batch.test.mjs`](permit2-batch.test.mjs)을 작성했다. 요청 분류는 normal 25, legacy_diagnostic 22, limit_boundary 1, limit_error 3, empty_observation 1, emit_error 37, input_error 8, routing_miss 5인 **102개**다. 구조 검사 6개를 더한 **108개 정의**, 기존 358개를 포함한 통합 **466개 정의**이며 통과 수가 아니다. 아래 기대값·오류는 작성한 검사와 정적 소스 대조이며 Batch 실행 결과가 아니다. 기존 Single fixture/test·기존 358개 기대값을 변경하지 않는다.
+**DEC-05b 저장 로그 확인:** `/private/tmp/dambi-dec05b-verify.WCHZDj/`에서 Batch **108/108 통과**(`duration_ms=817.124708`), 기존 DEC-01~04의 273개와 Single 85개를 포함한 통합 **466/466 통과**(`duration_ms=1198.186625`)를 확인했다. 두 실행 모두 suites/fail/cancelled/skipped/todo는 0이다. 실제 실행 전후 HEAD는 `66af65c6bbe0adb6f8fbb9941aac729ec330b801`이며 Batch 관련 9개 미커밋 경로를 포함한 작업 트리다. 이후 구현 커밋 `1326fb5ac0c61e9552d952b748a3d09c2b236b35`와 DEC-06a 편집 전 파일을 읽기 전용으로 대조하여 입력 **44개 모두 Git blob 및 당시 현재 파일과 일치**함을 확인했다. 실행 후 입력 44개와 JS/WASM 2개 검사도 모두 OK이며 전후 tracked patch·Git 상태·HEAD가 동일하다. Node v25.9.0/npm 11.12.1, UTC Batch `2026-09-12T07:10:27Z–07:10:28Z`, 통합 `07:10:28Z–07:10:30Z`, verification/input hash/artifact hash exit는 모두 0이다. 실제 Batch resolved JCS digest는 `0x161755caa54753a0064c023990f6af3a9698e45b74b414db1bb3a8946f45c0d5`다. 현재 JS/WASM hash는 검증된 DEC-04·Single의 동일 쌍과 일치한다. **DEC-05는 A안의 기존 v3 연결·진단·교정 설계 범위에서 검증 완료**이며 nonce·입력 범위/형식·시간·v4 런타임 교정은 기존 후속 항목이다. 실행 HEAD를 이후 구현 커밋으로 바꾸지 않으며 기록 갱신을 위해 빌드·시험을 재실행하지 않았다.
+
+**코드 작성·정적 검토·사용자 실행 검증 완료.** 실제 [`permitBatch@1.0.0.json`](../../registryV2/manifests/uniswap/permit2/permitBatch@1.0.0.json)을 연결하는 [`permit2-batch.cases.json`](permit2-batch.cases.json)과 [`permit2-batch.test.mjs`](permit2-batch.test.mjs)의 요청 분류는 normal 25, legacy_diagnostic 22, limit_boundary 1, limit_error 3, empty_observation 1, emit_error 37, input_error 8, routing_miss 5인 **102개**다. 구조 검사 6개를 더한 **108/108**, 기존 358개를 포함한 통합 **466/466**이 사용자 실행에서 통과했다. 아래 정상·오류·관찰 검사는 저장 로그로 확인했으며 raw 시간 포화 등 정적 분석의 한계는 별도 근거로 유지한다. 기존 Single fixture/test·기존 358개 기대값은 보존했다.
 
 구조 검사 6개는 정확한 12/8/0 index·네 체인/JCS, 실제 ABI/emit 원본, BigInt 독립 검산·분류, key 재배열/역순/중복, 같은 프로세스의 Single/Batch 교대 9요청·설치 상태 4개의 프로세스 격리·등록된 primary type 교차 시 입력 오류, v4 Single/Batch unsupported guard다. 요청 경계에는 양쪽 원소 각각의 0/MAX/MAX+1·nonce 255/256/513/770, 64개 정상·65개 전체 오류·65개+첫 원소 오류의 한도 우선·64개+마지막 원소 오류의 전체 전파를 포함한다. 시간 `2^53+1`/`2^64`는 legacy diagnostic이다.
 
@@ -302,7 +304,7 @@ PermitSingle/PermitBatch는 AllowanceTransfer이며 순차 nonce를 사용한다
 
 ### Batch 오류·한도와 관찰의 정적 근거
 
-관련 경로는 [`declarative_exports.rs`](../../crates/policy-engine-wasm/src/declarative_exports.rs)의 typed reshape/array emit 분기와 [`action_builder.rs`](../../crates/adapters/mappers/src/declarative/action_builder.rs)의 `build_array_emit`·live nonce wrapping이다. 원소 수 검사 → 순서대로 child 생성 순서를 유지하고 실패 시 `data: null`인 오류 envelope를 반환하는 경로를 작성한 시험으로 확인한다. 아래 문자열은 현재 코드의 예상 오류이며 실행으로 확인된 로그는 아직 없다.
+관련 경로는 [`declarative_exports.rs`](../../crates/policy-engine-wasm/src/declarative_exports.rs)의 typed reshape/array emit 분기와 [`action_builder.rs`](../../crates/adapters/mappers/src/declarative/action_builder.rs)의 `build_array_emit`·live nonce wrapping이다. 원소 수 검사 → 순서대로 child 생성 순서를 유지하고 실패 시 `data: null`인 오류 envelope를 반환하는 경로를 작성한 시험으로 확인한다. 아래 오류 검사는 저장된 사용자 실행에서 통과했다. raw 정수 정밀도·내부 포화 설명은 해당 정적 분석 근거와 구분한다.
 
 | 최소 입력·조건 | 현재 예상 결과 | 계약·기대값 판단 |
 | --- | --- | --- |
@@ -319,4 +321,4 @@ PermitSingle/PermitBatch는 AllowanceTransfer이며 순차 nonce를 사용한다
 
 현재 v3는 `uint160/uint48` 폭을 검사하지 않아 초과값을 출력 타입 범위에서 수용할 수 있고 nonce `2^48`은 `["0x10000000000",0]`으로 표현된다. 큰 공통 sigDeadline은 모든 child에 적용되므로 JS 안전 정수 초과와 body u64 포화/외부 meta 0 문제도 전파될 수 있다. worker JSON.parse 이후의 값으로 raw 정수 정밀도를 복원했다고 주장하지 않는다. nonce·폭·시간·v4의 교정 설계와 B/C 제안은 [상세 계획](../../docs/sdk-migration/decoder-design-plan.md#dec-05-계약-교정안-a안-확정bc-미구현-제안)에 보존하며 이번에 다시 승인 질문하거나 런타임을 변경하지 않는다.
 
-Batch 실행 명령은 [README](README.md#dec-05b-사용자가-직접-실행할-검증-명령)의 **Batch 개별 → 기존 358개 포함 통합** 순서다. Rust·worker·manifest를 변경하지 않아 검증된 JS/WASM을 재사용한다. Single 개별 재실행은 별도로 요구하지 않는다. 외부 nonce 조회·서명 검증·정책·Core·DEC-06/07·SDK 소스 이관은 미연결/미구현이다. Batch 사용자 실행 검증 전에는 DEC-05 전체나 D2 전체를 완료 처리하지 않는다.
+Batch **108/108·통합 466/466**의 실행 근거와 hash는 [README](README.md#dec-05b-사용자-실행-기록--저장-로그-확인)에 기록했다. 검증된 JS/WASM 쌍을 재사용했으며 DEC-05 완료 기록을 위해 재시험·재빌드를 요구하지 않는다. **DEC-05 A안 범위는 검증 완료**, nonce·범위/형식·시간·v4 교정 및 외부 nonce 조회·서명 검증·정책·Core·SDK 소스 이관은 기존 후속 범위다. D2 전체는 아직 미완료다.
