@@ -56,5 +56,9 @@
   "nfpm_refund_eth_manifest": {
     "path": "manifests/uniswap/v3-nfpm/refundETH@1.0.0.json",
     "sha256": "0x2684b33185f8b5128582b1afca36fa5b7ff9ea8cdc691e6bc3879cdc12375f78"
+  },
+  "bundler3_manifest": {
+    "path": "manifests/morpho/bundler3/1-multicall@1.0.0.json",
+    "sha256": "0xd909edf6d2f1cf5eeb375042b5f61979b3cd1a1e0505a4fee9352b87d78b2a63"
   }
 }

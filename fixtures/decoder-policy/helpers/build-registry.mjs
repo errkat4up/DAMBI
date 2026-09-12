@@ -39,13 +39,14 @@ async function copyPinnedFile(root, selected) {
 // Existing callers remain approve-only; later fixtures explicitly opt in.
 export async function buildRegistry(selection, {
   includeTransfer = false, includePermit = false, includePermit2Single = false,
-  includePermit2Batch = false, includeNfpmSelf = false,
+  includePermit2Batch = false, includeNfpmSelf = false, includeBundler3 = false,
 } = {}) {
   assert.equal(typeof includeTransfer, "boolean");
   assert.equal(typeof includePermit, "boolean");
   assert.equal(typeof includePermit2Single, "boolean");
   assert.equal(typeof includePermit2Batch, "boolean");
   assert.equal(typeof includeNfpmSelf, "boolean");
+  assert.equal(typeof includeBundler3, "boolean");
   const tsx = join(registryRoot, "node_modules/.bin/tsx");
   await access(tsx).catch(() => {
     throw new Error("Registry dependencies missing; run npm ci --prefix registryV2 first.");
@@ -175,6 +176,20 @@ export async function buildRegistry(selection, {
         nfpmSources[key] = nfpm;
       }
     }
+    let bundler3Source;
+    if (includeBundler3) {
+      bundler3Source = await copyPinnedFile(root, selection.bundler3_manifest);
+      assert.equal(bundler3Source.id, "morpho/bundler3/1-multicall@1.0.0");
+      // This source declares only its concrete mainnet deployment. The token
+      // fixtures expand approve/transfer, never the Bundler3 parent address.
+      assert.deepEqual(bundler3Source.match, {
+        selector: "0x374f435d",
+        chain_to_addresses: { "1": ["0x6566194141eefa99af43bb5aa71460ca2dc90245"] },
+      });
+      assert.deepEqual(bundler3Source.emit, {
+        strategy: "multicall_call_array", recurse_arg: "bundle", max_depth: 4,
+      });
+    }
     assert.equal(selection.tokens.length, 4, "DEC-01 pins one token per chain");
     const tokens = [];
     for (const selected of selection.tokens) {
@@ -196,7 +211,7 @@ export async function buildRegistry(selection, {
         maxBuffer: 4 * 1024 * 1024,
       });
     } catch (error) {
-      throw new Error(`${includeNfpmSelf ? "DEC-06a" : includePermit2Batch ? "DEC-05b" : includePermit2Single ? "DEC-05a" : includePermit ? "DEC-04a" : includeTransfer ? "DEC-03" : "DEC-01"} Registry build failed; all output is discarded.\n${error.stderr ?? ""}\n${error.message}`, { cause: error });
+      throw new Error(`${includeBundler3 ? "DEC-06b" : includeNfpmSelf ? "DEC-06a" : includePermit2Batch ? "DEC-05b" : includePermit2Single ? "DEC-05a" : includePermit ? "DEC-04a" : includeTransfer ? "DEC-03" : "DEC-01"} Registry build failed; all output is discarded.\n${error.stderr ?? ""}\n${error.message}`, { cause: error });
     }
     return {
       root, source, tokens, cleanup,
@@ -205,6 +220,7 @@ export async function buildRegistry(selection, {
       ...(includePermit2Single ? { permit2SingleSource } : {}),
       ...(includePermit2Batch ? { permit2BatchSource } : {}),
       ...nfpmSources,
+      ...(includeBundler3 ? { bundler3Source } : {}),
     };
   } catch (error) {
     await cleanup();

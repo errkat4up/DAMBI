@@ -10,7 +10,7 @@
     "core:typecheck": "yarn workspace @dambi/core typecheck",
     "core:build": "yarn workspace @dambi/core build",
     "core:pack": "yarn workspace @dambi/core pack:check",
-    "decoder:test": "node --test fixtures/decoder-policy/approve.test.mjs fixtures/decoder-policy/approve-policy.test.mjs fixtures/decoder-policy/transfer.test.mjs fixtures/decoder-policy/typed-permit.test.mjs fixtures/decoder-policy/typed-permit-strict.test.mjs fixtures/decoder-policy/permit2-single.test.mjs fixtures/decoder-policy/permit2-batch.test.mjs fixtures/decoder-policy/multicall-self.test.mjs",
+    "decoder:test": "node --test fixtures/decoder-policy/approve.test.mjs fixtures/decoder-policy/approve-policy.test.mjs fixtures/decoder-policy/transfer.test.mjs fixtures/decoder-policy/typed-permit.test.mjs fixtures/decoder-policy/typed-permit-strict.test.mjs fixtures/decoder-policy/permit2-single.test.mjs fixtures/decoder-policy/permit2-batch.test.mjs fixtures/decoder-policy/multicall-self.test.mjs fixtures/decoder-policy/multicall-call-array.test.mjs",
     "decoder:test:approve": "node --test fixtures/decoder-policy/approve.test.mjs",
     "decoder:test:approve-policy": "node --test fixtures/decoder-policy/approve-policy.test.mjs",
     "decoder:test:transfer": "node --test fixtures/decoder-policy/transfer.test.mjs",
@@ -18,7 +18,8 @@
     "decoder:test:typed-permit-strict": "node --test fixtures/decoder-policy/typed-permit-strict.test.mjs",
     "decoder:test:permit2-single": "node --test fixtures/decoder-policy/permit2-single.test.mjs",
     "decoder:test:permit2-batch": "node --test fixtures/decoder-policy/permit2-batch.test.mjs",
-    "decoder:test:multicall-self": "node --test fixtures/decoder-policy/multicall-self.test.mjs"
+    "decoder:test:multicall-self": "node --test fixtures/decoder-policy/multicall-self.test.mjs",
+    "decoder:test:multicall-call-array": "node --test fixtures/decoder-policy/multicall-call-array.test.mjs"
   },
   "workspaces": [
     "packages/*"

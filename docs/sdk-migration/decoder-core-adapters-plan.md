@@ -1,6 +1,8 @@
 # Dambi: Decoder·정책 → Core → Adapters 개발 계획
 
-**2026-09-12 DEC-06a 현재 상태:** 성공 로그 `AsBmk6`에서 **self 48/48·통합 514/514 사용자 재실행 검증 완료**다. 최초 실패 `kJih6u`는 과거 기록으로 보존한다. 실행 당시 HEAD `1326fb5`의 9개 미커밋 경로와 이후 생성할 구현 커밋을 구분한다. 완료 기록을 먼저 반영하고 사용자 분리 커밋을 확인한 뒤 06b를 구현한다. 06b·06c는 아직 미구현이며 06c까지 구현·검증해야 DEC-06 전체 완료다.
+**2026-09-12 DEC-06b 현재 상태:** 실제 Bundler3 Call[] 연결 **구현·정적 검토 완료, 사용자 실행 대기**다. 요청 43개 + 구조 6개 = **49개**, 기존 514개 포함 통합 **563개 정의**이며 통과 수가 아니다. DEC-06a는 self 48/48·통합 514/514 및 분리 커밋 `9923487`까지 확인했다. 06c는 별도 미구현이며 06b 사용자 검증 후 진행한다.
+
+**2026-09-12 DEC-06a 현재 상태:** 성공 로그 `AsBmk6`에서 **self 48/48·통합 514/514 사용자 재실행 검증 완료**다. 최초 실패 `kJih6u`는 과거 기록으로 보존한다. 실행 당시 HEAD `1326fb5`의 9개 미커밋 경로와 이후 구현 커밋 `9923487`을 구분한다. DEC-05 기록 `56ece47`·06a 구현 `9923487`의 경계와 성공 로그 입력을 확인해 06b 착수 조건을 충족했다. 06b는 이번 별도 변경으로 진행하며 06c는 미구현이다. 06c까지 구현·검증해야 DEC-06 전체 완료다.
 
 **2026-09-12 DEC-05 상태:** Single **85/85·당시 통합 358/358**, Batch **108/108·통합 466/466 사용자 실행 검증 완료**다. DEC-05b 저장 로그를 읽고 입력 44개·JS/WASM·전후 tracked patch를 대조했다. 실제 실행 HEAD `66af65c`의 미커밋 작업 트리와 이후 구현 커밋 `1326fb5`를 구분한다. **DEC-05는 합의한 A안의 기존 v3 연결·진단·교정 설계 범위에서 완료**다. nonce 모델·malformed fallback·uint160/uint48 범위·큰 시간 표현·v4 교정은 기존 후속 항목으로 유지한다. v4는 여전히 USDC EIP-2612만 지원하며 Permit2 v3 연결 성공은 full EIP-712 검증이 아니다. 상세 실행 근거는 [README](../../fixtures/decoder-policy/README.md#dec-05b-사용자-실행-기록--저장-로그-확인)를 따른다.
 
@@ -243,15 +245,15 @@ Batch의 **코드 작성·정적 검토·사용자 실행 검증 완료**다. �
 
 #### DEC-06 — self 연결과 후속 Call[]·진단/한도
 
-**DEC-06a self — 사용자 재실행 검증 완료, 분리 커밋 대기.** 실제 `registryV2/manifests/uniswap/v3-nfpm/{multicall,mint,refundETH}@1.0.0.json`을 선택하는 [`multicall-self.cases.json`](../../fixtures/decoder-policy/multicall-self.cases.json)·[`.test.mjs`](../../fixtures/decoder-policy/multicall-self.test.mjs)을 작성했다. 고정 요청 **43개 + 구조 5개 = 48/48 통과**, 기존 일곱 파일의 466개를 포함한 통합 **514/514 통과**를 성공 로그에서 확인했다. 에이전트는 소스 읽기·수정·정적 검토만 했고 Registry/Native/WASM/Node 빌드·시험·설치·Git 변경 명령을 실행하지 않았다.
+**DEC-06a self — 사용자 재실행 검증·분리 커밋 완료.** 실제 `registryV2/manifests/uniswap/v3-nfpm/{multicall,mint,refundETH}@1.0.0.json`을 선택하는 [`multicall-self.cases.json`](../../fixtures/decoder-policy/multicall-self.cases.json)·[`.test.mjs`](../../fixtures/decoder-policy/multicall-self.test.mjs)을 작성했다. 고정 요청 **43개 + 구조 5개 = 48/48 통과**, 기존 일곱 파일의 466개를 포함한 통합 **514/514 통과**를 성공 로그에서 확인했다. 에이전트는 소스 읽기·수정·정적 검토만 했고 Registry/Native/WASM/Node 빌드·시험·설치·Git 변경 명령을 실행하지 않았다.
 
 **사용자 재실행 검증 완료:** `/private/tmp/dambi-dec06a-verify.AsBmk6/`에서 self **48/48 통과**(`duration_ms=860.220167`), 기존 466개를 포함한 통합 **514/514 통과**(`duration_ms=1337.026125`)를 확인했다. 두 실행 모두 suites/fail/cancelled/skipped/todo는 0이다. self는 UTC `2026-09-12T07:53:21Z–07:53:22Z`, 통합은 `07:53:22Z–07:53:24Z`이며 command/tee/hash/inventory/Git/final exit 모두 0이다. 실행 전후 HEAD는 `1326fb5ac0c61e9552d952b748a3d09c2b236b35`, branch는 `feat/decoder`이고 **06a 관련 9개 미커밋 경로를 포함한 작업 트리**에서 실행했다. 이번 완료 기록 편집 전에 입력 **1356개 모두 현재 파일과 일치**, JS/WASM 2개 hash도 일치함을 확인했다. 입력·산출물·HEAD/branch/status·tracked/staged patch는 실행 전후 및 편집 전 작업 트리와 동일하다. 최초 실패 `kJih6u`는 아래 과거 기록으로 보존하며 성공 결과로 덮어쓰지 않는다. 에이전트가 빌드·시험을 재실행한 결과가 아니다.
 
-**커밋 경계:** DEC-06a는 사용자 검증 완료지만 아직 미커밋이다. 현재 HEAD에는 DEC-05 Batch 구현만 있으며 DEC-05 완료 기록과 DEC-06a는 별도 커밋으로 정리한다. 먼저 저장된 DEC-05 기록 전용 patch, 다음으로 검증 완료 기록을 포함한 실제 06a 9개 경로를 사용자가 커밋한다. **실제 06a 커밋을 확인한 후 06b 구현을 시작**한다. 06b·06c 파일/시험은 아직 작성하지 않았고 DEC-06 전체는 미완료다. 완료 기록 갱신을 위한 재시험·재빌드는 요구하지 않는다.
+**커밋 경계 확인 완료:** 사용자 커밋은 `1326fb5` → DEC-05 기록 `56ece474961ca72cea014b17e0060ad180a4b53a` → DEC-06a 구현·검증 기록 `99234877c8b72e1ea96cd8597e45e9c0e716d66d` 순서다. 첫 커밋은 네 문서만, 두 번째는 06a 관련 정확한 아홉 경로만 포함한다. DEC-05 기록 전용 patch를 `1326fb5` 원문에 메모리에서 적용한 네 결과가 `56ece47` Git blob과 바이트 동일함을 읽기 전용으로 확인했다. 성공 로그 `AsBmk6`의 **06a 구현 다섯 파일**(fixture·test·selection·helper·package)의 SHA-256도 `9923487` blob과 모두 일치한다. **06a 실제 실행 HEAD는 `1326fb5`의 미커밋 작업 트리이며 이후 구현 커밋은 `9923487`**이다. 06b 착수 전에 `feat/decoder`, HEAD `9923487`, 깨끗한 작업 트리·빈 index를 확인했으므로 커밋 선행 조건을 충족했다. 과거 DEC-05/06a 커밋 절차는 이미 완료해 다시 실행하지 않는다. 기록 확인을 위한 재빌드·재시험은 필요 없다.
 
 **첫 사용자 실행 실패와 수정:** `/private/tmp/dambi-dec06a-verify.kJih6u/`의 self 결과는 **tests 48 / pass 0 / fail 48**, suites/cancelled/skipped/todo 모두 0, `duration_ms=659.926875`다. 모든 index를 `3-ref`로 가정한 공통 before hook(당시 `multicall-self.test.mjs:93`)에서 NFPM inline의 실제 `schema_version=undefined`와 기대 `"3-ref"`가 불일치했다. 최초 정적 검토에서 놓친 시험의 형식 가정이며 48개의 개별 ABI/Action 실패로 해석하지 않는다. 임시 Registry 빌드 후 index 검사에서 중단되어 실제 WASM 설치·route 요청은 시작하지 않았고, self exit 1로 통합도 미실행(`integrated.log` 없음)이다. 실행 전후 HEAD는 `1326fb5ac0c61e9552d952b748a3d09c2b236b35`, branch는 `feat/decoder`, 관련 9개 미커밋 경로가 있었고 입력 1356개·JS/WASM·tracked/staged patch·HEAD/status가 전후 동일하다. 사후 입력 1356개 모두 OK이며 final/command exit=1, hash/inventory/Git record exit=0이다. 전체 UTC `2026-09-12T07:45:32Z–07:45:34Z`, self `07:45:33Z–07:45:34Z`다. Rust/빌드 입력 1279개는 검증된 `e487805`와 같고 현재 JS/WASM hash도 기록과 일치한다. 상세 도구·수정 전 파일 대응은 [README](../../fixtures/decoder-policy/README.md#dec-06a-첫-사용자-실행--공통-준비-훅-실패와-수정)에 보존한다.
 
-**수정한 index 계약:** approve sourced callkey **4개는 `3-ref`**, NFPM concrete callkey **12개는 `schema_version`·`bundle_ref` 없이 `bundle`을 직접 담은 inline**이다. 별도 `bundles/` 파일은 approve **1개**이며 서로 다른 해석 bundle 객체·JCS digest **4개**와 구분한다. 실제 builder의 두 경로에 맞춰 exact key·형식·참조/원본·JCS 검사를 수정했다. 기대 Action·fixture·43요청+5구조=48개 및 통합514개 정의는 유지한다. **사용자 재실행 검증 완료**이며 기존 실패 기록과 DEC-05 기록 전용 patch를 보존한다. 같은 JS/WASM 쌍으로 self 48/48·통합 514/514가 통과했다. 완료 기록 갱신을 위한 재실행은 필요 없으며 06b는 실제 06a 커밋을 확인한 후 진행한다.
+**수정한 index 계약:** approve sourced callkey **4개는 `3-ref`**, NFPM concrete callkey **12개는 `schema_version`·`bundle_ref` 없이 `bundle`을 직접 담은 inline**이다. 별도 `bundles/` 파일은 approve **1개**이며 서로 다른 해석 bundle 객체·JCS digest **4개**와 구분한다. 실제 builder의 두 경로에 맞춰 exact key·형식·참조/원본·JCS 검사를 수정했다. 기대 Action·fixture·43요청+5구조=48개 및 통합514개 정의는 유지한다. **사용자 재실행 검증 완료**이며 기존 실패 기록과 DEC-05 기록 전용 patch를 보존한다. 같은 JS/WASM 쌍으로 self 48/48·통합 514/514가 통과했다. 완료 기록 갱신을 위한 재실행은 필요 없으며 실제 06a 커밋 `9923487`을 확인해 06b를 별도 변경으로 진행한다.
 
 `buildRegistry(selection, { includeNfpmSelf: true })`는 기존 approve와 NFPM 세 원본을 선택한다. 원본 hash 검증 → 임시 strict Registry → 정확한 **callkey 16·typed 0·selector 0** 및 네 bundle의 고정 JCS digest → 실제 WASM 설치 → worker의 기존 transaction route를 연결했다. 기본 false인 선택 옵션과 해당 경우의 NFPM source 반환만 더하고 기존 기본값·반환·정리 동작을 유지한다. 세 원본의 세 체인 `1/10/42161` 공통 주소 `0xC36442b4a4522E871399CD717aBDD847Ab11FE88`와 Base `8453` 주소 `0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1`을 그대로 유지한다. USDC token 목록은 approve 확장용이며 NFPM 주소 확장에 쓰지 않는다.
 
@@ -265,10 +267,26 @@ mint는 `amm/add_liquidity`·`params.kind=concentrated_mint`다. token pair·des
 
 | 후속 단계 | 현재 상태·다음 범위 |
 | --- | --- |
-| **06b Call[]** | **미구현, 06a 사용자 검증 완료·실제 분리 커밋 확인 후 진행.** 실제 `registryV2/manifests/morpho/bundler3/1-multicall@1.0.0.json`으로 별도 `multicall-call-array.cases.json`/`.test.mjs` 작성. 자식별 to/data/value·approve/transfer·순서·미지원/malformed/empty/64·65. 짧은 Call[] child의 Unknown 경로를 self 오류와 억지로 통일하지 않음. skipRevert/callbackHash 입력 존재와 출력·검증 범위를 구분하며 실행 성공 시뮬레이션을 주장하지 않음 |
+| **06b Call[]** | **구현·정적 검토 완료, 사용자 실행 대기.** 실제 Bundler3/approve/transfer 연결 43요청 + 구조6 = 49개, 통합563개 정의. 아래 별도 06b 기록·사용자 실행 절차를 따른다 |
 | **06c 진단·한도** | **미구현, 06b 사용자 검증 후 진행.** self·Call[] 재진입·re-entry callback의 요청별 재귀 문맥/제한 전달과 callback 생략 분기 보완. **해석한 호출과 순서 보존 + 남은 구간 Unknown/한도 사유**는 기존 사용자 결정. 새로운 제한값·wire·complete/partial·안정 진단 코드·호출 경로/decoder ID·기존 소비자 호환을 구체 입력/현재 결과/영향 파일/권장안과 함께 확정. 읽지 않은 내부 내용은 추측하지 않으며 Permit2 Batch에 새 한도 정책을 자동 적용하지 않음 |
 
 **DEC-06 전체 완료 조건:** 06c까지 필요한 구현·사용자 실행 검증을 마쳐야 한다. 미해석 구간이 사라지거나 complete로 표시되지 않고 해석한 정상 호출과 순서를 보존해야 한다. `multicall-limits.test.mjs` 등으로 경계 전/경계/초과와 서로 다른 재귀 경로의 우회를 확인한다. Core API·allow/warn/deny 정책·RPC·서명 검증·SDK 이관·DEC-07은 이번 구현 범위 밖이다.
+
+#### DEC-06b — 실제 Bundler3 Call[] 연결
+
+**구현·정적 검토 완료, 사용자 실행 대기.** [`multicall-call-array.cases.json`](../../fixtures/decoder-policy/multicall-call-array.cases.json)의 **43요청**(성공 envelope 기대 25·오류 기대 18)과 [`.test.mjs`](../../fixtures/decoder-policy/multicall-call-array.test.mjs)의 **구조 검사 6개**, 합계 **49개 정의**다. 기존 514개 포함 통합 **563개 정의**이며 통과 수가 아니다. DEC-05 기록 `56ece47`·06a 구현 `9923487`의 실제 분리 커밋과 성공 로그 구현 다섯 파일의 hash를 먼저 확인하여 선행 조건을 충족했다. 실제 06a 실행 HEAD는 `1326fb5`의 미커밋 작업 트리로 구분하고 과거 검증/커밋 절차는 다시 실행하지 않는다.
+
+실제 원본은 `registryV2/manifests/morpho/bundler3/1-multicall@1.0.0.json`, 원본 SHA-256은 `0xd909edf6d2f1cf5eeb375042b5f61979b3cd1a1e0505a4fee9352b87d78b2a63`다. chain **1**·부모 `0x6566194141eefa99af43bb5aa71460ca2dc90245`·selector `0x374f435d`를 유지한다. `includeTransfer: true, includeBundler3: true`로 approve/transfer/Bundler3를 선택하고 원본 hash → 임시 strict Registry → exact index·inline/ref·JCS → 실제 WASM install → 기존 worker transaction route를 연결한다. callkey **9개**는 approve `3-ref` 4개·transfer `3-ref` 4개·Bundler3 inline 1개이며 typed/selector index는 0개다. 서로 다른 bundle/digest **3개**와 별도 `bundles/` 파일 **2개**를 구분한다. concrete 부모를 USDC token 목록으로 네 체인에 확장하지 않는다. 새 옵션의 기본값은 false이며 명시 선택에만 `bundler3Source`를 추가하고 기존 기본값·반환·실패 정리를 보존한다.
+
+Call tuple `(to,data,value,skipRevert,callbackHash)`의 순서·동적 offset/length/padding과 고정 calldata를 독립 검산한다. 자식별 to의 실제 approve/transfer에서 token·spender/recipient·수량 `1234567`/`2^200+12345`·전체 Action/meta를 대조한다. 부모 value `999`와 자식 `17/19`·큰 uint256을 구분한다. 단독/조합·역순/반복·flags 변형, known/미등록 target·selector 혼합 및 전부 Unknown, 0/1/2/3바이트 child, empty/64/65, 등록된 malformed 첫째/마지막 child와 skipRevert false/true, 외부 ABI malformed 10개, 추가 바이트 허용, 부모 routing miss를 포함한다. 여섯 설치 상태와 같은 프로세스의 정상/오류/미지원 교대도 검사한다. 기대값은 실제 WASM 출력에서 생성하지 않았다.
+
+**현행 오류·정보 보존 범위:** 짧거나 미등록인 Call[] child는 각 target·원문 calldata·value의 Unknown으로 보존하며 self의 짧은 child 오류와 통일하지 않는다. all-unknown은 순서를 유지한 Multicall이고 empty·65개·등록된 malformed는 전체 오류다. source note/Rust 주석의 오래된 “skip” 문구보다 실제 `process_call_legs` 구현을 따른다. skipRevert/callbackHash는 ABI 입력으로 파싱되지만 해당 처리 함수가 적용/검증하지 않으므로 true가 decoder 오류를 숨기지 않고 nonzero hash가 callback 실행·인증을 의미하지 않는다. 최상위 meta 아래에는 child ActionBody만 존재하며 known body에 Call.value·flags·내부 meta/decoder ID를 추가하지 않는다. Unknown의 value 보존도 실제 EVM 자금 전송·계약 실행 성공의 증거가 아니다.
+
+**정적 검토·사용자 검증:** 실제 세 원본의 바이트/JCS 기대값, 고정 ABI·수량·10개 malformed outer 변형·flags 출력 관계, source별 ref/inline 분기를 읽어 대조했다. 새 test/helper의 `node --check`, JSON 파싱·고유 case ID·안전 정수 literal, `git diff --check`, 사용자 Bash/Python 구문을 검사했다. 기존 여덟 test·일곱 fixture·worker **16파일**은 `9923487`와 바이트 동일하며 기존 selection 항목을 보존한다. Rust·schema·Cargo·빌드 입력 **1279파일**이 `e487805`와 같고 JS/WASM hash가 검증된 쌍과 동일하여 재빌드·설치를 요구하지 않는다. [README](../../fixtures/decoder-policy/README.md#dec-06b-사용자가-직접-실행할-검증-명령)의 **Call[] 개별 → 기존 self 포함 통합**을 사용자가 실행하고 실제 결과를 기록한다. 시험·빌드·Git 쓰기는 에이전트가 실행하지 않았다.
+
+기존 Native Call[] 시험의 synthetic child/해석 후 JSON 입력과 TS mock installer/WASM 사전 설치 시험은 참고 근거이며 실제 부모 원본 → Registry → outer ABI → WASM 연결의 대체물이 아니다. 새 Node 시험도 실제 bundle을 사전 설치하므로 호스트의 동적 발견·설치를 검증하지 않는다. manifest의 `max_depth: 4`는 현재 `reenter(Call[])` callback 재귀에만 읽히며 06b는 callback 재귀·public route 재진입의 전역 깊이 계약을 검증하지 않는다.
+
+**06c는 별도 미구현 단계**다. 06b 사용자 결과 확인 후 재귀 문맥·서로 다른 경로의 한도 우회·callback 생략을 보완한다. **해석한 호출과 순서 보존 + 남은 구간 Unknown/한도 사유**라는 기존 결정은 유지하고 새로운 제한값·정확한 wire/complete/partial·진단 코드·호출 경로/decoder ID·소비자 호환만 구체 입력/현재 결과/영향 파일/권장안과 함께 확정한다. 현재 없는 진단을 06b 기대값에 넣거나 Permit2 Batch에 새 multicall 정책을 자동 적용하지 않는다. 06c까지 구현·사용자 검증해야 DEC-06 전체 완료이며 Core API·정책 allow/warn/deny·RPC·서명·SDK 이관·DEC-07은 이번 범위 밖이다. 세부 원본/JCS·사례·한계는 [coverage](../../fixtures/decoder-policy/coverage.md#dec-06b--call-연결과-현재-한계)를 따른다.
 
 ### D3. 정책 콘텐츠와 manifest 정리
 
