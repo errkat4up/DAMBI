@@ -1,6 +1,8 @@
 # Decoder 기준 시험 커버리지
 
-**DEC-06b 최신 상태:** Call[] 연결 구현·정적 검토 완료, 사용자 실행 대기. 요청 43개 + 구조 6개 = **49개**, 기존 514개 포함 통합 **563개 정의**이며 통과 수가 아니다. DEC-06a는 검증·분리 커밋 완료, 06c는 별도 미구현이다. [06b 상세](#dec-06b--call-연결과-현재-한계).
+**DEC-06c·DEC-06 검증 상태:** 구현·정적 검토·사용자 검증 완료. self·Call[]·callback이 요청별 깊이/노드 예산과 진단을 공유하며 미해석 구간은 Unknown으로 보존한다. 실행 근거는 [README 검증 기록](README.md#dec-06c--사용자-검증-완료-dec-06-완료)을 따른다. 아래 06a/06b는 기존 기준선의 범위 기록이며 DEC-07은 미착수다.
+
+**DEC-06b 구현 당시 상태:** Call[] 연결 구현·정적 검토 완료, 사용자 실행 대기. 요청 43개 + 구조 6개 = **49개**, 기존 514개 포함 통합 **563개 정의**이며 통과 수가 아니다. DEC-06a는 검증·분리 커밋 완료, 06c는 별도 미구현이다. [06b 상세](#dec-06b--call-연결과-현재-한계).
 
 **DEC-06a 최신 상태:** 성공 로그 `AsBmk6`에서 **self 48/48·통합 514/514 사용자 재실행 검증 완료**. 최초 실패 기록은 보존한다. DEC-05 기록 `56ece47`·06a 구현 `9923487`의 실제 분리 커밋과 성공 로그 입력 대응을 확인했다. 06b는 이번 별도 변경으로 진행하며 06c는 미구현이다. 상세 범위는 [DEC-06a](#dec-06a--self-multicall-연결과-현재-한계)를 따른다.
 
@@ -382,13 +384,13 @@ Batch **108/108·통합 466/466**의 실행 근거와 hash는 [README](README.md
 
 **깊이·후속 범위:** 실제 self manifest의 `max_depth: 3`을 `build_multicall_recurse_body`는 읽지 않는다. 자식마다 public route로 재진입하며 현재 직접 적용되는 제한은 단계별 자식 64개다. 작은 깊이 2/3/4의 현행 동작을 관찰하며 한도 구현 완료로 표시하지 않는다. TS의 self 사전 설치는 직계 selector만 검색하고 별도 `MAX_REENTER_DEPTH = 4`는 Call[]의 `installCallTree`에 적용된다. bundle을 모두 준비한 Node 시험은 호스트의 동적 발견·설치를 검증하지 않는다.
 
-06b Call[]는 **구현·정적 검토 완료, 사용자 실행 대기**다. 실제 Morpho Bundler3 원본의 to/data/value·approve/transfer·순서/미지원/malformed/empty/64·65를 별도 49개 정의로 작성했다. [06b 상세 기록](#dec-06b--call-연결과-현재-한계)을 따른다.
+**06a 당시 후속 계획:** 06b Call[]는 **구현·정적 검토 완료, 사용자 실행 대기**다. 실제 Morpho Bundler3 원본의 to/data/value·approve/transfer·순서/미지원/malformed/empty/64·65를 별도 49개 정의로 작성했다. [06b 상세 기록](#dec-06b--call-연결과-현재-한계)을 따른다.
 
-06c는 **미구현·06b 사용자 검증 후 진행**한다. self·Call[] 재진입·callback 재귀 문맥과 제한 전달, callback 한도에서 내용을 생략하는 분기를 보완한다. **해석한 호출과 순서를 보존하고 남은 구간을 Unknown 및 한도 사유로 남긴다**는 사용자 결정은 확정돼 있다. 새 제한값·wire/진단 코드·호출 경로·decoder ID·complete/partial 및 기존 소비자 호환만 구체 입력/현재 결과/영향 파일/권장안과 함께 결정한다. 읽지 않은 내부 내용을 추측하지 않고 Permit2 Batch에 새 multicall 정책을 자동 적용하지 않는다. 06c까지 구현·사용자 검증을 마쳐야 DEC-06 전체 완료다.
+**06a 당시 후속 계획:** 06c는 **미구현·06b 사용자 검증 후 진행**한다. self·Call[] 재진입·callback 재귀 문맥과 제한 전달, callback 한도에서 내용을 생략하는 분기를 보완한다. **해석한 호출과 순서를 보존하고 남은 구간을 Unknown 및 한도 사유로 남긴다**는 사용자 결정은 확정돼 있다. 새 제한값·wire/진단 코드·호출 경로·decoder ID·complete/partial 및 기존 소비자 호환만 구체 입력/현재 결과/영향 파일/권장안과 함께 결정한다. 읽지 않은 내부 내용을 추측하지 않고 Permit2 Batch에 새 multicall 정책을 자동 적용하지 않는다. 06c까지 구현·사용자 검증을 마쳐야 DEC-06 전체 완료다.
 
 ## DEC-06b — Call[] 연결과 현재 한계
 
-**구현·정적 검토 완료, 사용자 실행 대기.** [`multicall-call-array.cases.json`](multicall-call-array.cases.json)의 요청 **43개**(성공 envelope 기대 25·오류 기대 18)와 [`multicall-call-array.test.mjs`](multicall-call-array.test.mjs)의 구조 **6개**로 **49개 정의**, 기존 514개 포함 통합 **563개 정의**다. 사용자 실행 전이므로 통과 수가 아니다. 06a 실제 구현 커밋 `9923487`과 성공 로그 입력을 먼저 확인했으며, 기존 여덟 test·일곱 case fixture·worker를 보존했다. 실제 빌드·시험은 [README 명령](README.md#dec-06b-사용자가-직접-실행할-검증-명령)으로 사용자가 수행한다.
+**06b 구현 당시 기록: 구현·정적 검토 완료, 사용자 실행 대기.** [`multicall-call-array.cases.json`](multicall-call-array.cases.json)의 요청 **43개**(성공 envelope 기대 25·오류 기대 18)와 [`multicall-call-array.test.mjs`](multicall-call-array.test.mjs)의 구조 **6개**로 **49개 정의**, 기존 514개 포함 통합 **563개 정의**다. 사용자 실행 전이므로 통과 수가 아니다. 06a 실제 구현 커밋 `9923487`과 성공 로그 입력을 먼저 확인했으며, 기존 여덟 test·일곱 case fixture·worker를 보존했다. 실제 빌드·시험은 [README 명령](README.md#dec-06b-사용자가-직접-실행할-검증-명령)으로 사용자가 수행한다.
 
 | 실제 원본 | 고정 입력 |
 | --- | --- |
@@ -434,4 +436,14 @@ Batch **108/108·통합 466/466**의 실행 근거와 hash는 [README](README.md
 
 **출력 정보의 한계:** 최상위 Multicall Action/meta 하나 아래에 자식 ActionBody만 들어간다. known ERC-20 body에는 `Call.value`·skipRevert·callbackHash·내부 meta/decoder ID를 새 필드로 추가하지 않는다. Unknown에는 원소별 target/data/value가 남으며 calldata가 짧아도 금액을 삭제하지 않는다. 정적 코드 대조로 tuple `[2]`의 `Call.value`가 자식 route에 전달됨을 확인했고 출력에서 직접 값 보존을 검사하는 대상은 Unknown이다. 현재 approve/transfer는 native value를 소비하지 않으므로 이 시험으로 모든 known value 소비 경로를 보증하지 않는다. 이 보존은 실제 value 전송이나 계약 실행 성공의 증거가 아니다. skipRevert/callbackHash는 ABI 입력으로 파싱되지만 현재 `process_call_legs`가 읽어 검증하거나 오류 동작에 적용하지 않는다. callbackHash가 nonzero라는 사실만으로 callback 내용을 얻거나 인증한 것으로 설명하지 않는다.
 
-**06c 구분:** manifest `max_depth: 4`는 `reenter(Call[])` callback 재귀에만 전달된다. 이 06b는 callback 재귀를 시험하지 않고 public route 재진입의 전역 깊이 제한·TS 사전 설치 한도·완전한 정보 보존이 구현됐다고 주장하지 않는다. 다음 단계는 요청별 재귀 문맥·서로 다른 경로의 한도 우회·callback 한도에서 내용 생략을 보완하고 **해석한 호출과 순서 보존 + 남은 구간 Unknown/한도 사유**라는 기존 사용자 결정을 구현하는 것이다. 새로운 제한값·정확한 wire/complete/partial·안정 진단 코드·경로/decoder ID·기존 소비자 호환은 구체 사례와 영향 파일을 근거로 확정한다. 현재 없는 진단을 06b 정상 기대값에 넣지 않고 읽지 않은 내부 내용을 추측하지 않으며 Permit2 Batch에 새 multicall 정책을 자동 적용하지 않는다. **06c까지 구현·사용자 검증을 마쳐야 DEC-06 전체 완료**다.
+**06b 당시의 06c 후속 범위:** manifest `max_depth: 4`는 `reenter(Call[])` callback 재귀에만 전달된다. 이 06b는 callback 재귀를 시험하지 않고 public route 재진입의 전역 깊이 제한·TS 사전 설치 한도·완전한 정보 보존이 구현됐다고 주장하지 않는다. 다음 단계는 요청별 재귀 문맥·서로 다른 경로의 한도 우회·callback 한도에서 내용 생략을 보완하고 **해석한 호출과 순서 보존 + 남은 구간 Unknown/한도 사유**라는 기존 사용자 결정을 구현하는 것이다. 새로운 제한값·정확한 wire/complete/partial·안정 진단 코드·경로/decoder ID·기존 소비자 호환은 구체 사례와 영향 파일을 근거로 확정한다. 현재 없는 진단을 06b 정상 기대값에 넣지 않고 읽지 않은 내부 내용을 추측하지 않으며 Permit2 Batch에 새 multicall 정책을 자동 적용하지 않는다. **06c까지 구현·사용자 검증을 마쳐야 DEC-06 전체 완료**다.
+
+## DEC-06c — 달라진 지원 범위와 제한
+
+**사용자 검증 완료. DEC-06 전체 완료.** 실제 Registry/WASM 연결, 재귀·한도 경계와 교대 요청, TS route→audit의 진단 전달 및 구형 응답의 필드 부재 보존을 사용자 실행으로 확인했다. 실행 수치·로그는 [README 검증 기록](README.md#dec-06c--사용자-검증-완료-dec-06-완료)을 따른다. 아래 지원 범위·한계는 유지하며 DEC-07은 미착수다.
+
+- self 깊이 3과 Call[] 깊이 4를 요청 전체의 깊이 4·256개 노드 상한 아래에서 실제 적용한다. self/Call[]/callback 전환이 예산을 초기화하지 않는다. 각 배열 65번째부터는 오류 대신 원문 Unknown+`child_limit`로 보존하고 앞 64개 결과를 유지한다.
+- 성공한 multicall/callback transaction에만 `decoding`의 complete/partial과 원본 경로·사유·decoder ID를 제공한다. 미등록·짧은 Call[] child·알려진 decoder의 Unknown도 partial이다. self의 짧은 child와 읽은 malformed ABI/emit/필수 해석 오류는 계속 전체 오류다.
+- 실제 GA1 FlashLoan(reenter_only)·SupplyCollateral manifest의 outer ABI→route→callback 전개를 추가한다. 직접 callback route와 nested callback 모두 처리하며, 한도에서 callback 원문과 제공 호출의 target/value 문맥을 보존한다. raw callback 자체의 target/value를 추측하지 않는다.
+- 기존 self `nested-depth-4`의 깊이 4 자식과 self/Call[] `children-65` 기대값이 승인 계약에 따라 바뀐다. 정상 multicall에도 complete 진단 객체를 검사하고 Unknown 진단은 설치 조합에 맞춰 검사한다. typed·Permit2 Batch 및 단순 transaction의 기존 응답은 유지한다.
+- 256은 루트·callback 구간을 포함한 해석 노드 예산이다. ABI 전체 decode 메모리나 미해석 tail 출력 크기를 제한하지 않으며 기존 JSON 입력 4 MiB 경계는 그대로다. TS의 동적 bundle 발견/사전 설치 한도는 이 WASM 시험 범위 밖이다.

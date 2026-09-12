@@ -11,14 +11,15 @@
  *      `declarative_route_request_v3_json`. The engine decodes the raw
  *      calldata using the bridge-resolved bundle's `abi_fragment.abi` and
  *      emits the PDF FSM `policy_transition::action::Action` tree.
- *   4. Return `{ actions, decoderId }`. The caller (orchestrator in
- *      `service-worker/orchestrator.ts`) plugs these into the audit trail.
+ *   4. Return `{ actions, decoderId }` plus decoding metadata when present.
+ *      The caller (`service-worker/orchestrator.ts`) adds it to the audit trail.
  */
 
 import {
   EngineError,
   declarativeRouteRequestV3,
   type DeclarativeRouteRequestV3Result,
+  type TransactionDecoding,
 } from "../wasm-bridge";
 import type { V3Bundle } from "./bundle-schema";
 import { extractSelector } from "./declarative-decode";
@@ -46,6 +47,7 @@ const AGNOSTIC_SELECTORS = new Set<string>(["0xa22cb465"]);
 export interface DeclarativeRouteV3Hit {
   actions: Record<string, unknown>[];
   decoderId: string;
+  decoding?: TransactionDecoding;
 }
 
 export type DeclarativeRouteV3Outcome =
@@ -497,6 +499,7 @@ export async function tryDeclarativeRouteV3(args: {
     value: {
       actions: result.actions,
       decoderId: result.decoder_id,
+      ...(result.decoding !== undefined ? { decoding: result.decoding } : {}),
     },
   };
 }

@@ -151,16 +151,22 @@ function assertExpected(actual, expected) {
   if (expected.error_kind) {
     assert.deepEqual(Object.keys(actual).sort(), ["data", "error", "ok"]);
     assert.equal(actual.ok, false, JSON.stringify(actual));
-    assert.equal(actual.data, null, "Malformed/limit failures must not become partial success or Unknown");
+    assert.equal(actual.data, null, "Malformed failures must not become partial success or Unknown");
     assert.deepEqual(Object.keys(actual.error).sort(), ["kind", "message"]);
     assert.equal(actual.error.kind, expected.error_kind);
     assert.equal(typeof actual.error.message, "string");
     assert.ok(actual.error.message.includes(expected.message_includes), actual.error.message);
   } else {
-    // Entire Action + meta + route envelope, including absence of invented
-    // reason/path/complete/partial/child decoder metadata and refund amounts.
+    // Compare the entire envelope, including exact diagnostics for recursive
+    // results and their absence on direct mint/refund routes.
+    assert.equal(Object.hasOwn(expected, "decoding"), expected.action.body.domain === "multicall");
     assert.deepEqual(actual, {
-      ok: true, data: { actions: [expected.action], decoder_id: expected.decoder_id }, error: null,
+      ok: true,
+      data: {
+        actions: [expected.action], decoder_id: expected.decoder_id,
+        ...(Object.hasOwn(expected, "decoding") ? { decoding: expected.decoding } : {}),
+      },
+      error: null,
     });
   }
 }
@@ -290,14 +296,29 @@ test("fixed bytes[] offsets, lengths, padding, nested order and precise malforme
       [body] = body.actions;
     }
     assert.deepEqual(inspectArray(data), [mint, refund]);
-    assert.deepEqual(body.actions, [requestCase("mint-direct").expected.action.body,
-      requestCase("refund-direct").expected.action.body]);
+    assert.deepEqual(body.actions, depth === 4
+      ? [mint, refund].map((calldata) => ({
+        domain: "unknown", target: requestCase("nested-depth-4").input.to,
+        chain: "eip155:1", calldata, value: "0x0",
+      }))
+      : [requestCase("mint-direct").expected.action.body,
+        requestCase("refund-direct").expected.action.body]);
   }
   assert.deepEqual(inspectArray(requestCase("refund-mint").input.calldata), [refund, mint]);
   assert.deepEqual(inspectArray(requestCase("repeated-calls").input.calldata), [mint, refund, mint, refund]);
   for (const count of [64, 65]) {
     assert.deepEqual(inspectArray(requestCase(`children-${count}`).input.calldata), Array(count).fill(refund));
   }
+  const capped = requestCase("children-65").expected;
+  assert.deepEqual(capped.action.body.actions.slice(0, 64), requestCase("children-64").expected.action.body.actions);
+  assert.deepEqual(capped.action.body.actions[64], {
+    domain: "unknown", target: requestCase("children-65").input.to,
+    chain: "eip155:1", calldata: refund, value: "0x0",
+  });
+  assert.deepEqual(capped.decoding, {
+    status: "partial",
+    diagnostics: [{ code: "child_limit", path: [{ kind: "self", index: 64 }], decoder_id: null }],
+  });
   for (const count of [0, 1, 3]) {
     assert.deepEqual(inspectArray(requestCase(`short-child-${count}`).input.calldata), [refund, `0x${"ab".repeat(count)}`]);
   }
@@ -345,12 +366,16 @@ test("installed and omitted child bundles distinguish known bodies, Unknown legs
       hasMint ? mint.expected.action.body : unknown(mint.input.calldata),
       hasRefund ? refund.expected.action.body : unknown(refund.input.calldata),
     ];
+    const diagnostics = [hasMint, hasRefund].flatMap((present, index) => present ? [] : [{
+      code: "unregistered_call", path: [{ kind: "self", index }], decoder_id: null,
+    }]);
+    expected.decoding = { status: diagnostics.length ? "partial" : "complete", diagnostics };
     assertExpected(resultById(scenario, pair.id), hasParent ? expected : miss);
   }
   assertExpected(resultById(installed, pair.id), pair.expected);
 });
 
-test("one WASM process alternates success, malformed, unsupported and limit errors without state leakage", () => {
+test("one WASM process alternates complete, partial, malformed and unsupported results without state leakage", () => {
   for (const entry of alternating) assertExpected(resultById(installed, entry.id), entry.expected);
   assert.deepEqual(resultById(installed, alternating[0].id),
     resultById(installed, alternating.at(-1).id));

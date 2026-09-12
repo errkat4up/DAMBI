@@ -322,23 +322,75 @@ pub struct TypedDataValidationV4Dto {
     pub signature_verification: &'static str,
 }
 
+/// A position in the original transaction call tree, independent of emitted
+/// Action nesting. Callback bytes have no selector or independent target/value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TransactionCallPathDto {
+    #[serde(rename = "self")]
+    SelfCall {
+        index: usize,
+    },
+    Call {
+        index: usize,
+    },
+    Callback,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransactionDiagnosticCodeDto {
+    DepthLimit,
+    ChildLimit,
+    NodeLimit,
+    UnregisteredCall,
+    ShortCalldata,
+    RouteNotApplicable,
+    UninterpretedAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TransactionDiagnosticDto {
+    pub code: TransactionDiagnosticCodeDto,
+    pub path: Vec<TransactionCallPathDto>,
+    /// None means no decoder was matched/looked up. Callback segments identify
+    /// the manifest that supplied the opaque callback, not a guessed child ID.
+    pub decoder_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransactionDecodingStatusDto {
+    Complete,
+    Partial,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TransactionDecodingDto {
+    pub status: TransactionDecodingStatusDto,
+    pub diagnostics: Vec<TransactionDiagnosticDto>,
+}
+
 /// Result returned by `declarative_route_request_v3_json` on success.
 ///
-/// `actions` is the `Vec<policy_transition::action::Action>` produced for the
-/// raw Tx — Phase 4B emits a single `ActionBody::Unknown` stub. `decoder_id`
-/// echoes the bundle id when a registry match exists (Phase 4D+); empty
-/// string when no match (stub fallback).
+/// `actions` contains the decoded Actions and `decoder_id` identifies the
+/// matched root manifest. The legacy v3 typed route also uses this DTO but
+/// never adds transaction traversal metadata.
 #[derive(Debug, Clone, Serialize)]
 pub struct DeclarativeRouteRequestV3ResultDto {
     pub actions: Vec<policy_transition::action::Action>,
     pub decoder_id: String,
     /// When the matched manifest declares `emit.reenter_callback_arg`, the raw
     /// `bytes` value of that arg — an `abi.encode(Call[])` re-entry callback the
-    /// caller (a `multicall_call_array` decode) recurses into. Generic: any
-    /// bundler-adapter that nests a `Call[]` in a leg arg declares the arg name in
-    /// its manifest, so the engine carries no per-protocol selector list.
+    /// transaction traversal expands using the same request context. Kept for
+    /// response compatibility; callback decoding is manifest-driven and does
+    /// not require a per-protocol selector list.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reenter_callback: Option<String>,
+    /// Present only when transaction multicall/callback traversal was active.
+    /// Shared typed routes leave this absent; absence does not mean complete.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decoding: Option<TransactionDecodingDto>,
 }
 
 /// One entry in the base alias table surfaced through `get_alias_table_json`.

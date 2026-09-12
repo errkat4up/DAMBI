@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { AuditEntry } from "../storage";
+import type { TransactionDecoding } from "../wasm-bridge";
 import {
   RequestType,
   isUntypedSignature,
@@ -669,6 +671,9 @@ describe("orchestrator", () => {
       multicallAction.meta,
       multicallAction.meta,
     ]);
+    expect(mocks.auditAppend).toHaveBeenCalledOnce();
+    const [audit] = mocks.auditAppend.mock.calls[0] as unknown as [AuditEntry];
+    expect(audit.declarativeV3).not.toHaveProperty("decoding");
   });
 
   it("phaseA: a failing inner child blocks the whole multicall (deny-overrides)", async () => {
@@ -712,6 +717,14 @@ describe("orchestrator", () => {
 
   it("phaseA/N2-N3: an unknown inner child WARN-closes the batch (not pass), siblings still evaluate", async () => {
     const unknownChild = { domain: "unknown", target: ROUTER, calldata: "0x" };
+    const decoding: TransactionDecoding = {
+      status: "partial",
+      diagnostics: [{
+        code: "short_calldata",
+        path: [{ kind: "call", index: 1 }],
+        decoder_id: null,
+      }],
+    };
     const mixed = {
       meta: multicallAction.meta,
       body: { domain: "multicall", actions: [swapChild, unknownChild] },
@@ -721,6 +734,7 @@ describe("orchestrator", () => {
       value: {
         actions: [mixed],
         decoderId: "registry-v2.uniswap/universal-router/execute",
+        decoding,
       },
     });
 
@@ -742,6 +756,16 @@ describe("orchestrator", () => {
       (c) => (c[0] as { action: unknown }).action,
     );
     expect(evaluatedBodies).toEqual([mixed.body, swapChild]);
+    expect(mocks.auditAppend).toHaveBeenCalledOnce();
+    const [audit] = mocks.auditAppend.mock.calls[0] as unknown as [AuditEntry];
+    expect(audit.declarativeV3).toStrictEqual({
+      outcome: "hit",
+      nature: "onchain_tx",
+      decoder_id: "registry-v2.uniswap/universal-router/execute",
+      action_count: 1,
+      decoding,
+    });
+    expect(audit.declarativeV3?.decoding).toBe(decoding);
   });
 
   it("phaseA/N3: [deny-leg, unknown-leg] still FAILS — deny outranks the partial-decode warn", async () => {

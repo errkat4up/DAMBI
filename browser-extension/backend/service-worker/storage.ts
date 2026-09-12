@@ -1,4 +1,5 @@
 import Browser from "webextension-polyfill";
+import type { TransactionDecoding } from "./wasm-bridge";
 
 const PENDING_KEY = "requests:pending";
 const AUDIT_KEY = "requests:audit";
@@ -55,6 +56,7 @@ export interface AuditEntry {
     decoder_id?: string;
     action_count?: number;
     reason?: string;
+    decoding?: TransactionDecoding;
   };
   /**
    * Which pipeline produced the verdict.

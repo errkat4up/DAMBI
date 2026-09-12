@@ -40,6 +40,7 @@ async function copyPinnedFile(root, selected) {
 export async function buildRegistry(selection, {
   includeTransfer = false, includePermit = false, includePermit2Single = false,
   includePermit2Batch = false, includeNfpmSelf = false, includeBundler3 = false,
+  includeMorphoCallbacks = false,
 } = {}) {
   assert.equal(typeof includeTransfer, "boolean");
   assert.equal(typeof includePermit, "boolean");
@@ -47,6 +48,7 @@ export async function buildRegistry(selection, {
   assert.equal(typeof includePermit2Batch, "boolean");
   assert.equal(typeof includeNfpmSelf, "boolean");
   assert.equal(typeof includeBundler3, "boolean");
+  assert.equal(typeof includeMorphoCallbacks, "boolean");
   const tsx = join(registryRoot, "node_modules/.bin/tsx");
   await access(tsx).catch(() => {
     throw new Error("Registry dependencies missing; run npm ci --prefix registryV2 first.");
@@ -190,6 +192,25 @@ export async function buildRegistry(selection, {
         strategy: "multicall_call_array", recurse_arg: "bundle", max_depth: 4,
       });
     }
+    const morphoCallbackSources = {};
+    if (includeMorphoCallbacks) {
+      for (const [key, selected, id, selector, strategy] of [
+        ["morphoFlashLoanSource", selection.morpho_flash_loan_manifest, "1-morphoFlashLoan", "0xe2975912", "reenter_only"],
+        ["morphoSupplyCollateralSource", selection.morpho_supply_collateral_manifest, "1-morphoSupplyCollateral", "0xca463673", "single_emit"],
+      ]) {
+        const callbackSource = await copyPinnedFile(root, selected);
+        assert.equal(callbackSource.id, `morpho/general-adapter1/${id}@1.0.0`);
+        // Both originals declare this concrete GeneralAdapter1 deployment.
+        // Token fixtures continue to expand only the standard ERC-20 sources.
+        assert.deepEqual(callbackSource.match, {
+          selector,
+          chain_to_addresses: { "1": ["0x4a6c312ec70e8747a587ee860a0353cd42be0ae0"] },
+        });
+        assert.equal(callbackSource.emit.strategy, strategy);
+        assert.equal(callbackSource.emit.reenter_callback_arg, "data");
+        morphoCallbackSources[key] = callbackSource;
+      }
+    }
     assert.equal(selection.tokens.length, 4, "DEC-01 pins one token per chain");
     const tokens = [];
     for (const selected of selection.tokens) {
@@ -211,7 +232,7 @@ export async function buildRegistry(selection, {
         maxBuffer: 4 * 1024 * 1024,
       });
     } catch (error) {
-      throw new Error(`${includeBundler3 ? "DEC-06b" : includeNfpmSelf ? "DEC-06a" : includePermit2Batch ? "DEC-05b" : includePermit2Single ? "DEC-05a" : includePermit ? "DEC-04a" : includeTransfer ? "DEC-03" : "DEC-01"} Registry build failed; all output is discarded.\n${error.stderr ?? ""}\n${error.message}`, { cause: error });
+      throw new Error(`${includeMorphoCallbacks ? "DEC-06c" : includeBundler3 ? "DEC-06b" : includeNfpmSelf ? "DEC-06a" : includePermit2Batch ? "DEC-05b" : includePermit2Single ? "DEC-05a" : includePermit ? "DEC-04a" : includeTransfer ? "DEC-03" : "DEC-01"} Registry build failed; all output is discarded.\n${error.stderr ?? ""}\n${error.message}`, { cause: error });
     }
     return {
       root, source, tokens, cleanup,
@@ -221,6 +242,7 @@ export async function buildRegistry(selection, {
       ...(includePermit2Batch ? { permit2BatchSource } : {}),
       ...nfpmSources,
       ...(includeBundler3 ? { bundler3Source } : {}),
+      ...morphoCallbackSources,
     };
   } catch (error) {
     await cleanup();

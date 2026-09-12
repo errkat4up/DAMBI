@@ -26,6 +26,7 @@ vi.mock("../wasm-bridge", () => ({
 import { tryDeclarativeRouteV3 } from "../adapter-loader/declarative-route";
 import type { V3Bundle } from "../adapter-loader/bundle-schema";
 import type { InstallDeclarativeV3Result } from "../adapter-loader/declarative-adapter-loader";
+import type { TransactionDecoding } from "../wasm-bridge";
 
 const NFPM_BASE = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
 const nfpmMulticallAbi = [
@@ -163,6 +164,8 @@ describe("tryDeclarativeRouteV3", () => {
     });
 
     expect(outcome.kind).toBe("hit");
+    if (outcome.kind !== "hit") throw new Error("expected route hit");
+    expect(outcome.value).not.toHaveProperty("decoding");
     expect(mocks.installDeclarativeBundleV3).toHaveBeenCalledTimes(4);
     expect(
       mocks.installDeclarativeBundleV3.mock.calls.map(
@@ -171,6 +174,60 @@ describe("tryDeclarativeRouteV3", () => {
     ).toEqual(["0xac9650d8", "0xfc6f7865", "0x49404b7c", "0xdf2ab5bb"]);
     expect(mocks.declarativeRouteRequestV3).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    { status: "complete", diagnostics: [] },
+    {
+      status: "partial",
+      diagnostics: [
+        {
+          code: "depth_limit",
+          path: [
+            { kind: "self", index: 0 },
+            { kind: "call", index: 1 },
+            { kind: "callback" },
+          ],
+          decoder_id: "morpho/bundler3/1-multicall@1.0.0",
+        },
+        {
+          code: "unregistered_call",
+          path: [{ kind: "self", index: 1 }],
+          decoder_id: null,
+        },
+      ],
+    },
+  ] satisfies TransactionDecoding[])(
+    "preserves $status decoding metadata returned by WASM",
+    async (decoding) => {
+      mocks.installDeclarativeBundleV3.mockResolvedValue(
+        installed(nfpmMulticallBundle),
+      );
+      const actions = [{ body: { domain: "multicall", actions: [] } }];
+      mocks.declarativeRouteRequestV3.mockResolvedValue({
+        decoder_id: nfpmMulticallBundle.id,
+        actions,
+        decoding,
+      });
+
+      const outcome = await tryDeclarativeRouteV3({
+        chainId: 8453,
+        from: "0x676fa5b94067c2be14bc025df6c5c80dedf49a54",
+        to: NFPM_BASE,
+        calldataHex: encodeFunctionData({
+          abi: nfpmMulticallAbi,
+          functionName: "multicall",
+          args: [[]],
+        }),
+      });
+
+      expect(outcome).toEqual({
+        kind: "hit",
+        value: { actions, decoderId: nfpmMulticallBundle.id, decoding },
+      });
+      if (outcome.kind !== "hit") throw new Error("expected route hit");
+      expect(outcome.value.decoding).toBe(decoding);
+    },
+  );
 
   const setApprovalForAllAbi = [
     {

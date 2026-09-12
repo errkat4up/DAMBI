@@ -136,7 +136,9 @@ before(async () => {
   const base = requestCase("approve-transfer");
   direct = directRequests(base);
   // Build a bounded sequence from explicit fixture classifications, always
-  // returning to the identical normal request after each failure or miss.
+  // returning to the identical normal request after each failure, miss or
+  // partial child-limit result. Malformed errors are selected independently
+  // of children-65, which is now a successful partial response.
   const error = fixture.cases.find((entry) => entry.expected.error_kind === "build_multicall_failed"
     && entry.expected.message_includes.includes("leg #"));
   const miss = fixture.cases.find((entry) => entry.expected.error_kind === "no_declarative_v3_mapper");
@@ -182,8 +184,14 @@ function assertExpected(actual, expected) {
     assert.ok(actual.error.message.includes(expected.message_includes), actual.error.message);
   } else {
     // Full envelope and outer Action/meta, not a count of Unknown children.
+    assert.equal(Object.hasOwn(expected, "decoding"), expected.action.body.domain === "multicall");
     assert.deepEqual(actual, {
-      ok: true, data: { decoder_id: expected.decoder_id, actions: [expected.action] }, error: null,
+      ok: true,
+      data: {
+        decoder_id: expected.decoder_id, actions: [expected.action],
+        ...(Object.hasOwn(expected, "decoding") ? { decoding: expected.decoding } : {}),
+      },
+      error: null,
     });
   }
 }
@@ -304,6 +312,13 @@ test("fixed Call[] tuple order, offset origins, lengths, padding and boundary co
   assert.deepEqual(inspectCalls(requestCase("transfer-approve").input.calldata), [...base.calls].reverse());
   assert.deepEqual(inspectCalls(requestCase("repeated-calls").input.calldata), [...base.calls, ...base.calls]);
   for (const count of [64, 65]) assert.equal(inspectCalls(requestCase(`children-${count}`).input.calldata).length, count);
+  const capped = requestCase("children-65");
+  assert.deepEqual(capped.expected.action.body.actions.slice(0, 64), requestCase("children-64").expected.action.body.actions);
+  assert.deepEqual(capped.expected.action.body.actions[64], unknown(capped.calls[64]));
+  assert.deepEqual(capped.expected.decoding, {
+    status: "partial",
+    diagnostics: [{ code: "child_limit", path: [{ kind: "call", index: 64 }], decoder_id: null }],
+  });
   assert.deepEqual(inspectCalls(requestCase("empty-array").input.calldata), []);
   for (const [id, trailer] of [["outer-trailing-byte", "ab"], ["outer-trailing-word", "ab".repeat(32)]]) {
     const entry = requestCase(id);
@@ -400,6 +415,10 @@ test("six isolated installation states distinguish real child Actions, per-call 
     const expected = structuredClone(base.expected);
     expected.action.body.actions = base.calls.map((call, index) =>
       (index === 0 ? hasApprove : hasTransfer) ? base.expected.action.body.actions[index] : unknown(call));
+    const diagnostics = [hasApprove, hasTransfer].flatMap((present, index) => present ? [] : [{
+      code: "unregistered_call", path: [{ kind: "call", index }], decoder_id: null,
+    }]);
+    expected.decoding = { status: diagnostics.length ? "partial" : "complete", diagnostics };
     assertExpected(resultById(scenario, base.id), hasParent ? expected : miss);
   }
 });

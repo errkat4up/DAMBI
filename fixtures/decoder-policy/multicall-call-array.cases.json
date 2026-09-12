@@ -15,8 +15,8 @@
     "Call[] routes each child at its own target. The parent value is 999; child values are independent decimal uint256 values, and Unknown preserves them as minimal hex.",
     "Only outer Action meta survives. Known ERC-20 child bodies do not project value, skipRevert, callbackHash, child meta, or child decoder IDs.",
     "skipRevert and callbackHash are carried in ABI input but are not runtime-validated or applied to error behavior. They do not establish actual EVM execution, native value transfer, or callback execution success.",
-    "Empty array errors; short and unregistered children remain Unknown; registered malformed ABI rejects the whole request; 65 children reject before partial output.",
-    "The manifest max_depth=4 is read for reenter callback recursion only. This fixture does not exercise callback recursion, define a general nested-route depth guarantee, or introduce DEC-06c diagnostics.",
+    "Empty array errors; short and unregistered children remain Unknown with diagnostics; registered malformed ABI rejects the whole request. The first 64 children are interpreted and child index 64 is retained as Unknown with child_limit.",
+    "Recursive successes carry exact decoding status/diagnostics. The shared inherited route depth budget applies to Call[] and callback re-entry; this fixture has no callback recursion, which is covered separately by DEC-06c.",
     "Noncanonical outer ABI cases deliberately use bounded small out-of-range offsets/lengths. Normal child arrays have at most 65 elements. Trailing bytes retain existing permissive ABI behavior."
   ],
   "defaults": {
@@ -99,6 +99,10 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "complete",
+          "diagnostics": []
         }
       }
     },
@@ -161,6 +165,10 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "complete",
+          "diagnostics": []
         }
       }
     },
@@ -243,6 +251,10 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "complete",
+          "diagnostics": []
         }
       }
     },
@@ -325,6 +337,10 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "complete",
+          "diagnostics": []
         }
       }
     },
@@ -447,6 +463,10 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "complete",
+          "diagnostics": []
         }
       }
     },
@@ -529,6 +549,10 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "complete",
+          "diagnostics": []
         }
       },
       "note": "Both flags are present in calldata. Current decoding does not simulate or apply EVM revert handling."
@@ -612,6 +636,10 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "complete",
+          "diagnostics": []
         }
       },
       "note": "Nonzero bytes32 callbackHash is ABI input only; it is not verified, projected, or itself treated as callback calldata."
@@ -695,6 +723,10 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "complete",
+          "diagnostics": []
         }
       }
     },
@@ -791,6 +823,21 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "partial",
+          "diagnostics": [
+            {
+              "code": "short_calldata",
+              "path": [
+                {
+                  "kind": "call",
+                  "index": 1
+                }
+              ],
+              "decoder_id": null
+            }
+          ]
         }
       },
       "note": "Every tuple field has an independently checkable position. The short middle leg preserves its own target/data/uint256 value."
@@ -868,6 +915,21 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "partial",
+          "diagnostics": [
+            {
+              "code": "unregistered_call",
+              "path": [
+                {
+                  "kind": "call",
+                  "index": 1
+                }
+              ],
+              "decoder_id": null
+            }
+          ]
         }
       }
     },
@@ -944,6 +1006,21 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "partial",
+          "diagnostics": [
+            {
+              "code": "unregistered_call",
+              "path": [
+                {
+                  "kind": "call",
+                  "index": 0
+                }
+              ],
+              "decoder_id": null
+            }
+          ]
         }
       }
     },
@@ -1020,6 +1097,21 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "partial",
+          "diagnostics": [
+            {
+              "code": "unregistered_call",
+              "path": [
+                {
+                  "kind": "call",
+                  "index": 1
+                }
+              ],
+              "decoder_id": null
+            }
+          ]
         }
       }
     },
@@ -1090,6 +1182,31 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "partial",
+          "diagnostics": [
+            {
+              "code": "unregistered_call",
+              "path": [
+                {
+                  "kind": "call",
+                  "index": 0
+                }
+              ],
+              "decoder_id": null
+            },
+            {
+              "code": "unregistered_call",
+              "path": [
+                {
+                  "kind": "call",
+                  "index": 1
+                }
+              ],
+              "decoder_id": null
+            }
+          ]
         }
       },
       "note": "Unregistered legs remain ordered Unknown bodies; all-unsupported is not an empty-array error."
@@ -1167,6 +1284,21 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "partial",
+          "diagnostics": [
+            {
+              "code": "unregistered_call",
+              "path": [
+                {
+                  "kind": "call",
+                  "index": 0
+                }
+              ],
+              "decoder_id": null
+            }
+          ]
         }
       },
       "note": "Only the four pinned USDC tokens expand standard manifests; a WETH address with transfer calldata has no installed mapper."
@@ -1224,6 +1356,21 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "partial",
+          "diagnostics": [
+            {
+              "code": "unregistered_call",
+              "path": [
+                {
+                  "kind": "call",
+                  "index": 0
+                }
+              ],
+              "decoder_id": null
+            }
+          ]
         }
       }
     },
@@ -1280,6 +1427,21 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "partial",
+          "diagnostics": [
+            {
+              "code": "short_calldata",
+              "path": [
+                {
+                  "kind": "call",
+                  "index": 0
+                }
+              ],
+              "decoder_id": null
+            }
+          ]
         }
       },
       "note": "Call[] short calldata is Unknown at its own target; it does not reuse self-multicall short-child errors or synthesize native transfer success."
@@ -1337,6 +1499,21 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "partial",
+          "diagnostics": [
+            {
+              "code": "short_calldata",
+              "path": [
+                {
+                  "kind": "call",
+                  "index": 0
+                }
+              ],
+              "decoder_id": null
+            }
+          ]
         }
       },
       "note": "Call[] short calldata is Unknown at its own target; it does not reuse self-multicall short-child errors or synthesize native transfer success."
@@ -1394,6 +1571,21 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "partial",
+          "diagnostics": [
+            {
+              "code": "short_calldata",
+              "path": [
+                {
+                  "kind": "call",
+                  "index": 0
+                }
+              ],
+              "decoder_id": null
+            }
+          ]
         }
       },
       "note": "Call[] short calldata is Unknown at its own target; it does not reuse self-multicall short-child errors or synthesize native transfer success."
@@ -1451,6 +1643,21 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "partial",
+          "diagnostics": [
+            {
+              "code": "short_calldata",
+              "path": [
+                {
+                  "kind": "call",
+                  "index": 0
+                }
+              ],
+              "decoder_id": null
+            }
+          ]
         }
       },
       "note": "Call[] short calldata is Unknown at its own target; it does not reuse self-multicall short-child errors or synthesize native transfer success."
@@ -1590,6 +1797,51 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "partial",
+          "diagnostics": [
+            {
+              "code": "short_calldata",
+              "path": [
+                {
+                  "kind": "call",
+                  "index": 1
+                }
+              ],
+              "decoder_id": null
+            },
+            {
+              "code": "short_calldata",
+              "path": [
+                {
+                  "kind": "call",
+                  "index": 2
+                }
+              ],
+              "decoder_id": null
+            },
+            {
+              "code": "short_calldata",
+              "path": [
+                {
+                  "kind": "call",
+                  "index": 3
+                }
+              ],
+              "decoder_id": null
+            },
+            {
+              "code": "short_calldata",
+              "path": [
+                {
+                  "kind": "call",
+                  "index": 4
+                }
+              ],
+              "decoder_id": null
+            }
+          ]
         }
       }
     },
@@ -2927,6 +3179,10 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "complete",
+          "diagnostics": []
         }
       }
     },
@@ -3397,8 +3653,888 @@
         }
       ],
       "expected": {
-        "error_kind": "build_multicall_failed",
-        "message_includes": "multicall_call_array child count 65 exceeds cap 64"
+        "decoder_id": "morpho/bundler3/1-multicall@1.0.0",
+        "action": {
+          "body": {
+            "domain": "multicall",
+            "actions": [
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_approve",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "spender": "0x00000000000000000000000000000000deadbeef",
+                "amount": "0x12d687"
+              },
+              {
+                "domain": "token",
+                "action": "erc20_transfer",
+                "token": {
+                  "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                  }
+                },
+                "recipient": "0x111122223333444455556666777788889999abcd",
+                "amount": "0x100000000000000000000000000000000000000000000003039"
+              },
+              {
+                "domain": "unknown",
+                "target": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                "chain": "eip155:1",
+                "calldata": "0x095ea7b300000000000000000000000000000000000000000000000000000000deadbeef000000000000000000000000000000000000000000000000000000000012d687",
+                "value": "0x11"
+              }
+            ]
+          },
+          "meta": {
+            "submitted_at": 1700000000,
+            "submitter": "0x000000000000000000000000000000000000aaaa",
+            "nature": {
+              "kind": "onchain_tx",
+              "chain": "eip155:1",
+              "nonce": 7,
+              "gas_limit": "0x493e0",
+              "gas_price": {
+                "value": "0x4a817c800",
+                "source": {
+                  "kind": "oracle_feed",
+                  "provider": "pyth",
+                  "feed_id": "gas/eip155:1"
+                },
+                "synced_at": 1700000000
+              },
+              "value": "0x3e7"
+            }
+          }
+        },
+        "decoding": {
+          "status": "partial",
+          "diagnostics": [
+            {
+              "code": "child_limit",
+              "path": [
+                {
+                  "kind": "call",
+                  "index": 64
+                }
+              ],
+              "decoder_id": null
+            }
+          ]
+        }
       }
     },
     {
@@ -3752,6 +4888,10 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "complete",
+          "diagnostics": []
         }
       },
       "note": "Canonical payload is followed by one extra byte. Existing permissive trailing-byte compatibility remains."
@@ -3835,6 +4975,10 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "complete",
+          "diagnostics": []
         }
       }
     },
@@ -3917,6 +5061,10 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "complete",
+          "diagnostics": []
         }
       }
     },
@@ -3999,6 +5147,10 @@
               "value": "0x3e7"
             }
           }
+        },
+        "decoding": {
+          "status": "complete",
+          "diagnostics": []
         }
       }
     },

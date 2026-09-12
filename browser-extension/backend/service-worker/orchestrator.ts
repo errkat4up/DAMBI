@@ -15,7 +15,12 @@ import { ensureLoaded as ensureNotifySettings, shouldWarnModal } from "./notify-
 import { refreshBadge } from "./mascot-badge";
 import { appendStateDelta } from "./state-delta-storage";
 import { appendDiagnosisContext } from "./diagnosis-context-storage";
-import { EngineError, evaluateActionV2, planActionRpcV2 } from "./wasm-bridge";
+import {
+  EngineError,
+  evaluateActionV2,
+  planActionRpcV2,
+  type TransactionDecoding,
+} from "./wasm-bridge";
 import {
   dispatchCallsV2,
   formatAuditMatched,
@@ -133,6 +138,7 @@ export interface DeclarativeV3AuditMeta {
   decoder_id?: string;
   action_count?: number;
   reason?: string;
+  decoding?: TransactionDecoding;
 }
 
 /**
@@ -1703,6 +1709,9 @@ function auditFromDeclarativeV3Outcome(
       nature,
       decoder_id: outcome.value.decoderId,
       action_count: outcome.value.actions.length,
+      ...(outcome.value.decoding !== undefined
+        ? { decoding: outcome.value.decoding }
+        : {}),
     };
   }
   if (outcome.kind === "miss") {

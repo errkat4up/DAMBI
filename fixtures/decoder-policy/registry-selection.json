@@ -60,5 +60,13 @@
   "bundler3_manifest": {
     "path": "manifests/morpho/bundler3/1-multicall@1.0.0.json",
     "sha256": "0xd909edf6d2f1cf5eeb375042b5f61979b3cd1a1e0505a4fee9352b87d78b2a63"
+  },
+  "morpho_flash_loan_manifest": {
+    "path": "manifests/morpho/general-adapter1/1-morphoFlashLoan@1.0.0.json",
+    "sha256": "0xf46a90a8798f987bdac2e98b139c2a0669fcd4442d2cbf7ef8a50a1f42635a5a"
+  },
+  "morpho_supply_collateral_manifest": {
+    "path": "manifests/morpho/general-adapter1/1-morphoSupplyCollateral@1.0.0.json",
+    "sha256": "0x3927d998c7b9dac6d4ccdb82741d454ecaa75c054ed2c688a3fc6343017cc067"
   }
 }

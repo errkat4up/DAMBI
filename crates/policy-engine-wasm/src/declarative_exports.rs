@@ -31,8 +31,9 @@ use crate::dto::{
     DeclarativeInstallResultDto, DeclarativeRouteRequestV3InputDto,
     DeclarativeRouteRequestV3ResultDto, DeclarativeRouteTypedDataV3InputDto,
     DeclarativeRouteTypedDataV4InputDto, DeclarativeRouteTypedDataV4ResultDto, EngineErrorDto,
-    Envelope, TypedDataRequestV4Dto, TypedDataRoutingV4Dto, TypedDataValidatedV4Dto,
-    TypedDataValidationV4Dto,
+    Envelope, TransactionCallPathDto, TransactionDecodingDto, TransactionDecodingStatusDto,
+    TransactionDiagnosticCodeDto, TransactionDiagnosticDto, TypedDataRequestV4Dto,
+    TypedDataRoutingV4Dto, TypedDataValidatedV4Dto, TypedDataValidationV4Dto,
 };
 use crate::exports::check_input_size;
 use crate::typed_data_validation::{self, TypedDataError};
@@ -46,6 +47,95 @@ use policy_transition::action as v3_action;
 
 const DEFAULT_ARRAY_EMIT_MAX_ELEMENTS: usize = 64;
 const HARD_ARRAY_EMIT_MAX_ELEMENTS: usize = 64;
+
+const MAX_TRANSACTION_DEPTH: usize = 4;
+const MAX_TRANSACTION_NODES: usize = 256;
+const MAX_MULTICALL_CHILDREN: usize = 64;
+
+#[derive(Clone)]
+struct TransactionFrame {
+    path: Vec<TransactionCallPathDto>,
+    depth_limit: usize,
+}
+
+impl TransactionFrame {
+    fn root() -> Self {
+        Self {
+            path: Vec::new(),
+            depth_limit: MAX_TRANSACTION_DEPTH,
+        }
+    }
+
+    fn child(&self, segment: TransactionCallPathDto) -> Self {
+        let mut child = self.clone();
+        child.path.push(segment);
+        child
+    }
+
+    fn with_manifest(mut self, emit: &serde_json::Value) -> Self {
+        let remaining = emit
+            .get("max_depth")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(MAX_TRANSACTION_DEPTH as u64)
+            .min(MAX_TRANSACTION_DEPTH as u64) as usize;
+        self.depth_limit = self.depth_limit.min(self.path.len() + remaining);
+        self
+    }
+}
+
+/// Owned by one public transaction request, never stored in the Registry.
+/// Nodes count dispatch attempts and callback containers, not output bodies or
+/// ABI allocations. Opaque tails still need output work to preserve their bytes.
+struct TransactionTraversal {
+    nodes: usize,
+    active: bool,
+    diagnostics: Vec<TransactionDiagnosticDto>,
+}
+
+impl TransactionTraversal {
+    fn new() -> Self {
+        Self {
+            nodes: 1,
+            active: false,
+            diagnostics: Vec::new(),
+        }
+    }
+
+    fn enter(&mut self, frame: &TransactionFrame) -> Option<TransactionDiagnosticCodeDto> {
+        if frame.path.len() > frame.depth_limit {
+            return Some(TransactionDiagnosticCodeDto::DepthLimit);
+        }
+        if self.nodes >= MAX_TRANSACTION_NODES {
+            return Some(TransactionDiagnosticCodeDto::NodeLimit);
+        }
+        self.nodes += 1;
+        None
+    }
+
+    fn record(
+        &mut self,
+        frame: &TransactionFrame,
+        code: TransactionDiagnosticCodeDto,
+        decoder_id: Option<&str>,
+    ) {
+        self.diagnostics.push(TransactionDiagnosticDto {
+            code,
+            path: frame.path.clone(),
+            decoder_id: decoder_id.map(ToOwned::to_owned),
+        });
+    }
+
+    fn finish(self) -> TransactionDecodingDto {
+        TransactionDecodingDto {
+            status: if self.diagnostics.is_empty() {
+                TransactionDecodingStatusDto::Complete
+            } else {
+                TransactionDecodingStatusDto::Partial
+            },
+            diagnostics: self.diagnostics,
+        }
+    }
+}
 
 /// Reserved selector key for **bare native transfers** (B.3). A tx with EMPTY
 /// calldata (`"0x"` / absent) and `value > 0` has NO 4-byte function selector,
@@ -428,285 +518,307 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
             serde_json::from_str(&input_json).map_err(|error| {
                 EngineErrorDto::new("invalid_input_json", format!("invalid input json: {error}"))
             })?;
+        let mut traversal = TransactionTraversal::new();
+        let mut result = route_transaction(&input, &mut traversal, TransactionFrame::root())?;
+        if traversal.active {
+            result.decoding = Some(traversal.finish());
+        }
+        Ok(result)
+    })();
+    match result {
+        Ok(dto) => Envelope::ok(dto).to_json(),
+        Err(error) => Envelope::<()>::err(error.kind, error.message).to_json(),
+    }
+}
 
-        // ── Parse + normalise ──────────────────────────────────────────────
-        let submitter = parse_v3_address(&input.submitter, "submitter")?;
-        let target = parse_v3_address(&input.to, "to")?;
-        let value = parse_v3_u256(&input.value, "value")?;
-        let gas_limit = parse_v3_u256(&input.gas_limit, "gas_limit")?;
-        let gas_price = parse_v3_u256(&input.gas_price, "gas_price")?;
+/// Internal re-entry keeps the same request budget and absolute call path.
+fn route_transaction(
+    input: &DeclarativeRouteRequestV3InputDto,
+    traversal: &mut TransactionTraversal,
+    frame: TransactionFrame,
+) -> Result<DeclarativeRouteRequestV3ResultDto, EngineErrorDto> {
+    // ── Parse + normalise ──────────────────────────────────────────────
+    let submitter = parse_v3_address(&input.submitter, "submitter")?;
+    let target = parse_v3_address(&input.to, "to")?;
+    let value = parse_v3_u256(&input.value, "value")?;
+    let gas_limit = parse_v3_u256(&input.gas_limit, "gas_limit")?;
+    let gas_price = parse_v3_u256(&input.gas_price, "gas_price")?;
 
-        let chain = V3ChainId::new(format!("eip155:{}", input.chain_id));
-        let submitted_at = V3Time::from_unix(input.submitted_at);
+    let chain = V3ChainId::new(format!("eip155:{}", input.chain_id));
+    let submitted_at = V3Time::from_unix(input.submitted_at);
 
-        // ── Build ActionMeta (OnchainTx nature) ────────────────────────────
-        //
-        // Phase 4B wraps `gas_price` in a stub `LiveField` whose source =
-        // Pyth `gas/eip155:<chain_id>`. The Sync Orchestrator is not wired
-        // into this entry yet — `synced_at` collapses to `submitted_at` and
-        // `ttl`/`confidence` are left at default. Phase 5+ replaces this
-        // stub with a proper LiveField sourced from the Sync layer.
-        let gas_price_live = LiveField::new(
-            gas_price,
-            DataSource::OracleFeed {
-                provider: OracleProvider::Pyth,
-                feed_id: format!("gas/eip155:{}", input.chain_id),
-            },
-            submitted_at,
-        );
+    // ── Build ActionMeta (OnchainTx nature) ────────────────────────────
+    //
+    // Phase 4B wraps `gas_price` in a stub `LiveField` whose source =
+    // Pyth `gas/eip155:<chain_id>`. The Sync Orchestrator is not wired
+    // into this entry yet — `synced_at` collapses to `submitted_at` and
+    // `ttl`/`confidence` are left at default. Phase 5+ replaces this
+    // stub with a proper LiveField sourced from the Sync layer.
+    let gas_price_live = LiveField::new(
+        gas_price,
+        DataSource::OracleFeed {
+            provider: OracleProvider::Pyth,
+            feed_id: format!("gas/eip155:{}", input.chain_id),
+        },
+        submitted_at,
+    );
 
-        let meta = v3_action::ActionMeta {
-            submitted_at,
-            submitter,
-            nature: v3_action::ActionNature::OnchainTx {
-                chain: chain.clone(),
-                nonce: input.nonce,
-                gas_limit,
-                gas_price: gas_price_live,
-                value,
-            },
-        };
+    let meta = v3_action::ActionMeta {
+        submitted_at,
+        submitter,
+        nature: v3_action::ActionNature::OnchainTx {
+            chain: chain.clone(),
+            nonce: input.nonce,
+            gas_limit,
+            gas_price: gas_price_live,
+            value,
+        },
+    };
 
-        // ── Build ActionBody (M2 — v3 manifest lookup + action_builder) ────
-        //
-        // Pipeline:
-        //   1. Look the callkey up in `DECLARATIVE_V3_STATE.bridge` — miss
-        //      surfaces a `no_declarative_v3_mapper` error so the SW caller
-        //      can fail closed or surface the gap.
-        //   2. Decode the raw calldata against the manifest's
-        //      `abi_fragment.abi`.
-        //   3. Build a [`V3MapContext`] from the request + the decoded args
-        //      (`args_to_json` keeps the stable decoded-args JSON shape).
-        //   4. Dispatch on `emit.strategy`:
-        //        * `single_emit`            → [`build_action_body`]
-        //        * `opcode_stream_dispatch` → [`build_multicall_from_opcode_stream`]
-        //      any other strategy returns `unsupported_strategy`.
-        //
-        // `resolved` is only populated for static, source-grounded values the
-        // route path can know locally (for example WETH, V4 PoolManager, Aave
-        // WTG immutable Pool). Other `$resolved.<k>` / `$derived.<k>` values
-        // still surface a precise `unresolved_placeholder` until Sync wires the
-        // dynamic resolver layer.
-        //
-        // B.3 — selector-less (bare native transfer) routing. A tx with EMPTY
-        // calldata has no 4-byte selector, so the lookup uses the reserved
-        // [`NATIVE_TRANSFER_SELECTOR`] sentinel instead of `input.selector`.
-        // The byte vec is decoded once here (so emptiness is authoritative,
-        // not the raw string) and reused for the ABI-decode pass below. A
-        // selector-bearing call (≥1 calldata byte) keeps the exact prior key
-        // (`input.selector`), so existing routing is byte-identical.
-        let calldata_hex = input.calldata.strip_prefix("0x").unwrap_or(&input.calldata);
-        let calldata_bytes = hex::decode(calldata_hex).map_err(|error| {
+    // ── Build ActionBody (M2 — v3 manifest lookup + action_builder) ────
+    //
+    // Pipeline:
+    //   1. Look the callkey up in `DECLARATIVE_V3_STATE.bridge` — miss
+    //      surfaces a `no_declarative_v3_mapper` error so the SW caller
+    //      can fail closed or surface the gap.
+    //   2. Decode the raw calldata against the manifest's
+    //      `abi_fragment.abi`.
+    //   3. Build a [`V3MapContext`] from the request + the decoded args
+    //      (`args_to_json` keeps the stable decoded-args JSON shape).
+    //   4. Dispatch on `emit.strategy`:
+    //        * `single_emit`            → [`build_action_body`]
+    //        * `opcode_stream_dispatch` → [`build_multicall_from_opcode_stream`]
+    //      any other strategy returns `unsupported_strategy`.
+    //
+    // `resolved` is only populated for static, source-grounded values the
+    // route path can know locally (for example WETH, V4 PoolManager, Aave
+    // WTG immutable Pool). Other `$resolved.<k>` / `$derived.<k>` values
+    // still surface a precise `unresolved_placeholder` until Sync wires the
+    // dynamic resolver layer.
+    //
+    // B.3 — selector-less (bare native transfer) routing. A tx with EMPTY
+    // calldata has no 4-byte selector, so the lookup uses the reserved
+    // [`NATIVE_TRANSFER_SELECTOR`] sentinel instead of `input.selector`.
+    // The byte vec is decoded once here (so emptiness is authoritative,
+    // not the raw string) and reused for the ABI-decode pass below. A
+    // selector-bearing call (≥1 calldata byte) keeps the exact prior key
+    // (`input.selector`), so existing routing is byte-identical.
+    let calldata_hex = input.calldata.strip_prefix("0x").unwrap_or(&input.calldata);
+    let calldata_bytes = hex::decode(calldata_hex).map_err(|error| {
+        EngineErrorDto::new(
+            "invalid_calldata",
+            format!("calldata is not valid hex: {error}"),
+        )
+    })?;
+    let is_native_transfer = calldata_bytes.is_empty();
+    let lookup_selector = if is_native_transfer {
+        NATIVE_TRANSFER_SELECTOR.to_owned()
+    } else {
+        input.selector.to_ascii_lowercase()
+    };
+
+    let key = BridgeKey {
+        chain_id: input.chain_id,
+        to: input.to.to_ascii_lowercase(),
+        selector: lookup_selector.clone(),
+    };
+
+    let (bundle_id, bundle_value) = DECLARATIVE_V3_STATE
+        .with(|state| {
+            let state = state.borrow();
+            // 1. Exact per-address callkey (unchanged priority — a registered
+            //    `(chain, to, selector)` always wins). 2. Address-agnostic
+            //    selector-only fallback (standard NFT `setApprovalForAll`):
+            //    consulted ONLY on a per-address miss, so existing routing is
+            //    byte-identical.
+            let bundle_id = state.bridge.get(&key).or_else(|| {
+                state.selector_bridge.get(&SelectorKey {
+                    chain_id: input.chain_id,
+                    selector: lookup_selector.clone(),
+                })
+            });
+            bundle_id.and_then(|bundle_id| {
+                state
+                    .bundles
+                    .get(bundle_id)
+                    .cloned()
+                    .map(|b| (bundle_id.clone(), b))
+            })
+        })
+        .ok_or_else(|| {
             EngineErrorDto::new(
-                "invalid_calldata",
-                format!("calldata is not valid hex: {error}"),
+                "no_declarative_v3_mapper",
+                format!(
+                    "no v3 mapper bridged for chain_id={} to={} selector={lookup_selector}",
+                    input.chain_id, input.to
+                ),
             )
         })?;
-        let is_native_transfer = calldata_bytes.is_empty();
-        let lookup_selector = if is_native_transfer {
-            NATIVE_TRANSFER_SELECTOR.to_owned()
-        } else {
-            input.selector.to_ascii_lowercase()
-        };
 
-        let key = BridgeKey {
-            chain_id: input.chain_id,
-            to: input.to.to_ascii_lowercase(),
-            selector: lookup_selector.clone(),
-        };
-
-        let (bundle_id, bundle_value) = DECLARATIVE_V3_STATE
-            .with(|state| {
-                let state = state.borrow();
-                // 1. Exact per-address callkey (unchanged priority — a registered
-                //    `(chain, to, selector)` always wins). 2. Address-agnostic
-                //    selector-only fallback (standard NFT `setApprovalForAll`):
-                //    consulted ONLY on a per-address miss, so existing routing is
-                //    byte-identical.
-                let bundle_id = state.bridge.get(&key).or_else(|| {
-                    state.selector_bridge.get(&SelectorKey {
-                        chain_id: input.chain_id,
-                        selector: lookup_selector.clone(),
-                    })
-                });
-                bundle_id.and_then(|bundle_id| {
-                    state
-                        .bundles
-                        .get(bundle_id)
-                        .cloned()
-                        .map(|b| (bundle_id.clone(), b))
-                })
-            })
-            .ok_or_else(|| {
-                EngineErrorDto::new(
-                    "no_declarative_v3_mapper",
-                    format!(
-                        "no v3 mapper bridged for chain_id={} to={} selector={lookup_selector}",
-                        input.chain_id, input.to
-                    ),
-                )
+    // Decode calldata against the manifest ABI. A bare
+    // native transfer has NO calldata to decode against a function ABI
+    // (the byte vec is empty, and `decode_with_json_abi` requires ≥4 bytes
+    // for a selector), so the args object is simply empty — the
+    // native-transfer body references only `$to` / `$chain` / `$calldata` /
+    // `$tx.value`, never `$args.*`.
+    let args_json = if is_native_transfer {
+        serde_json::Value::Object(serde_json::Map::new())
+    } else {
+        let abi_json = bundle_value.pointer("/abi_fragment/abi").ok_or_else(|| {
+            EngineErrorDto::new("invalid_bundle", "missing abi_fragment.abi".to_string())
+        })?;
+        let decoded = abi_resolver::bridge::decode_with_json_abi(abi_json, &calldata_bytes)
+            .map_err(|error| {
+                EngineErrorDto::new("decode_failed", format!("calldata decode failed: {error}"))
             })?;
+        args_to_json(&decoded)
+    };
 
-        // Decode calldata against the manifest ABI. A bare
-        // native transfer has NO calldata to decode against a function ABI
-        // (the byte vec is empty, and `decode_with_json_abi` requires ≥4 bytes
-        // for a selector), so the args object is simply empty — the
-        // native-transfer body references only `$to` / `$chain` / `$calldata` /
-        // `$tx.value`, never `$args.*`.
-        let args_json = if is_native_transfer {
-            serde_json::Value::Object(serde_json::Map::new())
-        } else {
-            let abi_json = bundle_value.pointer("/abi_fragment/abi").ok_or_else(|| {
-                EngineErrorDto::new("invalid_bundle", "missing abi_fragment.abi".to_string())
-            })?;
-            let decoded = abi_resolver::bridge::decode_with_json_abi(abi_json, &calldata_bytes)
-                .map_err(|error| {
-                    EngineErrorDto::new("decode_failed", format!("calldata decode failed: {error}"))
-                })?;
-            args_to_json(&decoded)
-        };
+    let emit = bundle_value
+        .get("emit")
+        .ok_or_else(|| EngineErrorDto::new("invalid_bundle", "missing emit".to_string()))?;
+    let strategy = emit
+        .get("strategy")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| EngineErrorDto::new("invalid_bundle", "missing emit.strategy".to_string()))?
+        .to_owned();
 
-        let emit = bundle_value
-            .get("emit")
-            .ok_or_else(|| EngineErrorDto::new("invalid_bundle", "missing emit".to_string()))?;
-        let strategy = emit
-            .get("strategy")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| {
-                EngineErrorDto::new("invalid_bundle", "missing emit.strategy".to_string())
-            })?
-            .to_owned();
+    // Pre-populate well-known chain-scoped token addresses. Dynamic
+    // resolved values such as pool/factory addresses are supplied by
+    // higher-level sync, but static token addresses like WETH can be
+    // resolved here so `$resolved.weth` placeholders avoid zero-address
+    // fallback.
+    let mut resolved = BTreeMap::new();
+    let weth_address: Option<&'static str> = match input.chain_id {
+        1 => Some("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+        8453 | 10 => Some("0x4200000000000000000000000000000000000006"),
+        42161 => Some("0x82af49447d8a07e3bd95bd0d56f35241523fbab1"),
+        _ => None,
+    };
+    if let Some(addr) = weth_address {
+        resolved.insert(
+            "weth".to_owned(),
+            serde_json::Value::String(addr.to_owned()),
+        );
+    }
 
-        // Pre-populate well-known chain-scoped token addresses. Dynamic
-        // resolved values such as pool/factory addresses are supplied by
-        // higher-level sync, but static token addresses like WETH can be
-        // resolved here so `$resolved.weth` placeholders avoid zero-address
-        // fallback.
-        let mut resolved = BTreeMap::new();
-        let weth_address: Option<&'static str> = match input.chain_id {
-            1 => Some("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
-            8453 | 10 => Some("0x4200000000000000000000000000000000000006"),
-            42161 => Some("0x82af49447d8a07e3bd95bd0d56f35241523fbab1"),
-            _ => None,
-        };
-        if let Some(addr) = weth_address {
-            resolved.insert(
-                "weth".to_owned(),
-                serde_json::Value::String(addr.to_owned()),
-            );
+    // B.1.c — Uniswap V4 singleton `PoolManager` per chain. It is the
+    // `IPoolManager` immutable wired into the PositionManager at deploy
+    // and is NEVER in `modifyLiquidities` calldata, but is fixed per chain,
+    // so it is pre-populated here (mirroring the static WETH injection) for
+    // the V4 manifest's `$resolved.pool_manager` venue field. Addresses are
+    // the verified V4 deployments (docs UNISWAP_B1_SOURCE_RESEARCH.md §2;
+    // mainnet + Base explorer "Exact Match", OP/ARB docs-table sourced).
+    let v4_pool_manager: Option<&'static str> = match input.chain_id {
+        1 => Some("0x000000000004444c5dc75cb358380d2e3de08a90"),
+        8453 => Some("0x498581ff718922c3f8e6a244956af099b2652b2b"),
+        10 => Some("0x9a13f98cb987694c9f086b1f5eb990eea8264ec3"),
+        42161 => Some("0x360e68faccca8ca495c1b759fd9eee466db9fb32"),
+        _ => None,
+    };
+    if let Some(addr) = v4_pool_manager {
+        resolved.insert(
+            "pool_manager".to_owned(),
+            serde_json::Value::String(addr.to_owned()),
+        );
+    }
+
+    // Aave WrappedTokenGatewayV3 keeps the legacy `pool` calldata argument,
+    // but current verified deployments ignore it and call immutable POOL.
+    // Resolve by known gateway target instead of trusting user calldata.
+    if let Some(pool) = aave_weth_gateway_pool(input.chain_id, &key.to) {
+        resolved.insert(
+            "pool".to_owned(),
+            serde_json::Value::String(pool.to_owned()),
+        );
+    }
+    if let Some(asset) = compound_v3_base_asset(input.chain_id, &key.to) {
+        resolved.insert(
+            "compound_v3_base_asset".to_owned(),
+            serde_json::Value::String(asset.to_owned()),
+        );
+    }
+    if let Some(asset) = compound_v2_underlying(input.chain_id, &key.to) {
+        resolved.insert(
+            "compound_v2_underlying".to_owned(),
+            serde_json::Value::String(asset.to_owned()),
+        );
+    }
+
+    // Uniswap V2/V3 CREATE2 pool derivation. Unlike Curve (`venue.pool =
+    // $to`) or Balancer (`pool_id = $args.pool`), a Uniswap ROUTER takes only
+    // `(tokens[, fee])` and computes the pool address INTERNALLY, so it is
+    // never in calldata — leaving `$resolved.pool` unresolved and the
+    // pool-keyed enrichment (`pool.liquidity` → AMM low-liquidity / low-TVL)
+    // dormant. Re-derive the pool statically (CREATE2, no RPC) from the
+    // decoded tokens + fee and inject `$resolved.pool`, so BOTH the venue and
+    // the (dormant) `live_inputs` onchain_view resolve to the real pool.
+    // The single_emit analogue of `maybe_inject_morpho_market_id`: a derived
+    // identity the declarative grammar cannot compute (it cannot keccak /
+    // CREATE2). Generic by venue — a V2/V3 fork onboards by extending the
+    // (factory, init_hash) tables in `maybe_compute_uniswap_pool`. Skipped
+    // when `pool` is already resolved (e.g. an Aave gateway), and shape-gated
+    // on the token arg names so it is a no-op for every non-Uniswap call.
+    if !resolved.contains_key("pool") {
+        if let Some(pool) = maybe_compute_uniswap_pool(input.chain_id, &args_json) {
+            resolved.insert("pool".to_owned(), serde_json::Value::String(pool));
         }
+    }
 
-        // B.1.c — Uniswap V4 singleton `PoolManager` per chain. It is the
-        // `IPoolManager` immutable wired into the PositionManager at deploy
-        // and is NEVER in `modifyLiquidities` calldata, but is fixed per chain,
-        // so it is pre-populated here (mirroring the static WETH injection) for
-        // the V4 manifest's `$resolved.pool_manager` venue field. Addresses are
-        // the verified V4 deployments (docs UNISWAP_B1_SOURCE_RESEARCH.md §2;
-        // mainnet + Base explorer "Exact Match", OP/ARB docs-table sourced).
-        let v4_pool_manager: Option<&'static str> = match input.chain_id {
-            1 => Some("0x000000000004444c5dc75cb358380d2e3de08a90"),
-            8453 => Some("0x498581ff718922c3f8e6a244956af099b2652b2b"),
-            10 => Some("0x9a13f98cb987694c9f086b1f5eb990eea8264ec3"),
-            42161 => Some("0x360e68faccca8ca495c1b759fd9eee466db9fb32"),
-            _ => None,
-        };
-        if let Some(addr) = v4_pool_manager {
-            resolved.insert(
-                "pool_manager".to_owned(),
-                serde_json::Value::String(addr.to_owned()),
-            );
-        }
+    // Tier-B synthetic derivations the declarative grammar cannot express
+    // (it can index/slice but not hash). Morpho Blue's `market_id` =
+    // keccak(MarketParams); inject it as `$derived.morpho_market_id` so the
+    // single_emit `LendingVenue::MorphoBlue.market_id` field resolves. A
+    // no-op for every non-Morpho call (shape-gated on a `marketParams`
+    // 5-tuple). The single_emit analogue of `maybe_inject_v4_pool_id`.
+    let mut derived = BTreeMap::new();
+    maybe_inject_morpho_market_id(&args_json, &mut derived);
+    maybe_inject_metamorpho_underlying(&args_json, &mut derived);
+    maybe_inject_uniswap_v3_path(&args_json, &mut derived);
 
-        // Aave WrappedTokenGatewayV3 keeps the legacy `pool` calldata argument,
-        // but current verified deployments ignore it and call immutable POOL.
-        // Resolve by known gateway target instead of trusting user calldata.
-        if let Some(pool) = aave_weth_gateway_pool(input.chain_id, &key.to) {
-            resolved.insert(
-                "pool".to_owned(),
-                serde_json::Value::String(pool.to_owned()),
-            );
-        }
-        if let Some(asset) = compound_v3_base_asset(input.chain_id, &key.to) {
-            resolved.insert(
-                "compound_v3_base_asset".to_owned(),
-                serde_json::Value::String(asset.to_owned()),
-            );
-        }
-        if let Some(asset) = compound_v2_underlying(input.chain_id, &key.to) {
-            resolved.insert(
-                "compound_v2_underlying".to_owned(),
-                serde_json::Value::String(asset.to_owned()),
-            );
-        }
+    let ctx = V3MapContext {
+        chain: chain.clone(),
+        tx_to: target,
+        tx_from: submitter,
+        value,
+        submitted_at,
+        args_json: &args_json,
+        // Raw tx calldata hex — referenced by the bare `$calldata`
+        // placeholder so an `Unknown` body preserves the full calldata.
+        raw_calldata: &input.calldata,
+        resolved,
+        derived,
+        inputs: None,
+    };
 
-        // Uniswap V2/V3 CREATE2 pool derivation. Unlike Curve (`venue.pool =
-        // $to`) or Balancer (`pool_id = $args.pool`), a Uniswap ROUTER takes only
-        // `(tokens[, fee])` and computes the pool address INTERNALLY, so it is
-        // never in calldata — leaving `$resolved.pool` unresolved and the
-        // pool-keyed enrichment (`pool.liquidity` → AMM low-liquidity / low-TVL)
-        // dormant. Re-derive the pool statically (CREATE2, no RPC) from the
-        // decoded tokens + fee and inject `$resolved.pool`, so BOTH the venue and
-        // the (dormant) `live_inputs` onchain_view resolve to the real pool.
-        // The single_emit analogue of `maybe_inject_morpho_market_id`: a derived
-        // identity the declarative grammar cannot compute (it cannot keccak /
-        // CREATE2). Generic by venue — a V2/V3 fork onboards by extending the
-        // (factory, init_hash) tables in `maybe_compute_uniswap_pool`. Skipped
-        // when `pool` is already resolved (e.g. an Aave gateway), and shape-gated
-        // on the token arg names so it is a no-op for every non-Uniswap call.
-        if !resolved.contains_key("pool") {
-            if let Some(pool) = maybe_compute_uniswap_pool(input.chain_id, &args_json) {
-                resolved.insert("pool".to_owned(), serde_json::Value::String(pool));
-            }
-        }
-
-        // Tier-B synthetic derivations the declarative grammar cannot express
-        // (it can index/slice but not hash). Morpho Blue's `market_id` =
-        // keccak(MarketParams); inject it as `$derived.morpho_market_id` so the
-        // single_emit `LendingVenue::MorphoBlue.market_id` field resolves. A
-        // no-op for every non-Morpho call (shape-gated on a `marketParams`
-        // 5-tuple). The single_emit analogue of `maybe_inject_v4_pool_id`.
-        let mut derived = BTreeMap::new();
-        maybe_inject_morpho_market_id(&args_json, &mut derived);
-        maybe_inject_metamorpho_underlying(&args_json, &mut derived);
-        maybe_inject_uniswap_v3_path(&args_json, &mut derived);
-
-        let ctx = V3MapContext {
-            chain: chain.clone(),
-            tx_to: target,
-            tx_from: submitter,
-            value,
-            submitted_at,
-            args_json: &args_json,
-            // Raw tx calldata hex — referenced by the bare `$calldata`
-            // placeholder so an `Unknown` body preserves the full calldata.
-            raw_calldata: &input.calldata,
-            resolved,
-            derived,
-            inputs: None,
-        };
-
-        // D-C (generalized): a manifest's `emit.reenter_callback_arg` names the
-        // `bytes` arg carrying an `abi.encode(Call[])` re-entry callback the
-        // `multicall_call_array` caller recurses into — manifest-driven, so the
-        // engine has NO per-protocol callback-selector list.
-        let reenter_callback = emit
-            .get("reenter_callback_arg")
-            .and_then(serde_json::Value::as_str)
-            .and_then(|arg| args_json.get(arg))
-            .and_then(serde_json::Value::as_str)
-            .map(ToOwned::to_owned);
-        // `reenter_only` is a pure re-entry trampoline (e.g. a Morpho flash loan):
-        // it has NO own body — the whole intent is in the callback the caller
-        // recurses into. Emit no action; surface only the callback.
-        if strategy == "reenter_only" {
-            return Ok(DeclarativeRouteRequestV3ResultDto {
-                actions: vec![],
-                decoder_id: bundle_id,
-                reenter_callback,
-            });
-        }
-
-        let body = match strategy.as_str() {
+    // D-C (generalized): a manifest's `emit.reenter_callback_arg` names the
+    // `bytes` arg carrying an `abi.encode(Call[])` re-entry callback the
+    // `multicall_call_array` caller recurses into — manifest-driven, so the
+    // engine has NO per-protocol callback-selector list.
+    let reenter_callback = emit
+        .get("reenter_callback_arg")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|arg| args_json.get(arg))
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned);
+    let recursive = matches!(
+        strategy.as_str(),
+        "multicall_recurse" | "multicall_call_array"
+    );
+    let has_callback = emit
+        .get("reenter_callback_arg")
+        .and_then(serde_json::Value::as_str)
+        .is_some();
+    let frame = if recursive || has_callback || strategy == "reenter_only" {
+        traversal.active = true;
+        frame.with_manifest(emit)
+    } else {
+        frame
+    };
+    let body = if strategy == "reenter_only" {
+        None
+    } else {
+        Some(match strategy.as_str() {
             "single_emit" => {
                 let body_template = emit.get("body").ok_or_else(|| {
                     EngineErrorDto::new("invalid_bundle", "missing emit.body".to_string())
@@ -907,13 +1019,15 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
             // strategy — single_emit, opcode_stream_dispatch, even nested
             // multicall), then wrap the flattened inner bodies in one
             // `ActionBody::Multicall`.
-            "multicall_recurse" => build_multicall_recurse_body(
+            "multicall_recurse" => build_multicall_recurse_body_with_context(
                 input.chain_id,
                 &input.to,
                 &input.submitter,
                 input.submitted_at,
                 &args_json,
                 emit,
+                traversal,
+                &frame,
             )?,
             // Cat D' — `multicall_call_array` (PER-LEG-TO: Bundler3
             // `multicall(Call[])`, Call = (address to, bytes data, uint256 value,
@@ -921,12 +1035,14 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
             // (same-`to`, `bytes[]` legs), each leg carries its OWN target `to`, so
             // we re-route the leg's `data` THERE (e.g. Bundler3 → GeneralAdapter1)
             // and wrap the mapped legs in one `ActionBody::Multicall`.
-            "multicall_call_array" => build_multicall_call_array_body(
+            "multicall_call_array" => build_multicall_call_array_body_with_context(
                 input.chain_id,
                 &input.submitter,
                 input.submitted_at,
                 &args_json,
                 emit,
+                traversal,
+                &frame,
             )?,
             // composite_emit (Li.Fi `swapAndStartBridgeTokensViaX`): an ordered list
             // of sub-emits, each a `single_emit` or `array_emit`, flattened into ONE
@@ -1021,17 +1137,11 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
                     format!("unsupported emit.strategy: {other}"),
                 ));
             }
-        };
+        })
+    };
 
-        // N2 (catch-all): a decoded body that is an EMPTY Multicall — e.g. an
-        // `array_emit` over a length-0 dynamic array (Permit2 `lockdown([])`,
-        // `permitBatch([])`, …) — must NOT pass through. An empty Multicall has
-        // domain "multicall", survives the orchestrator's realActions filter, and
-        // aggregates to PASS (no children, no policy) — a fail-open. Surface it as
-        // Unknown so it warn-closes. (A strictly-empty batch is an on-chain no-op,
-        // so warn-closing costs the user nothing.) `dispatch_opcode_stream` already
-        // returns Unknown for an empty stream; this is the single chokepoint for
-        // every other strategy.
+    let mut bodies = Vec::new();
+    if let Some(body) = body {
         let body = match body {
             v3_action::ActionBody::Multicall { ref actions } if actions.is_empty() => unknown_leg(
                 ctx.tx_to,
@@ -1041,20 +1151,58 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
             ),
             other => other,
         };
-
-        let action = v3_action::Action { meta, body };
-
-        Ok(DeclarativeRouteRequestV3ResultDto {
-            actions: vec![action],
-            decoder_id: bundle_id,
-            reenter_callback,
-        })
-    })();
-
-    match result {
-        Ok(dto) => Envelope::ok(dto).to_json(),
-        Err(error) => Envelope::<()>::err(error.kind, error.message).to_json(),
+        // Recursive builders already recorded exact child paths. Other emit
+        // strategies may intentionally produce Unknown without a route miss.
+        if traversal.active && !recursive && body_has_unknown(&body) {
+            traversal.record(
+                &frame,
+                TransactionDiagnosticCodeDto::UninterpretedAction,
+                Some(&bundle_id),
+            );
+        }
+        bodies.push(body);
     }
+    if let Some(callback) = reenter_callback.as_deref() {
+        bodies.extend(process_reenter_callback(
+            input, callback, &bundle_id, traversal, &frame,
+        )?);
+    }
+    if strategy == "reenter_only" && bodies.is_empty() {
+        traversal.record(
+            &frame,
+            TransactionDiagnosticCodeDto::UninterpretedAction,
+            Some(&bundle_id),
+        );
+        bodies.push(unknown_child_leg(
+            input.chain_id,
+            &input.to,
+            &input.calldata,
+            &input.value,
+            "reenter_only target",
+        )?);
+    }
+    // Internal callback results remain ordered siblings when folded by their
+    // parent. A directly routed callback has one outer Action/meta container.
+    let actions = if frame.path.is_empty() && (has_callback || strategy == "reenter_only") {
+        vec![v3_action::Action {
+            meta,
+            body: v3_action::ActionBody::Multicall { actions: bodies },
+        }]
+    } else {
+        bodies
+            .into_iter()
+            .map(|body| v3_action::Action {
+                meta: meta.clone(),
+                body,
+            })
+            .collect()
+    };
+    Ok(DeclarativeRouteRequestV3ResultDto {
+        actions,
+        decoder_id: bundle_id,
+        reenter_callback,
+        decoding: None,
+    })
 }
 
 fn aave_weth_gateway_pool(chain_id: u64, target: &str) -> Option<&'static str> {
@@ -1503,6 +1651,7 @@ pub fn declarative_route_typed_data_v3_json(input_json: String) -> String {
             decoder_id: bundle_id,
             // Typed-data signatures carry no calldata, hence no re-entry callback.
             reenter_callback: None,
+            decoding: None,
         })
     })();
 
@@ -3442,39 +3591,17 @@ fn rederive_for_child(
     derived
 }
 
-/// `multicall_recurse` (Cat D) — flatten a self-`multicall(bytes[])` into one
-/// [`v3_action::ActionBody::Multicall`].
-///
-/// `self_array_bytes_last_arg`: the inner sub-calls live in a `bytes[]`
-/// argument (SwapRouter02 `multicall(uint256 deadline, bytes[] data)` has a
-/// leading non-array `deadline`; NFPM / V4 PositionManager `multicall(bytes[]
-/// data)` has only the array). [`args_to_json`] renders that `bytes[]` as a JSON
-/// array of `"0x.."` strings, so the common case picks the sole array-valued
-/// arg. Wrappers with sibling array args can set `emit.recurse_arg` to the
-/// decoded argument name that holds child calldata.
-///
-/// Each inner leg targets the SAME `to`. We resolve + decode + build it by
-/// RE-ENTERING [`declarative_route_request_v3_json`] (the public entrypoint), so
-/// every inner strategy is handled transparently — single_emit, opcode_stream
-/// dispatch (e.g. an inner V4 `modifyLiquidities`), and even a nested
-/// `multicall`. Inner legs with no installed mapper (helper calls Uniswap
-/// routinely bundles — `refundETH` / `sweepToken` / `unwrapWETH9`) are SKIPPED
-/// rather than failing the batch; but if NO leg resolves we reject so the policy
-/// engine never receives a misleading empty no-op for calldata we could not map.
-///
-/// Recursion is bounded: every inner element is a strict sub-slice of the outer
-/// calldata, so a `multicall`-of-`multicall` chain shrinks each level; the
-/// per-level fan-out is capped at [`MAX_MULTICALL_CHILDREN`].
-fn build_multicall_recurse_body(
+/// Self multicall uses the current absolute frame and shared request budget.
+fn build_multicall_recurse_body_with_context(
     chain_id: u64,
     to: &str,
     submitter: &str,
     submitted_at: u64,
     args_json: &serde_json::Value,
     emit: &serde_json::Value,
+    traversal: &mut TransactionTraversal,
+    frame: &TransactionFrame,
 ) -> Result<v3_action::ActionBody, EngineErrorDto> {
-    const MAX_MULTICALL_CHILDREN: usize = 64;
-
     let recurse_rule_id = emit
         .get("recurse_rule_id")
         .and_then(serde_json::Value::as_str)
@@ -3532,17 +3659,7 @@ fn build_multicall_recurse_body(
         )
     })?;
 
-    if inner_calls.len() > MAX_MULTICALL_CHILDREN {
-        return Err(EngineErrorDto::new(
-            "build_multicall_failed",
-            format!(
-                "multicall child count {} exceeds cap {MAX_MULTICALL_CHILDREN}",
-                inner_calls.len()
-            ),
-        ));
-    }
-
-    let mut actions: Vec<v3_action::ActionBody> = Vec::new();
+    let mut actions = Vec::new();
     for (index, item) in inner_calls.iter().enumerate() {
         let inner_hex = item.as_str().ok_or_else(|| {
             EngineErrorDto::new(
@@ -3550,127 +3667,33 @@ fn build_multicall_recurse_body(
                 format!("multicall child #{index} is not a hex string"),
             )
         })?;
-        let stripped = inner_hex.strip_prefix("0x").unwrap_or(inner_hex);
-        let inner_bytes = hex::decode(stripped).map_err(|error| {
-            EngineErrorDto::new(
-                "build_multicall_failed",
-                format!("multicall child #{index} not hex: {error}"),
-            )
-        })?;
-        if inner_bytes.len() < 4 {
-            return Err(EngineErrorDto::new(
-                "build_multicall_failed",
-                format!("multicall child #{index} calldata < 4 bytes"),
-            ));
-        }
-        let inner_selector = format!("0x{}", hex::encode(&inner_bytes[0..4]));
-
-        // Re-enter the public entrypoint for this leg. Inner calls carry no
-        // independent msg.value (they execute under the outer call's context),
-        // so value is "0".
-        let inner_input = serde_json::json!({
-            "chain_id": chain_id,
-            "to": to,
-            "selector": inner_selector,
-            "calldata": inner_hex,
-            "value": "0",
-            "submitter": submitter,
-            "submitted_at": submitted_at,
-        });
-        let out = declarative_route_request_v3_json(inner_input.to_string());
-        let parsed: serde_json::Value = serde_json::from_str(&out).map_err(|error| {
-            EngineErrorDto::new(
-                "build_multicall_failed",
-                format!("multicall child #{index} result not JSON: {error}"),
-            )
-        })?;
-
-        if parsed.get("ok").and_then(serde_json::Value::as_bool) != Some(true) {
-            let kind = parsed
-                .pointer("/error/kind")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("");
-            // Unmapped child legs must stay policy-visible. Earlier code skipped
-            // `no_declarative_v3_mapper` here for helper selectors, but that also
-            // erased any unsupported fund-moving selector inside an otherwise
-            // mapped multicall. Mirror opcode-stream warn semantics: preserve the
-            // child as Unknown so the parent warn-closes.
-            if kind == "no_declarative_v3_mapper" || kind == "route_failed" {
-                actions.push(unknown_child_leg(
-                    chain_id,
-                    to,
-                    inner_hex,
-                    "0",
-                    "multicall child target",
-                )?);
-                continue;
-            }
-            let message = parsed
-                .pointer("/error/message")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("");
-            return Err(EngineErrorDto::new(
-                "build_multicall_failed",
-                format!("multicall child #{index} ({inner_selector}): {kind}: {message}"),
-            ));
-        }
-        let inner_actions = parsed
-            .pointer("/data/actions")
-            .and_then(serde_json::Value::as_array)
-            .ok_or_else(|| {
-                EngineErrorDto::new(
-                    "build_multicall_failed",
-                    format!("multicall child #{index} result missing data.actions"),
-                )
-            })?;
-        for action in inner_actions {
-            let body_json = action.get("body").ok_or_else(|| {
-                EngineErrorDto::new(
-                    "build_multicall_failed",
-                    format!("multicall child #{index} action missing body"),
-                )
-            })?;
-            let body: v3_action::ActionBody =
-                serde_json::from_value(body_json.clone()).map_err(|error| {
-                    EngineErrorDto::new(
-                        "build_multicall_failed",
-                        format!("multicall child #{index} body deserialize: {error}"),
-                    )
-                })?;
-            actions.push(body);
-        }
+        // Preserve existing self semantics: children have no independent value.
+        let input = child_transaction(chain_id, to, inner_hex, "0", submitter, submitted_at);
+        let child = frame.child(TransactionCallPathDto::SelfCall { index });
+        actions.extend(process_multicall_child(
+            &input, traversal, &child, index, false,
+        )?);
     }
-
     if actions.is_empty() {
         return Err(EngineErrorDto::new(
             "build_multicall_failed",
             "multicall_recurse: no inner leg produced a policy-visible action".to_string(),
         ));
     }
-
     Ok(v3_action::ActionBody::Multicall { actions })
 }
 
-/// Cat D' — `multicall_call_array`: Bundler3-style `multicall(Call[])` where each
-/// `Call = (address to, bytes data, uint256 value, bool skipRevert, bytes32 callbackHash)`
-/// carries its OWN target. Unlike [`build_multicall_recurse_body`] (same-`to`,
-/// `bytes[]` legs), we read each leg's `to` from the decoded positional tuple and
-/// re-route the leg's `data` THERE (e.g. Bundler3 → GeneralAdapter1), wrapping the
-/// mapped legs in one [`ActionBody::Multicall`]. Unmapped helper legs (no installed
-/// mapper) are skipped; if NO leg resolves we reject (never an empty no-op).
-///
-/// Recursion is bounded: each leg's `data` is a strict sub-slice of the outer
-/// calldata (shrinks every level) and the per-level fan-out is capped at
-/// `MAX_MULTICALL_CHILDREN`.
-fn build_multicall_call_array_body(
+/// Call[] keeps each tuple's target, bytes and value. The first 64 input calls
+/// are eligible for dispatch; later calls remain opaque in the same order.
+fn build_multicall_call_array_body_with_context(
     chain_id: u64,
     submitter: &str,
     submitted_at: u64,
     args_json: &serde_json::Value,
     emit: &serde_json::Value,
+    traversal: &mut TransactionTraversal,
+    frame: &TransactionFrame,
 ) -> Result<v3_action::ActionBody, EngineErrorDto> {
-    const MAX_MULTICALL_CHILDREN: usize = 64;
-
     // Select the `Call[]` argument: an explicit `recurse_arg` name, else the single
     // array-valued argument (the bundle is the only array for `multicall(Call[])`).
     let bundle_value =
@@ -3711,73 +3734,162 @@ fn build_multicall_call_array_body(
             "multicall_call_array: selected argument is not a Call[] array".to_string(),
         )
     })?;
-    if legs.len() > MAX_MULTICALL_CHILDREN {
-        return Err(EngineErrorDto::new(
-            "build_multicall_failed",
-            format!(
-                "multicall_call_array child count {} exceeds cap {MAX_MULTICALL_CHILDREN}",
-                legs.len()
-            ),
-        ));
-    }
 
-    // `max_depth` bounds only the `reenter(Call[])` callback recursion (D-C).
-    let max_depth = emit
-        .get("max_depth")
-        .and_then(serde_json::Value::as_u64)
-        .map_or(4, |d| usize::try_from(d).unwrap_or(4));
-
-    let actions = process_call_legs(chain_id, submitter, submitted_at, legs, 0, max_depth)?;
-
+    let actions = process_call_legs(chain_id, submitter, submitted_at, legs, traversal, frame)?;
     if actions.is_empty() {
         return Err(EngineErrorDto::new(
             "build_multicall_failed",
             "multicall_call_array: no inner leg produced a policy-visible action".to_string(),
         ));
     }
-
     Ok(v3_action::ActionBody::Multicall { actions })
 }
 
-/// Process a decoded `Call[]` (positional `[to,data,value,skipRevert,callbackHash]`
-/// tuples), re-routing each leg AT ITS OWN `to` and folding the mapped legs into a
-/// flat `Vec<ActionBody>`. Shared by the top-level Bundler3 `multicall(Call[])`
-/// decode and the nested `reenter(Call[])` callback recursion (D-C).
-///
-/// LENIENT: returns whatever resolved (possibly EMPTY) so a `reenter` callback
-/// whose legs are all unmapped (e.g. a swap via a deferred adapter) does not fail
-/// the outer bundle — only the TOP-LEVEL caller rejects an all-empty decode.
-/// `depth`/`max_depth` bound the callback recursion (each callback `data` is a
-/// strict sub-slice; the per-level fan-out is capped at `MAX_MULTICALL_CHILDREN`).
+fn child_transaction(
+    chain_id: u64,
+    to: &str,
+    calldata: &str,
+    value: &str,
+    submitter: &str,
+    submitted_at: u64,
+) -> DeclarativeRouteRequestV3InputDto {
+    DeclarativeRouteRequestV3InputDto {
+        chain_id,
+        to: to.to_owned(),
+        selector: String::new(),
+        calldata: calldata.to_owned(),
+        value: value.to_owned(),
+        submitter: submitter.to_owned(),
+        submitted_at,
+        gas_limit: "0".to_owned(),
+        gas_price: "0".to_owned(),
+        nonce: 0,
+        block_timestamp: None,
+    }
+}
+
+fn opaque_call(
+    input: &DeclarativeRouteRequestV3InputDto,
+    traversal: &mut TransactionTraversal,
+    frame: &TransactionFrame,
+    code: TransactionDiagnosticCodeDto,
+    decoder_id: Option<&str>,
+) -> Result<v3_action::ActionBody, EngineErrorDto> {
+    let body = unknown_child_leg(
+        input.chain_id,
+        &input.to,
+        &input.calldata,
+        &input.value,
+        "multicall child target",
+    )?;
+    traversal.record(frame, code, decoder_id);
+    Ok(body)
+}
+
+fn process_multicall_child(
+    input: &DeclarativeRouteRequestV3InputDto,
+    traversal: &mut TransactionTraversal,
+    frame: &TransactionFrame,
+    index: usize,
+    call_array: bool,
+) -> Result<Vec<v3_action::ActionBody>, EngineErrorDto> {
+    let limit = if index >= MAX_MULTICALL_CHILDREN {
+        Some(TransactionDiagnosticCodeDto::ChildLimit)
+    } else {
+        traversal.enter(frame)
+    };
+    if let Some(code) = limit {
+        return Ok(vec![opaque_call(input, traversal, frame, code, None)?]);
+    }
+    let label = if call_array {
+        "multicall_call_array leg"
+    } else {
+        "multicall child"
+    };
+    let bytes = hex::decode(input.calldata.strip_prefix("0x").unwrap_or(&input.calldata)).map_err(
+        |error| {
+            EngineErrorDto::new(
+                "build_multicall_failed",
+                format!("{label} #{index} not hex: {error}"),
+            )
+        },
+    )?;
+    if bytes.len() < 4 {
+        if !call_array {
+            return Err(EngineErrorDto::new(
+                "build_multicall_failed",
+                format!("multicall child #{index} calldata < 4 bytes"),
+            ));
+        }
+        return Ok(vec![opaque_call(
+            input,
+            traversal,
+            frame,
+            TransactionDiagnosticCodeDto::ShortCalldata,
+            None,
+        )?]);
+    }
+    let selector = format!("0x{}", hex::encode(&bytes[..4]));
+    let mut child = child_transaction(
+        input.chain_id,
+        &input.to,
+        &input.calldata,
+        &input.value,
+        &input.submitter,
+        input.submitted_at,
+    );
+    child.selector = selector.clone();
+    let result = match route_transaction(&child, traversal, frame.clone()) {
+        Ok(result) => result,
+        Err(error) => {
+            let code = match error.kind.as_str() {
+                "no_declarative_v3_mapper" => Some(TransactionDiagnosticCodeDto::UnregisteredCall),
+                "route_failed" => Some(TransactionDiagnosticCodeDto::RouteNotApplicable),
+                _ => None,
+            };
+            if let Some(code) = code {
+                // route_failed has no successful decoder result; do not invent
+                // an ID or interpret the skipped input to obtain one.
+                return Ok(vec![opaque_call(input, traversal, frame, code, None)?]);
+            }
+            return Err(EngineErrorDto::new(
+                "build_multicall_failed",
+                format!(
+                    "{label} #{index} ({selector}): {}: {}",
+                    error.kind, error.message
+                ),
+            ));
+        }
+    };
+    let mut actions = Vec::new();
+    for action in result.actions {
+        if call_array && is_unresolved_metamorpho_underlying(&action.body) {
+            return Err(EngineErrorDto::new("build_multicall_failed", format!(
+                "multicall_call_array leg #{index}: MetaMorpho vault underlying unresolved (vault outside the committed snapshot) — refusing a 0x0-asset decode"
+            )));
+        }
+        actions.push(action.body);
+    }
+    Ok(actions)
+}
+
 fn process_call_legs(
     chain_id: u64,
     submitter: &str,
     submitted_at: u64,
     legs: &[serde_json::Value],
-    depth: usize,
-    max_depth: usize,
+    traversal: &mut TransactionTraversal,
+    frame: &TransactionFrame,
 ) -> Result<Vec<v3_action::ActionBody>, EngineErrorDto> {
-    const MAX_MULTICALL_CHILDREN: usize = 64;
-    if legs.len() > MAX_MULTICALL_CHILDREN {
-        return Err(EngineErrorDto::new(
-            "build_multicall_failed",
-            format!(
-                "multicall_call_array child count {} exceeds cap {MAX_MULTICALL_CHILDREN}",
-                legs.len()
-            ),
-        ));
-    }
-
-    let mut actions: Vec<v3_action::ActionBody> = Vec::new();
+    let mut actions = Vec::new();
     for (index, leg) in legs.iter().enumerate() {
-        // Each leg is a positional tuple array: [to, data, value, skipRevert, callbackHash].
         let fields = leg.as_array().ok_or_else(|| {
             EngineErrorDto::new(
                 "build_multicall_failed",
                 format!("multicall_call_array leg #{index} is not a Call tuple array"),
             )
         })?;
-        let leg_to = fields
+        let to = fields
             .first()
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| {
@@ -3786,7 +3898,7 @@ fn process_call_legs(
                     format!("multicall_call_array leg #{index} missing tuple field 0 (to)"),
                 )
             })?;
-        let leg_data = fields
+        let data = fields
             .get(1)
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| {
@@ -3795,157 +3907,115 @@ fn process_call_legs(
                     format!("multicall_call_array leg #{index} missing tuple field 1 (data)"),
                 )
             })?;
-        // Call.value (tuple field 2, uint256 → decimal string) — forward it so a
-        // native-value leg (e.g. wrapNative) sees the right msg.value. Default "0".
-        let leg_value = fields
+        let value = fields
             .get(2)
             .and_then(serde_json::Value::as_str)
             .unwrap_or("0");
-
-        let stripped = leg_data.strip_prefix("0x").unwrap_or(leg_data);
-        let data_bytes = hex::decode(stripped).map_err(|error| {
-            EngineErrorDto::new(
-                "build_multicall_failed",
-                format!("multicall_call_array leg #{index} data not hex: {error}"),
-            )
-        })?;
-        if data_bytes.len() < 4 {
-            // A bare value-transfer/fallback leg has no selector to route, but
-            // it is still a potentially value-moving call to `leg_to`. Preserve
-            // it as Unknown rather than erasing it from a partially decoded batch.
-            actions.push(unknown_child_leg(
-                chain_id,
-                leg_to,
-                leg_data,
-                leg_value,
-                "multicall_call_array leg target",
-            )?);
-            continue;
-        }
-        let leg_selector = format!("0x{}", hex::encode(&data_bytes[0..4]));
-
-        // Re-enter the public entrypoint AT THE LEG'S OWN `to` (the per-leg-to
-        // difference vs `multicall_recurse`).
-        let inner_input = serde_json::json!({
-            "chain_id": chain_id,
-            "to": leg_to,
-            "selector": leg_selector,
-            "calldata": leg_data,
-            "value": leg_value,
-            "submitter": submitter,
-            "submitted_at": submitted_at,
-        });
-        let out = declarative_route_request_v3_json(inner_input.to_string());
-        let parsed: serde_json::Value = serde_json::from_str(&out).map_err(|error| {
-            EngineErrorDto::new(
-                "build_multicall_failed",
-                format!("multicall_call_array leg #{index} result not JSON: {error}"),
-            )
-        })?;
-
-        if parsed.get("ok").and_then(serde_json::Value::as_bool) == Some(true) {
-            let inner_actions = parsed
-                .pointer("/data/actions")
-                .and_then(serde_json::Value::as_array)
-                .ok_or_else(|| {
-                    EngineErrorDto::new(
-                        "build_multicall_failed",
-                        format!("multicall_call_array leg #{index} result missing data.actions"),
-                    )
-                })?;
-            for action in inner_actions {
-                let body_json = action.get("body").ok_or_else(|| {
-                    EngineErrorDto::new(
-                        "build_multicall_failed",
-                        format!("multicall_call_array leg #{index} action missing body"),
-                    )
-                })?;
-                let body: v3_action::ActionBody = serde_json::from_value(body_json.clone())
-                    .map_err(|error| {
-                        EngineErrorDto::new(
-                            "build_multicall_failed",
-                            format!("multicall_call_array leg #{index} body deserialize: {error}"),
-                        )
-                    })?;
-                // D-A: a GeneralAdapter1 `erc4626*` leg whose MetaMorpho vault is
-                // OUTSIDE the committed `metamorpho_underlying` snapshot could not
-                // resolve its underlying, so the required `asset` fell back to the
-                // zero address — a confidently-WRONG decode. Refuse the WHOLE bundle
-                // (fail loud → warn-closed) rather than silently skip the leg: a
-                // malicious batch could otherwise hide a large unknown-vault deposit
-                // behind a benign known-vault one. (Re-gen the snapshot when the
-                // listed set changes; see `crate::metamorpho_underlying`.)
-                if is_unresolved_metamorpho_underlying(&body) {
-                    return Err(EngineErrorDto::new(
-                        "build_multicall_failed",
-                        format!(
-                            "multicall_call_array leg #{index}: MetaMorpho vault underlying \
-                             unresolved (vault outside the committed snapshot) — refusing a \
-                             0x0-asset decode"
-                        ),
-                    ));
-                }
-                actions.push(body);
-            }
-        } else {
-            let kind = parsed
-                .pointer("/error/kind")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("");
-            // No installed mapper or a route-level non-applicable result is not
-            // safe to erase from a partially decoded Call[] batch. Preserve the
-            // primary leg as Unknown, then still fall through to callback
-            // extraction below if the child route surfaced one.
-            if kind == "no_declarative_v3_mapper" || kind == "route_failed" {
-                actions.push(unknown_child_leg(
-                    chain_id,
-                    leg_to,
-                    leg_data,
-                    leg_value,
-                    "multicall_call_array leg target",
-                )?);
-            } else {
-                let message = parsed
-                    .pointer("/error/message")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("");
-                return Err(EngineErrorDto::new(
-                    "build_multicall_failed",
-                    format!(
-                        "multicall_call_array leg #{index} ({leg_selector}): {kind}: {message}"
-                    ),
-                ));
-            }
-        }
-
-        // D-C (generalized): the route surfaces `data.reenter_callback` when the
-        // leg's manifest declares `emit.reenter_callback_arg` — the raw
-        // `abi.encode(Call[])` re-entry callback (Bundler3 re-enters it at the
-        // just-called adapter mid-execution: leverage / flash-loan loops). The
-        // primary body (if any) is already pushed; ALSO decode the callback legs so
-        // they aren't opaque. Bounded by `max_depth`; an all-unmapped callback
-        // contributes nothing. NO per-protocol selector list — fully manifest-driven.
-        if depth < max_depth {
-            if let Some(callback_hex) = parsed
-                .pointer("/data/reenter_callback")
-                .and_then(serde_json::Value::as_str)
-            {
-                if let Some(callback_legs) = decode_reenter_call_array(callback_hex)? {
-                    let nested = process_call_legs(
-                        chain_id,
-                        submitter,
-                        submitted_at,
-                        &callback_legs,
-                        depth + 1,
-                        max_depth,
-                    )?;
-                    actions.extend(nested);
-                }
-            }
-        }
+        let input = child_transaction(chain_id, to, data, value, submitter, submitted_at);
+        let child = frame.child(TransactionCallPathDto::Call { index });
+        actions.extend(process_multicall_child(
+            &input, traversal, &child, index, true,
+        )?);
     }
-
     Ok(actions)
+}
+
+fn process_reenter_callback(
+    input: &DeclarativeRouteRequestV3InputDto,
+    callback: &str,
+    decoder_id: &str,
+    traversal: &mut TransactionTraversal,
+    frame: &TransactionFrame,
+) -> Result<Vec<v3_action::ActionBody>, EngineErrorDto> {
+    if callback.strip_prefix("0x").unwrap_or(callback).is_empty() {
+        return Ok(Vec::new());
+    }
+    let callback_frame = frame.child(TransactionCallPathDto::Callback);
+    if let Some(code) = traversal.enter(&callback_frame) {
+        // Raw abi.encode(Call[]) has no independent target/value. Preserve its
+        // bytes in the supplying call's context; the path identifies this as
+        // an opaque callback, not a fabricated ordinary EVM call.
+        let opaque = child_transaction(
+            input.chain_id,
+            &input.to,
+            callback,
+            &input.value,
+            &input.submitter,
+            input.submitted_at,
+        );
+        return Ok(vec![opaque_call(
+            &opaque,
+            traversal,
+            &callback_frame,
+            code,
+            Some(decoder_id),
+        )?]);
+    }
+    match decode_reenter_call_array(callback)? {
+        Some(legs) => process_call_legs(
+            input.chain_id,
+            &input.submitter,
+            input.submitted_at,
+            &legs,
+            traversal,
+            &callback_frame,
+        ),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn body_has_unknown(body: &v3_action::ActionBody) -> bool {
+    match body {
+        v3_action::ActionBody::Unknown { .. } => true,
+        v3_action::ActionBody::Multicall { actions } => actions.iter().any(body_has_unknown),
+        _ => false,
+    }
+}
+
+// Existing focused unit tests enter the same implementation with a fresh root
+// context. Production recursion only uses the explicit context variants.
+#[cfg(test)]
+fn build_multicall_recurse_body(
+    chain_id: u64,
+    to: &str,
+    submitter: &str,
+    submitted_at: u64,
+    args_json: &serde_json::Value,
+    emit: &serde_json::Value,
+) -> Result<v3_action::ActionBody, EngineErrorDto> {
+    let mut traversal = TransactionTraversal::new();
+    traversal.active = true;
+    build_multicall_recurse_body_with_context(
+        chain_id,
+        to,
+        submitter,
+        submitted_at,
+        args_json,
+        emit,
+        &mut traversal,
+        &TransactionFrame::root().with_manifest(emit),
+    )
+}
+
+#[cfg(test)]
+fn build_multicall_call_array_body(
+    chain_id: u64,
+    submitter: &str,
+    submitted_at: u64,
+    args_json: &serde_json::Value,
+    emit: &serde_json::Value,
+) -> Result<v3_action::ActionBody, EngineErrorDto> {
+    let mut traversal = TransactionTraversal::new();
+    traversal.active = true;
+    build_multicall_call_array_body_with_context(
+        chain_id,
+        submitter,
+        submitted_at,
+        args_json,
+        emit,
+        &mut traversal,
+        &TransactionFrame::root().with_manifest(emit),
+    )
 }
 
 /// Decode a `reenter(Call[])` callback — the raw `abi.encode(Call[])` bytes a

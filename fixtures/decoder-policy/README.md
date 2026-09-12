@@ -1,5 +1,88 @@
 # DEC-01~06: 실제 Registry·WASM Decoder 기준 시험
 
+## DEC-06c — 사용자 검증 완료, DEC-06 완료
+
+요청별 재귀 문맥으로 self·Call[]·callback의 깊이와 노드 예산을 공유한다. 해석한 결과는 순서대로 유지하고 미해석 구간은 Unknown과 `decoding` 진단에 남긴다. typed·Permit2 Batch와 단순 transaction 응답은 유지하며 소비자는 선택 진단 필드를 route→audit까지 그대로 전달한다. 구형 응답의 필드 부재를 complete로 보정하지 않는다. [확정 계약](../../docs/sdk-migration/decoder-design-plan.md#dec-06c--확정-계약과-실행-상태)과 [범위·한계](coverage.md#dec-06c--달라진-지원-범위와-제한)를 따른다.
+
+기존 self/Call[] 기대값의 실질 Action 변경은 self `nested-depth-4`의 깊이 4 자식 두 개, 두 `children-65`의 65번째 자식이다. 이들은 원문 Unknown과 한도 진단을 요구하며 정상 prefix를 유지한다. 나머지 성공 multicall은 전체 Action/meta와 새 complete/partial 진단을 함께 검사한다. 소비자 route 시험은 2개를 추가하고 기존 audit 시험 2개를 확장했다.
+
+**사용자 실행 로그 확인:** [`/private/tmp/dambi-dec06c.jBh0Cs/verify.log`](/private/tmp/dambi-dec06c.jBh0Cs/verify.log)에서 Native `declarative_exports::tests` **29/29**(필터 제외 66개), `declarative_v3_route` **138/138**, 새 `multicall_limits` **5/5** 통과를 확인했다. 이어서 **새 Rust의 WASM release 빌드와 확장 경로 복사 완료**, limits 개별 **26/26**, 통합 **589/589** 통과를 확인했다. 두 Node 실행의 실패·취소·건너뛰기·todo는 모두 0이다. `tsc --noEmit`은 별도 진단 출력 없이, 실패 시 중단하는 스크립트의 다음 단계인 Vitest로 이어졌으며 관련 **3파일 82/82**가 통과했다. wasm-pack 업데이트 안내와 Node `--localstorage-file` 경고는 있었으나 검사는 통과했다. 이 결과로 **DEC-06 구현·사용자 검증을 완료**한다. 사전 설치 bundle을 사용하는 Node 결과는 호스트의 동적 발견·설치 검증을 뜻하지 않는다. 06b·06c 커밋은 아직 사용자 실행 전이며 DEC-07은 다음 단계다.
+
+아래는 사용자가 완료한 검증의 재현 명령이다. **Native → 새 WASM → limits 개별 → 통합 → TS 소비자** 순서이며 `SKIP_WASM_BUILD=0`으로 이전 WASM 재사용을 막고 실패 시 후속 단계를 중단한다. 이번 기록 반영에서는 빌드·시험을 다시 실행하지 않았다.
+
+```bash
+bash /private/tmp/dambi-dec06c-verify.sh
+```
+
+저장된 명령의 본문은 다음과 같다. 로그는 출력된 `/tmp/dambi-dec06c.*/verify.log` 하나에 저장한다.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+cd /Users/spu/SDKdambi/DAMBI
+dec06c_log_dir="$(mktemp -d /tmp/dambi-dec06c.XXXXXX)"
+printf 'log=%s/verify.log\n' "$dec06c_log_dir"
+dec06c_run() { "$@" || exit "$?"; }
+{
+  dec06c_run cargo test --locked -p policy-engine-wasm --lib declarative_exports::tests
+  dec06c_run cargo test --locked -p policy-engine-wasm --test multicall_limits --test declarative_v3_route
+  dec06c_run env SKIP_WASM_BUILD=0 bash scripts/wasm-build.sh
+  dec06c_run npm run decoder:test:multicall-limits
+  dec06c_run npm run decoder:test
+  (
+    cd browser-extension || exit "$?"
+    dec06c_run yarn exec tsc --noEmit
+    dec06c_run yarn exec vitest run backend/service-worker/__tests__/declarative-route.test.ts backend/service-worker/__tests__/orchestrator.test.ts backend/service-worker/__tests__/sig-routing.test.ts
+  )
+} 2>&1 | tee "$dec06c_log_dir/verify.log"
+```
+
+### 06b와 06c의 사용자 커밋 경계
+
+착수 HEAD는 `9923487`이며 06b 아홉 경로가 아직 미커밋이었다. 그 변경과 06b 사용자 통합 결과의 짧은 기록만 [별도 patch](/private/tmp/dambi-dec06b-before-dec06c.lkjck_jr.patch)에 보관했다. 검증 기록 반영 후에도 HEAD는 같고 index는 비어 있다. 사용자가 이 patch를 index에 적용해 06b를 커밋하고, 실제 06c 경로를 두 번째 커밋으로 stage한다. 작업 트리를 되돌리는 절차나 기록 전용 커밋은 필요 없다. 이제 `bash /private/tmp/dambi-dec06c-commit.sh`로 아래 명령을 실행할 수 있다. 생성물은 경로 목록에 포함하지 않는다. 이미 첫 커밋을 수행했다면 다시 patch를 적용하지 않고 남은 06c stage/commit 단계만 사용한다.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+cd /Users/spu/SDKdambi/DAMBI
+# Run after reviewing the new build/test results and updating the README.
+test "$(git rev-parse HEAD)" = 99234877c8b72e1ea96cd8597e45e9c0e716d66d
+git diff --cached --quiet
+# Stage only the saved DEC-06b baseline; the DEC-06c working files remain intact.
+git apply --cached /private/tmp/dambi-dec06b-before-dec06c.lkjck_jr.patch
+git diff --cached --check
+git commit -m "test(decoder): connect real Bundler3 Call-array decoding"
+# Stage the actual DEC-06c sources, tests and concise documentation.
+git add -- \
+  crates/policy-engine-wasm/src/declarative_exports.rs \
+  crates/policy-engine-wasm/src/dto.rs \
+  crates/policy-engine-wasm/tests/multicall_limits.rs \
+  browser-extension/backend/service-worker/wasm-bridge.ts \
+  browser-extension/backend/service-worker/adapter-loader/declarative-route.ts \
+  browser-extension/backend/service-worker/orchestrator.ts \
+  browser-extension/backend/service-worker/storage.ts \
+  browser-extension/backend/service-worker/__tests__/declarative-route.test.ts \
+  browser-extension/backend/service-worker/__tests__/orchestrator.test.ts \
+  fixtures/decoder-policy/multicall-limits.cases.json \
+  fixtures/decoder-policy/multicall-limits.test.mjs \
+  fixtures/decoder-policy/multicall-self.cases.json \
+  fixtures/decoder-policy/multicall-self.test.mjs \
+  fixtures/decoder-policy/multicall-call-array.cases.json \
+  fixtures/decoder-policy/multicall-call-array.test.mjs \
+  fixtures/decoder-policy/helpers/build-registry.mjs \
+  fixtures/decoder-policy/registry-selection.json \
+  package.json \
+  fixtures/decoder-policy/README.md \
+  fixtures/decoder-policy/coverage.md \
+  docs/sdk-migration/decoder-design-plan.md \
+  docs/sdk-migration/decoder-core-adapters-plan.md
+git diff --cached --check
+git commit -m "feat(decoder): bound multicall traversal and preserve diagnostics"
+git status --short
+```
+
+아래 06a/06b의 장문 검증·커밋 명령은 과거 절차 보관용이다. **이번에는 상단 DEC-06c 명령을 사용**한다.
+
 ## DEC-06b 현재 상태 — 사용자 통합 검증 완료
 
 DEC-06a는 **self 48/48·통합 514/514 사용자 검증 및 분리 커밋 완료**다. DEC-05 기록 `56ece47`과 06a 구현 `9923487`의 경계·성공 로그 입력 대응을 먼저 확인했다. 06a 실제 실행 HEAD `1326fb5`의 미커밋 작업 트리와 이후 구현 커밋 `9923487`을 구분한다. 아래 과거 06a 검증·커밋 명령은 다시 실행하지 않는다.

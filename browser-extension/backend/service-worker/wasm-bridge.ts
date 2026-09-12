@@ -119,6 +119,25 @@ export interface DeclarativeRouteRequestV3Input {
   block_timestamp?: number;
 }
 
+/** Optional wire metadata for multicall/callback transaction decoding. */
+export interface TransactionDecoding {
+  status: "complete" | "partial";
+  diagnostics: Array<{
+    code:
+      | "depth_limit"
+      | "child_limit"
+      | "node_limit"
+      | "unregistered_call"
+      | "short_calldata"
+      | "route_not_applicable"
+      | "uninterpreted_action";
+    path: Array<
+      { kind: "self" | "call"; index: number } | { kind: "callback" }
+    >;
+    decoder_id: string | null;
+  }>;
+}
+
 /**
  * Result of a successful `declarative_route_request_v3_json` call.
  *
@@ -128,6 +147,8 @@ export interface DeclarativeRouteRequestV3Input {
 export interface DeclarativeRouteRequestV3Result {
   actions: Record<string, unknown>[];
   decoder_id: string;
+  /** Multicall/callback transaction metadata. Absent on older route responses. */
+  decoding?: TransactionDecoding;
 }
 
 interface OkEnvelope<T> {
