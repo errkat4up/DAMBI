@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { buildRegistry, readJson, repoRoot, resolveIndexBundle } from "./helpers/build-registry.mjs";
+import { readJson, repoRoot, resolveIndexBundle } from "./helpers/build-registry.mjs";
+import { buildHandoffRegistry } from "./helpers/handoff.mjs";
 
 const execFileAsync = promisify(execFile);
 const selection = await readJson(new URL("./registry-selection.json", import.meta.url));
@@ -71,7 +72,7 @@ function requestCase(id) {
 
 async function runScenario(name, bundles, requests) {
   const path = join(registry.root, `${name}.json`);
-  await writeFile(path, JSON.stringify({ bundles, requests }));
+  await writeFile(path, JSON.stringify({ handoff: { suite: "permit2-single", scenario: name }, bundles, requests }));
   try {
     const { stdout } = await execFileAsync(process.execPath, [
       fileURLToPath(new URL("./helpers/wasm-worker.mjs", import.meta.url)), path,
@@ -93,7 +94,7 @@ before(async () => {
   assert.equal(fixture.registry_source, selection.permit2_single_manifest.path);
   assert.equal(fixture.cases.length, 79, "Required DEC-05a request definitions changed");
   assert.equal(new Set(fixture.cases.map(({ id }) => id)).size, fixture.cases.length);
-  registry = await buildRegistry(selection, { includePermit: true, includePermit2Single: true });
+  registry = await buildHandoffRegistry(selection, "permit2-single");
   assert.deepEqual(Object.keys(registry).sort(), [
     "root", "source", "tokens", "cleanup", "permitSource", "permit2SingleSource",
   ].sort());

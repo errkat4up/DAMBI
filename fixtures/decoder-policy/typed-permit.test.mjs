@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { buildRegistry, readJson, repoRoot, resolveIndexBundle } from "./helpers/build-registry.mjs";
+import { readJson, repoRoot, resolveIndexBundle } from "./helpers/build-registry.mjs";
+import { buildHandoffRegistry } from "./helpers/handoff.mjs";
 
 const execFileAsync = promisify(execFile);
 const selection = await readJson(new URL("./registry-selection.json", import.meta.url));
@@ -54,7 +55,7 @@ function requestCase(id) {
 
 async function runScenario(name, bundles, requests) {
   const path = join(registry.root, `${name}.json`);
-  await writeFile(path, JSON.stringify({ bundles, requests }));
+  await writeFile(path, JSON.stringify({ handoff: { suite: "typed-permit", scenario: name }, bundles, requests }));
   try {
     // A separate process owns each installation state; there is no reset API.
     const { stdout } = await execFileAsync(process.execPath, [
@@ -82,7 +83,7 @@ before(async () => {
 
   // Explicit selection: approve (four token-expanded chains) + concrete
   // mainnet USDC permit. Transfer is not selected, and permit is not expanded.
-  registry = await buildRegistry(selection, { includePermit: true });
+  registry = await buildHandoffRegistry(selection, "typed-permit");
   assert.equal(Object.hasOwn(registry, "transferSource"), false);
   const approveFiles = selection.tokens.map(
     ({ chain_id, address }) => `${chain_id}__${address}__${approveSelector}.json`,

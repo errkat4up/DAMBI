@@ -2,7 +2,7 @@
   "name": "dambi",
   "private": true,
   "license": "Apache-2.0",
-  "description": "Dambi monorepo — Rust backend (crates/), browser extension. Frontend lives in browser-extension/dashboard/ for now.",
+  "description": "Dambi monorepo \u2014 Rust backend (crates/), browser extension. Frontend lives in browser-extension/dashboard/ for now.",
   "packageManager": "yarn@4.14.1",
   "scripts": {
     "server:local": "bash scripts/start-policy-server.sh local",
@@ -20,7 +20,9 @@
     "decoder:test:permit2-batch": "node --test fixtures/decoder-policy/permit2-batch.test.mjs",
     "decoder:test:multicall-self": "node --test fixtures/decoder-policy/multicall-self.test.mjs",
     "decoder:test:multicall-call-array": "node --test fixtures/decoder-policy/multicall-call-array.test.mjs",
-    "decoder:test:multicall-limits": "node --test fixtures/decoder-policy/multicall-limits.test.mjs"
+    "decoder:test:multicall-limits": "node --test fixtures/decoder-policy/multicall-limits.test.mjs",
+    "decoder:test:handoff": "node --test fixtures/decoder-policy/handoff.test.mjs",
+    "decoder:build:handoff": "node fixtures/decoder-policy/build-handoff.mjs"
   },
   "workspaces": [
     "packages/*"

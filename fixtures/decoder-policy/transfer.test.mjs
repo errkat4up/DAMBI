@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { buildRegistry, readJson, repoRoot, resolveIndexBundle } from "./helpers/build-registry.mjs";
+import { readJson, repoRoot, resolveIndexBundle } from "./helpers/build-registry.mjs";
+import { buildHandoffRegistry } from "./helpers/handoff.mjs";
 
 const execFileAsync = promisify(execFile);
 const selection = await readJson(new URL("./registry-selection.json", import.meta.url));
@@ -35,7 +36,7 @@ function requestCase(source, id, requestId = id) {
 
 async function runScenario(name, selectedBundles, cases) {
   const path = join(registry.root, `${name}.json`);
-  await writeFile(path, JSON.stringify({
+  await writeFile(path, JSON.stringify({ handoff: { suite: "transfer", scenario: name },
     bundles: selectedBundles,
     requests: cases.map(({ id, input }) => ({ id, input })),
   }));
@@ -63,7 +64,7 @@ before(async () => {
   assert.equal(approveFixture.registry_source, selection.manifest.path);
   assert.equal(fixture.cases.length, 18, "Required DEC-03 case count changed");
   assert.equal(new Set(fixture.cases.map(({ id }) => id)).size, fixture.cases.length);
-  registry = await buildRegistry(selection, { includeTransfer: true });
+  registry = await buildHandoffRegistry(selection, "transfer");
   const specs = [
     { id: approveId, selector: approveSelector, path: selection.manifest.path, source: registry.source },
     { id: transferId, selector, path: selection.transfer_manifest.path, source: registry.transferSource },

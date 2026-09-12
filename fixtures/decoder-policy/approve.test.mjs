@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { buildRegistry, readJson, repoRoot, resolveIndexBundle } from "./helpers/build-registry.mjs";
+import { readJson, repoRoot, resolveIndexBundle } from "./helpers/build-registry.mjs";
+import { buildHandoffRegistry } from "./helpers/handoff.mjs";
 
 const execFileAsync = promisify(execFile);
 const selection = await readJson(new URL("./registry-selection.json", import.meta.url));
@@ -20,7 +21,7 @@ let empty;
 
 async function runScenario(name, bundles, cases) {
   const path = join(registry.root, `${name}.json`);
-  await writeFile(path, JSON.stringify({
+  await writeFile(path, JSON.stringify({ handoff: { suite: "approve", scenario: name },
     bundles,
     requests: cases.map(({ id, input }) => ({ id, input: { ...fixture.defaults, ...input } })),
   }));
@@ -44,7 +45,7 @@ before(async () => {
   assert.equal(fixture.registry_source, selection.manifest.path);
   assert.equal(fixture.cases.length, 27, "Required DEC-01 case count changed");
   assert.equal(new Set(fixture.cases.map(({ id }) => id)).size, fixture.cases.length);
-  registry = await buildRegistry(selection);
+  registry = await buildHandoffRegistry(selection, "approve");
   const expectedFiles = selection.tokens.map(({ chain_id, address }) => `${chain_id}__${address}__${selector}.json`).sort();
   const callkeyDir = join(registry.root, "index/by-callkey");
   assert.deepEqual((await readdir(callkeyDir)).sort(), expectedFiles);

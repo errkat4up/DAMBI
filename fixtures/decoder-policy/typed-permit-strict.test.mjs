@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { buildRegistry, readJson, repoRoot, resolveIndexBundle } from "./helpers/build-registry.mjs";
+import { readJson, repoRoot, resolveIndexBundle } from "./helpers/build-registry.mjs";
+import { buildHandoffRegistry } from "./helpers/handoff.mjs";
 
 const execFileAsync = promisify(execFile);
 const selection = await readJson(new URL("./registry-selection.json", import.meta.url));
@@ -63,7 +64,7 @@ function byId(id) {
 
 async function runScenario(name, bundles, requests) {
   const path = join(registry.root, `${name}.json`);
-  await writeFile(path, JSON.stringify({ bundles, requests }));
+  await writeFile(path, JSON.stringify({ handoff: { suite: "typed-permit-strict", scenario: name }, bundles, requests }));
   try {
     const { stdout } = await execFileAsync(process.execPath, [
       fileURLToPath(new URL("./helpers/wasm-worker.mjs", import.meta.url)), path,
@@ -82,7 +83,7 @@ before(async () => {
       throw new Error(`Missing ${name}; build the paired JS/WASM from the DEC-04b Rust source (see README.md).`);
     });
   }
-  registry = await buildRegistry(selection, { includePermit: true });
+  registry = await buildHandoffRegistry(selection, "typed-permit-strict");
   assert.equal(fixture.registry_source, selection.permit_manifest.path);
   const callkeyDir = join(registry.root, "index/by-callkey");
   const typedDir = join(registry.root, "index/by-typed-data");

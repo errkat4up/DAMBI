@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { buildRegistry, readJson, repoRoot, resolveIndexBundle } from "./helpers/build-registry.mjs";
+import { readJson, repoRoot, resolveIndexBundle } from "./helpers/build-registry.mjs";
+import { buildHandoffRegistry } from "./helpers/handoff.mjs";
 
 const execFileAsync = promisify(execFile);
 const selection = await readJson(new URL("./registry-selection.json", import.meta.url));
@@ -75,14 +76,14 @@ before(async () => {
   // Reuse DEC-01's actual builder and digest-checked resolved bundle, without
   // duplicating its four-chain/index/negative-decode assertions.
   assert.equal(fixture.registry_source, selection.manifest.path);
-  registry = await buildRegistry(selection);
+  registry = await buildHandoffRegistry(selection, "approve-policy");
   const { input } = requests[0];
   const entry = await readJson(join(registry.root, "index/by-callkey",
     `${input.chain_id}__${input.to}__${input.selector}.json`));
   const bundle = await resolveIndexBundle(registry.root, entry);
   assert.equal(bundle.id, decoderId);
   const path = join(registry.root, "approve-policy.json");
-  await writeFile(path, JSON.stringify({ bundles: [bundle], requests, policyBundle: { policy, manifest } }));
+  await writeFile(path, JSON.stringify({ handoff: { suite: "approve-policy", scenario: "approve-policy" }, bundles: [bundle], requests, policyBundle: { policy, manifest } }));
   try {
     const { stdout } = await execFileAsync(process.execPath, [
       fileURLToPath(new URL("./helpers/wasm-worker.mjs", import.meta.url)), path,

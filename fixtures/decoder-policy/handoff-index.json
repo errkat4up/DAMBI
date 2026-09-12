@@ -1,0 +1,694 @@
+{
+  "schema_version": 1,
+  "selection": "registry-selection.json",
+  "coverage": "coverage.md",
+  "builder_args": [
+    "--strict-callkeys"
+  ],
+  "full_build_options": {
+    "includeTransfer": true,
+    "includePermit": true,
+    "includePermit2Single": true,
+    "includePermit2Batch": true,
+    "includeNfpmSelf": true,
+    "includeBundler3": true,
+    "includeMorphoCallbacks": true
+  },
+  "reference_rules": {
+    "source_path_and_sha256": "selection의 source_key 항목; token 입력은 selection.tokens 전체. 경로 기준은 registryV2/.",
+    "version": "source ID의 @ 뒤 버전. 원본에 별도 version 필드는 없다.",
+    "index_paths": "성공한 buildRegistry 반환 root 기준 상대 경로. inline은 bundle 필드, 3-ref는 bundle_ref로 resolveIndexBundle에서 JCS 검증한다.",
+    "fixture_and_verification": "이 파일의 디렉터리 기준. case_ids=all은 fixture.cases 전체이며 case_count는 fixture 사례 수다.",
+    "generated_cases_ref": "verification 안에서 기존 fixture를 조립·변형·교대하는 위치. #뒤는 함수/코드 위치 이름이며 별도 요청·Action 복제본은 없다.",
+    "live_inputs_ref": "DAMBI 저장소 기준 원본 경로와 JSON Pointer. 선언 참조이며 live 조회·검증 완료를 뜻하지 않는다.",
+    "result_contract": "기존 verification이 data.actions, data.decoder_id, 선택적인 data.decoding={status,diagnostics}, 진단 {code,path,decoder_id}를 검사한다. 없는 decoding은 보충하지 않는다.",
+    "installation": "각 scenario.installs 순서로 실제 설치한 artifact의 digest를 연결한다. route 결과에 digest를 추가하거나 미등록 자식의 ID·digest를 추정하지 않는다.",
+    "classification": "정상 지원은 fixture 기대 결과와 coverage 범위를 따른다. legacy_observation·legacy_diagnostic 등은 기존 동작 진단이며 지원 보장이 아니다. 미지원은 coverage의 한계를 따른다. Permit2는 v3 연결이며 strict EIP-712 지원 완료가 아니다.",
+    "trust": "서명 검증 없이 설치하는 시험 자료. JCS 일치와 WASM 설치는 발행자 서명 검증이 아니다."
+  },
+  "artifacts": [
+    {
+      "source_key": "manifest",
+      "id": "standard/erc20/approve@1.0.0",
+      "version": "1.0.0",
+      "bundle_sha256": "0x8de0f8e4eb676c1c1b45dc9ce1cddb0f59afd65fff573efe28c9d6dda4ac6167",
+      "index_format": "3-ref",
+      "index_paths": [
+        "index/by-callkey/10__0x0b2c639c533813f4aa9d7837caf62653d097ff85__0x095ea7b3.json",
+        "index/by-callkey/1__0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48__0x095ea7b3.json",
+        "index/by-callkey/42161__0xaf88d065e77c8cc2239327c5edb3a432268e5831__0x095ea7b3.json",
+        "index/by-callkey/8453__0x833589fcd6edb6e08f4c7c32d4f71b54bda02913__0x095ea7b3.json"
+      ],
+      "live_inputs_ref": "registryV2/manifests/standard/erc20/approve@1.0.0.json#/emit/live_inputs"
+    },
+    {
+      "source_key": "transfer_manifest",
+      "id": "standard/erc20/transfer@1.0.0",
+      "version": "1.0.0",
+      "bundle_sha256": "0xa3441e0599fbc45dd73b0887bebe4f105f70bcf7c28fb4cd5a543cce9c0a5726",
+      "index_format": "3-ref",
+      "index_paths": [
+        "index/by-callkey/10__0x0b2c639c533813f4aa9d7837caf62653d097ff85__0xa9059cbb.json",
+        "index/by-callkey/1__0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48__0xa9059cbb.json",
+        "index/by-callkey/42161__0xaf88d065e77c8cc2239327c5edb3a432268e5831__0xa9059cbb.json",
+        "index/by-callkey/8453__0x833589fcd6edb6e08f4c7c32d4f71b54bda02913__0xa9059cbb.json"
+      ],
+      "live_inputs_ref": "registryV2/manifests/standard/erc20/transfer@1.0.0.json#/emit/live_inputs"
+    },
+    {
+      "source_key": "permit_manifest",
+      "id": "standard/erc20/permit@1.0.0",
+      "version": "1.0.0",
+      "bundle_sha256": "0xa1c2d73e84cbb635119af5e92bbc26f32b441be8d3eb9e087acd675c8562dfce",
+      "index_format": "inline",
+      "index_paths": [
+        "index/by-callkey/1__0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48__0xd505accf.json",
+        "index/by-typed-data/1__0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48__Permit.json"
+      ],
+      "live_inputs_ref": "registryV2/manifests/standard/erc20/permit@1.0.0.json#/emit/live_inputs"
+    },
+    {
+      "source_key": "permit2_single_manifest",
+      "id": "uniswap/permit2/permitSingle@1.0.0",
+      "version": "1.0.0",
+      "bundle_sha256": "0x902d101222980bc78defec8450859402f9f3c968be30ff532c9c547b41806127",
+      "index_format": "inline",
+      "index_paths": [
+        "index/by-callkey/10__0x000000000022d473030f116ddee9f6b43ac78ba3__0x2b67b570.json",
+        "index/by-callkey/1__0x000000000022d473030f116ddee9f6b43ac78ba3__0x2b67b570.json",
+        "index/by-callkey/42161__0x000000000022d473030f116ddee9f6b43ac78ba3__0x2b67b570.json",
+        "index/by-callkey/8453__0x000000000022d473030f116ddee9f6b43ac78ba3__0x2b67b570.json",
+        "index/by-typed-data/10__0x000000000022d473030f116ddee9f6b43ac78ba3__PermitSingle.json",
+        "index/by-typed-data/1__0x000000000022d473030f116ddee9f6b43ac78ba3__PermitSingle.json",
+        "index/by-typed-data/42161__0x000000000022d473030f116ddee9f6b43ac78ba3__PermitSingle.json",
+        "index/by-typed-data/8453__0x000000000022d473030f116ddee9f6b43ac78ba3__PermitSingle.json"
+      ],
+      "live_inputs_ref": "registryV2/manifests/uniswap/permit2/permitSingle@1.0.0.json#/emit/live_inputs"
+    },
+    {
+      "source_key": "permit2_batch_manifest",
+      "id": "uniswap/permit2/permitBatch@1.0.0",
+      "version": "1.0.0",
+      "bundle_sha256": "0x161755caa54753a0064c023990f6af3a9698e45b74b414db1bb3a8946f45c0d5",
+      "index_format": "inline",
+      "index_paths": [
+        "index/by-callkey/10__0x000000000022d473030f116ddee9f6b43ac78ba3__0x2a2d80d1.json",
+        "index/by-callkey/1__0x000000000022d473030f116ddee9f6b43ac78ba3__0x2a2d80d1.json",
+        "index/by-callkey/42161__0x000000000022d473030f116ddee9f6b43ac78ba3__0x2a2d80d1.json",
+        "index/by-callkey/8453__0x000000000022d473030f116ddee9f6b43ac78ba3__0x2a2d80d1.json",
+        "index/by-typed-data/10__0x000000000022d473030f116ddee9f6b43ac78ba3__PermitBatch.json",
+        "index/by-typed-data/1__0x000000000022d473030f116ddee9f6b43ac78ba3__PermitBatch.json",
+        "index/by-typed-data/42161__0x000000000022d473030f116ddee9f6b43ac78ba3__PermitBatch.json",
+        "index/by-typed-data/8453__0x000000000022d473030f116ddee9f6b43ac78ba3__PermitBatch.json"
+      ],
+      "live_inputs_ref": "registryV2/manifests/uniswap/permit2/permitBatch@1.0.0.json#/emit/live_inputs"
+    },
+    {
+      "source_key": "nfpm_multicall_manifest",
+      "id": "uniswap/v3-nfpm/multicall@1.0.0",
+      "version": "1.0.0",
+      "bundle_sha256": "0xecbf4a7182dd70c319e7fc3dc14c6a1e1b9ce8194d07003a928c060d9e7038aa",
+      "index_format": "inline",
+      "index_paths": [
+        "index/by-callkey/10__0xc36442b4a4522e871399cd717abdd847ab11fe88__0xac9650d8.json",
+        "index/by-callkey/1__0xc36442b4a4522e871399cd717abdd847ab11fe88__0xac9650d8.json",
+        "index/by-callkey/42161__0xc36442b4a4522e871399cd717abdd847ab11fe88__0xac9650d8.json",
+        "index/by-callkey/8453__0x03a520b32c04bf3beef7beb72e919cf822ed34f1__0xac9650d8.json"
+      ],
+      "live_inputs_ref": null
+    },
+    {
+      "source_key": "nfpm_mint_manifest",
+      "id": "uniswap/v3-nfpm/mint@1.0.0",
+      "version": "1.0.0",
+      "bundle_sha256": "0x050b2d17d2ace5d4c764cc8e58cdbb37e12623a63dc74c78b61ee0dad2bd5180",
+      "index_format": "inline",
+      "index_paths": [
+        "index/by-callkey/10__0xc36442b4a4522e871399cd717abdd847ab11fe88__0x88316456.json",
+        "index/by-callkey/1__0xc36442b4a4522e871399cd717abdd847ab11fe88__0x88316456.json",
+        "index/by-callkey/42161__0xc36442b4a4522e871399cd717abdd847ab11fe88__0x88316456.json",
+        "index/by-callkey/8453__0x03a520b32c04bf3beef7beb72e919cf822ed34f1__0x88316456.json"
+      ],
+      "live_inputs_ref": null
+    },
+    {
+      "source_key": "nfpm_refund_eth_manifest",
+      "id": "uniswap/v3-nfpm/refundETH@1.0.0",
+      "version": "1.0.0",
+      "bundle_sha256": "0xcf326802ca795bc517d46dfe993160da77cd48cdb30e4d337893d9bfe0a1e4c3",
+      "index_format": "inline",
+      "index_paths": [
+        "index/by-callkey/10__0xc36442b4a4522e871399cd717abdd847ab11fe88__0x12210e8a.json",
+        "index/by-callkey/1__0xc36442b4a4522e871399cd717abdd847ab11fe88__0x12210e8a.json",
+        "index/by-callkey/42161__0xc36442b4a4522e871399cd717abdd847ab11fe88__0x12210e8a.json",
+        "index/by-callkey/8453__0x03a520b32c04bf3beef7beb72e919cf822ed34f1__0x12210e8a.json"
+      ],
+      "live_inputs_ref": null
+    },
+    {
+      "source_key": "bundler3_manifest",
+      "id": "morpho/bundler3/1-multicall@1.0.0",
+      "version": "1.0.0",
+      "bundle_sha256": "0xdcc2e2c6ba71e4edaaf61d26e7ef519f07bfcbd414b8ae367a71daaad4957e5b",
+      "index_format": "inline",
+      "index_paths": [
+        "index/by-callkey/1__0x6566194141eefa99af43bb5aa71460ca2dc90245__0x374f435d.json"
+      ],
+      "live_inputs_ref": null
+    },
+    {
+      "source_key": "morpho_flash_loan_manifest",
+      "id": "morpho/general-adapter1/1-morphoFlashLoan@1.0.0",
+      "version": "1.0.0",
+      "bundle_sha256": "0xfb4d4a01d575748f76701367344f347b254ead638f300c3fd95ebd7fbc93241d",
+      "index_format": "inline",
+      "index_paths": [
+        "index/by-callkey/1__0x4a6c312ec70e8747a587ee860a0353cd42be0ae0__0xe2975912.json"
+      ],
+      "live_inputs_ref": null
+    },
+    {
+      "source_key": "morpho_supply_collateral_manifest",
+      "id": "morpho/general-adapter1/1-morphoSupplyCollateral@1.0.0",
+      "version": "1.0.0",
+      "bundle_sha256": "0xd444f1557ae98d9d07f7ed74112005100e0b0b8459d3804ccc0f6a583706fc87",
+      "index_format": "inline",
+      "index_paths": [
+        "index/by-callkey/1__0x4a6c312ec70e8747a587ee860a0353cd42be0ae0__0xca463673.json"
+      ],
+      "live_inputs_ref": "registryV2/manifests/morpho/general-adapter1/1-morphoSupplyCollateral@1.0.0.json#/emit/live_inputs"
+    }
+  ],
+  "suites": [
+    {
+      "id": "approve",
+      "fixture": "approve.cases.json",
+      "verification": "approve.test.mjs",
+      "build_options": {
+        "includeTransfer": false,
+        "includePermit": false,
+        "includePermit2Single": false,
+        "includePermit2Batch": false,
+        "includeNfpmSelf": false,
+        "includeBundler3": false,
+        "includeMorphoCallbacks": false
+      },
+      "case_count": 27,
+      "scenarios": [
+        {
+          "id": "installed",
+          "installs": [
+            "manifest"
+          ],
+          "case_ids": "all"
+        },
+        {
+          "id": "empty",
+          "installs": [],
+          "case_ids": [
+            "amount-normal"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "approve-policy",
+      "fixture": "approve.cases.json",
+      "verification": "approve-policy.test.mjs",
+      "build_options": {
+        "includeTransfer": false,
+        "includePermit": false,
+        "includePermit2Single": false,
+        "includePermit2Batch": false,
+        "includeNfpmSelf": false,
+        "includeBundler3": false,
+        "includeMorphoCallbacks": false
+      },
+      "case_count": 27,
+      "scenarios": [
+        {
+          "id": "approve-policy",
+          "installs": [
+            "manifest"
+          ],
+          "case_ids": [
+            "amount-zero",
+            "amount-normal",
+            "amount-uint160-max",
+            "amount-uint256-max",
+            "amount-uint256-max-minus-one"
+          ],
+          "generated_cases_ref": "approve-policy.test.mjs#requestForCase"
+        }
+      ]
+    },
+    {
+      "id": "transfer",
+      "fixture": "transfer.cases.json",
+      "verification": "transfer.test.mjs",
+      "build_options": {
+        "includeTransfer": true,
+        "includePermit": false,
+        "includePermit2Single": false,
+        "includePermit2Batch": false,
+        "includeNfpmSelf": false,
+        "includeBundler3": false,
+        "includeMorphoCallbacks": false
+      },
+      "case_count": 18,
+      "scenarios": [
+        {
+          "id": "approve-and-transfer",
+          "installs": [
+            "manifest",
+            "transfer_manifest"
+          ],
+          "case_ids": "all",
+          "generated_cases_ref": "transfer.test.mjs#before:alternating"
+        },
+        {
+          "id": "approve-only",
+          "installs": [
+            "manifest"
+          ],
+          "case_ids": [
+            "chain-1-normal"
+          ],
+          "generated_cases_ref": "transfer.test.mjs#before:approve-only"
+        }
+      ]
+    },
+    {
+      "id": "typed-permit",
+      "fixture": "typed-permit.cases.json",
+      "verification": "typed-permit.test.mjs",
+      "build_options": {
+        "includeTransfer": false,
+        "includePermit": true,
+        "includePermit2Single": false,
+        "includePermit2Batch": false,
+        "includeNfpmSelf": false,
+        "includeBundler3": false,
+        "includeMorphoCallbacks": false
+      },
+      "case_count": 44,
+      "scenarios": [
+        {
+          "id": "typed-approve-and-permit",
+          "installs": [
+            "manifest",
+            "permit_manifest"
+          ],
+          "case_ids": "all"
+        },
+        {
+          "id": "typed-empty",
+          "installs": [],
+          "case_ids": [
+            "value-normal"
+          ]
+        },
+        {
+          "id": "typed-approve-only",
+          "installs": [
+            "manifest"
+          ],
+          "case_ids": [
+            "value-normal"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "typed-permit-strict",
+      "fixture": "typed-permit-strict.cases.json",
+      "verification": "typed-permit-strict.test.mjs",
+      "build_options": {
+        "includeTransfer": false,
+        "includePermit": true,
+        "includePermit2Single": false,
+        "includePermit2Batch": false,
+        "includeNfpmSelf": false,
+        "includeBundler3": false,
+        "includeMorphoCallbacks": false
+      },
+      "case_count": 163,
+      "scenarios": [
+        {
+          "id": "strict-installed",
+          "installs": [
+            "manifest",
+            "permit_manifest"
+          ],
+          "case_ids": "all"
+        },
+        {
+          "id": "strict-empty",
+          "installs": [],
+          "case_ids": [
+            "full-normal"
+          ]
+        },
+        {
+          "id": "strict-approve-only",
+          "installs": [
+            "manifest"
+          ],
+          "case_ids": [
+            "full-normal"
+          ]
+        },
+        {
+          "id": "strict-v3-compatibility",
+          "installs": [
+            "manifest",
+            "permit_manifest"
+          ],
+          "case_ids": [],
+          "generated_cases_ref": "typed-permit-strict.test.mjs#before:strict-v3-compatibility"
+        }
+      ]
+    },
+    {
+      "id": "permit2-single",
+      "fixture": "permit2-single.cases.json",
+      "verification": "permit2-single.test.mjs",
+      "build_options": {
+        "includeTransfer": false,
+        "includePermit": true,
+        "includePermit2Single": true,
+        "includePermit2Batch": false,
+        "includeNfpmSelf": false,
+        "includeBundler3": false,
+        "includeMorphoCallbacks": false
+      },
+      "case_count": 79,
+      "scenarios": [
+        {
+          "id": "single-installed",
+          "installs": [
+            "manifest",
+            "permit_manifest",
+            "permit2_single_manifest"
+          ],
+          "case_ids": "all",
+          "generated_cases_ref": "permit2-single.test.mjs#before:single-installed"
+        },
+        {
+          "id": "single-empty",
+          "installs": [],
+          "case_ids": [
+            "named-normal"
+          ]
+        },
+        {
+          "id": "single-not-installed",
+          "installs": [
+            "manifest",
+            "permit_manifest"
+          ],
+          "case_ids": [
+            "named-normal"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "permit2-batch",
+      "fixture": "permit2-batch.cases.json",
+      "verification": "permit2-batch.test.mjs",
+      "build_options": {
+        "includeTransfer": false,
+        "includePermit": false,
+        "includePermit2Single": true,
+        "includePermit2Batch": true,
+        "includeNfpmSelf": false,
+        "includeBundler3": false,
+        "includeMorphoCallbacks": false
+      },
+      "case_count": 102,
+      "scenarios": [
+        {
+          "id": "batch-installed",
+          "installs": [
+            "manifest",
+            "permit2_single_manifest",
+            "permit2_batch_manifest"
+          ],
+          "case_ids": "all",
+          "generated_cases_ref": "permit2-batch.test.mjs#before:batch-installed"
+        },
+        {
+          "id": "batch-empty",
+          "installs": [],
+          "case_ids": [
+            "two-distinct-details"
+          ],
+          "generated_cases_ref": "permit2-batch.test.mjs#singleRequest"
+        },
+        {
+          "id": "batch-single-only",
+          "installs": [
+            "manifest",
+            "permit2_single_manifest"
+          ],
+          "case_ids": [
+            "two-distinct-details"
+          ],
+          "generated_cases_ref": "permit2-batch.test.mjs#singleRequest"
+        },
+        {
+          "id": "batch-batch-only",
+          "installs": [
+            "manifest",
+            "permit2_batch_manifest"
+          ],
+          "case_ids": [
+            "two-distinct-details"
+          ],
+          "generated_cases_ref": "permit2-batch.test.mjs#singleRequest"
+        }
+      ]
+    },
+    {
+      "id": "multicall-self",
+      "fixture": "multicall-self.cases.json",
+      "verification": "multicall-self.test.mjs",
+      "build_options": {
+        "includeTransfer": false,
+        "includePermit": false,
+        "includePermit2Single": false,
+        "includePermit2Batch": false,
+        "includeNfpmSelf": true,
+        "includeBundler3": false,
+        "includeMorphoCallbacks": false
+      },
+      "case_count": 43,
+      "scenarios": [
+        {
+          "id": "all-bundles",
+          "installs": [
+            "manifest",
+            "nfpm_multicall_manifest",
+            "nfpm_mint_manifest",
+            "nfpm_refund_eth_manifest"
+          ],
+          "case_ids": "all",
+          "generated_cases_ref": "multicall-self.test.mjs#before:alternating"
+        },
+        {
+          "id": "parent-only",
+          "installs": [
+            "manifest",
+            "nfpm_multicall_manifest"
+          ],
+          "case_ids": [
+            "mint-direct",
+            "refund-direct",
+            "mint-refund"
+          ]
+        },
+        {
+          "id": "parent-mint",
+          "installs": [
+            "manifest",
+            "nfpm_multicall_manifest",
+            "nfpm_mint_manifest"
+          ],
+          "case_ids": [
+            "mint-direct",
+            "refund-direct",
+            "mint-refund"
+          ]
+        },
+        {
+          "id": "parent-refund",
+          "installs": [
+            "manifest",
+            "nfpm_multicall_manifest",
+            "nfpm_refund_eth_manifest"
+          ],
+          "case_ids": [
+            "mint-direct",
+            "refund-direct",
+            "mint-refund"
+          ]
+        },
+        {
+          "id": "children-only",
+          "installs": [
+            "manifest",
+            "nfpm_mint_manifest",
+            "nfpm_refund_eth_manifest"
+          ],
+          "case_ids": [
+            "mint-direct",
+            "refund-direct",
+            "mint-refund"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multicall-call-array",
+      "fixture": "multicall-call-array.cases.json",
+      "verification": "multicall-call-array.test.mjs",
+      "build_options": {
+        "includeTransfer": true,
+        "includePermit": false,
+        "includePermit2Single": false,
+        "includePermit2Batch": false,
+        "includeNfpmSelf": false,
+        "includeBundler3": true,
+        "includeMorphoCallbacks": false
+      },
+      "case_count": 43,
+      "scenarios": [
+        {
+          "id": "all",
+          "installs": [
+            "manifest",
+            "transfer_manifest",
+            "bundler3_manifest"
+          ],
+          "case_ids": "all",
+          "generated_cases_ref": "multicall-call-array.test.mjs#before:direct-and-alternating"
+        },
+        {
+          "id": "parent-only",
+          "installs": [
+            "bundler3_manifest"
+          ],
+          "case_ids": [
+            "approve-transfer"
+          ],
+          "generated_cases_ref": "multicall-call-array.test.mjs#directRequests"
+        },
+        {
+          "id": "children-only",
+          "installs": [
+            "manifest",
+            "transfer_manifest"
+          ],
+          "case_ids": [
+            "approve-transfer"
+          ],
+          "generated_cases_ref": "multicall-call-array.test.mjs#directRequests"
+        },
+        {
+          "id": "without-transfer",
+          "installs": [
+            "manifest",
+            "bundler3_manifest"
+          ],
+          "case_ids": [
+            "approve-transfer"
+          ],
+          "generated_cases_ref": "multicall-call-array.test.mjs#directRequests"
+        },
+        {
+          "id": "without-approve",
+          "installs": [
+            "transfer_manifest",
+            "bundler3_manifest"
+          ],
+          "case_ids": [
+            "approve-transfer"
+          ],
+          "generated_cases_ref": "multicall-call-array.test.mjs#directRequests"
+        },
+        {
+          "id": "empty-registry",
+          "installs": [],
+          "case_ids": [
+            "approve-transfer"
+          ],
+          "generated_cases_ref": "multicall-call-array.test.mjs#directRequests"
+        }
+      ]
+    },
+    {
+      "id": "multicall-limits",
+      "fixture": "multicall-limits.cases.json",
+      "verification": "multicall-limits.test.mjs",
+      "build_options": {
+        "includeTransfer": true,
+        "includePermit": false,
+        "includePermit2Single": false,
+        "includePermit2Batch": false,
+        "includeNfpmSelf": true,
+        "includeBundler3": true,
+        "includeMorphoCallbacks": true
+      },
+      "case_count": 20,
+      "scenarios": [
+        {
+          "id": "all",
+          "installs": [
+            "manifest",
+            "transfer_manifest",
+            "nfpm_multicall_manifest",
+            "nfpm_mint_manifest",
+            "nfpm_refund_eth_manifest",
+            "bundler3_manifest",
+            "morpho_flash_loan_manifest",
+            "morpho_supply_collateral_manifest"
+          ],
+          "case_ids": "all",
+          "generated_cases_ref": "multicall-limits.test.mjs#before:alternating"
+        },
+        {
+          "id": "without-callback-sources",
+          "installs": [
+            "manifest",
+            "transfer_manifest",
+            "nfpm_multicall_manifest",
+            "nfpm_mint_manifest",
+            "nfpm_refund_eth_manifest",
+            "bundler3_manifest"
+          ],
+          "case_ids": [
+            "callback-depth-before"
+          ]
+        }
+      ]
+    }
+  ],
+  "generation_inputs": [
+    "registryV2/scripts/build-index.ts",
+    "registryV2/scripts/resolvers/index.ts",
+    "registryV2/scripts/resolvers/aave_v3.ts",
+    "registryV2/scripts/resolvers/curve.ts",
+    "registryV2/scripts/resolvers/uniswap.ts",
+    "registryV2/scripts/resolvers/balancer.ts",
+    "registryV2/scripts/resolvers/rpc.ts",
+    "registryV2/scripts/resolvers/types.ts",
+    "crates/adapters/mappers/src/declarative/fn_whitelist.json",
+    "registryV2/package.json",
+    "registryV2/package-lock.json",
+    "registryV2/tsconfig.json",
+    "fixtures/decoder-policy/helpers/build-registry.mjs",
+    "fixtures/decoder-policy/helpers/handoff.mjs",
+    "fixtures/decoder-policy/helpers/wasm-worker.mjs"
+  ]
+}

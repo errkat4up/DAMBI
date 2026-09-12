@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { buildRegistry, readJson, repoRoot, resolveIndexBundle } from "./helpers/build-registry.mjs";
+import { readJson, repoRoot, resolveIndexBundle } from "./helpers/build-registry.mjs";
+import { buildHandoffRegistry } from "./helpers/handoff.mjs";
 
 const execFileAsync = promisify(execFile);
 const selection = await readJson(new URL("./registry-selection.json", import.meta.url));
@@ -51,7 +52,7 @@ function directRequests(base) {
 
 async function runScenario(name, ids, cases) {
   const path = join(registry.root, `${name}.json`);
-  await writeFile(path, JSON.stringify({
+  await writeFile(path, JSON.stringify({ handoff: { suite: "multicall-call-array", scenario: name },
     bundles: ids.map((id) => bundles.get(id)),
     requests: cases.map(({ id, input }) => ({ id, input })),
   }));
@@ -86,7 +87,7 @@ before(async () => {
   assert.deepEqual(fixture.registry_source_sha256, Object.fromEntries([
     selection.bundler3_manifest, selection.manifest, selection.transfer_manifest,
   ].map(({ path, sha256 }) => [path, sha256])));
-  registry = await buildRegistry(selection, { includeTransfer: true, includeBundler3: true });
+  registry = await buildHandoffRegistry(selection, "multicall-call-array");
   const specs = [
     [selection.manifest, registry.source],
     [selection.transfer_manifest, registry.transferSource],

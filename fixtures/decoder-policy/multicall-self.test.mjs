@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { buildRegistry, readJson, repoRoot, resolveIndexBundle } from "./helpers/build-registry.mjs";
+import { readJson, repoRoot, resolveIndexBundle } from "./helpers/build-registry.mjs";
+import { buildHandoffRegistry } from "./helpers/handoff.mjs";
 
 const execFileAsync = promisify(execFile);
 const selection = await readJson(new URL("./registry-selection.json", import.meta.url));
@@ -30,7 +31,7 @@ function requestCase(id, requestId = id) {
 
 async function runScenario(name, bundleIds, cases) {
   const path = join(registry.root, `${name}.json`);
-  await writeFile(path, JSON.stringify({
+  await writeFile(path, JSON.stringify({ handoff: { suite: "multicall-self", scenario: name },
     bundles: bundleIds.map((id) => bundles.get(id)),
     requests: cases.map(({ id, input }) => ({ id, input })),
   }));
@@ -63,7 +64,7 @@ before(async () => {
     selection.nfpm_multicall_manifest.path, selection.nfpm_mint_manifest.path,
     selection.nfpm_refund_eth_manifest.path,
   ]);
-  registry = await buildRegistry(selection, { includeNfpmSelf: true });
+  registry = await buildHandoffRegistry(selection, "multicall-self");
   const specs = [
     [selection.manifest, registry.source],
     [selection.nfpm_multicall_manifest, registry.nfpmMulticallSource],
