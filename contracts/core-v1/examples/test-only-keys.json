@@ -1,0 +1,16 @@
+{
+  "test_only": true,
+  "note": "Public development fixture keys. Never use as production credentials or SDK default trust anchors.",
+  "policy": {
+    "key_id": "d4-test-only-policy",
+    "role": "policy",
+    "public_key_spki_b64": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEobH/Dr2iA9Siku/biS/cX14LDbG5NRy7A1SEOeKgbRJAbPTFtkC4OhD1VSpOul5yf21cfFmLlb0cjp2ZWrB++Q==",
+    "private_key_pkcs8_pem": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg9lqYLLQDpubwpiIb\ngMmXp8pjRg9/KgEBaveCOL6ymgehRANCAAShsf8OvaID1KKS79uJL9xfXgsNsbk1\nHLsDVIQ54qBtEkBs9MW2QLg6EPVVKk66XnJ/bVx8WYuVvRyOnZlasH75\n-----END PRIVATE KEY-----\n"
+  },
+  "decoder": {
+    "key_id": "d4-test-only-decoder",
+    "role": "decoder",
+    "public_key_spki_b64": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAElYPLgDSn4Q7A0si9/dTJ9kZ3wEqW8cuqPS/hoLRZBRoaG/IciYe2Cr1QWAgbe4sJH4osvWjI2yXj8ulw1Euk8Q==",
+    "private_key_pkcs8_pem": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgKTEGRaY/mxyy6XL3\nLrS80ZaIdLDLaWoT5+ttd75Tr92hRANCAASVg8uANKfhDsDSyL391Mn2RnfASpbx\ny6o9L+GgtFkFGhob8hyJh7YKvVBYCBt7iwkfiiy9aMjbJePy6XDUS6Tx\n-----END PRIVATE KEY-----\n"
+  }
+}

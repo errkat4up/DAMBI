@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dambi:core-v1:policy-wire-draft",
+  "title": "D4-1 policy wire draft (not an agreed server API)",
+  "$ref": "#/$defs/envelope",
+  "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "timestamp": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "manifest": {
+      "description": "Wire skeleton only. Full ManifestV2/Cedar semantics remain an engine/Core check.",
+      "type": "object",
+      "required": ["id", "schema_version"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "schema_version": { "const": 2 },
+        "trigger": { "type": "object" },
+        "policy_rpc": { "type": "array", "items": { "type": "object" } },
+        "custom_context": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "policy": {
+      "type": "object",
+      "required": ["id", "policy", "manifest"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "policy": { "$ref": "#/$defs/nonEmptyString" },
+        "manifest": { "$ref": "#/$defs/manifest" }
+      },
+      "additionalProperties": false
+    },
+    "payload": {
+      "description": "Proposed field names and units. Sign the UTF-8 bytes of the original B string, without reserialization.",
+      "type": "object",
+      "required": ["schema_version", "policies", "sequence", "issued_at", "expires_at", "env", "profile", "registry_ref"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "policies": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/policy" } },
+        "sequence": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$", "description": "Non-negative decimal revision string, compared numerically within the configured env/profile scope." },
+        "issued_at": { "$ref": "#/$defs/timestamp", "description": "Proposed Unix seconds, not milliseconds." },
+        "expires_at": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 },
+        "env": { "$ref": "#/$defs/nonEmptyString" },
+        "profile": { "$ref": "#/$defs/nonEmptyString" },
+        "registry_ref": { "const": null }
+      },
+      "additionalProperties": false
+    },
+    "signature": {
+      "type": "object",
+      "required": ["alg", "key_id", "sig_b64"],
+      "properties": {
+        "alg": { "const": "ECDSA_P256_SHA256" },
+        "key_id": { "$ref": "#/$defs/nonEmptyString" },
+        "sig_b64": { "type": "string", "pattern": "^[A-Za-z0-9+/]{85}[AQgw]==$", "description": "64-byte IEEE P1363 r||s, canonical padded Base64. Encoding validity is not signature validity." }
+      },
+      "additionalProperties": false
+    },
+    "envelope": {
+      "type": "object",
+      "required": ["payload", "sig"],
+      "properties": {
+        "payload": { "$ref": "#/$defs/nonEmptyString", "description": "B: original JSON text. Validate the parsed value separately with $defs.payload; never sign JSON.stringify(parsed)." },
+        "sig": { "$ref": "#/$defs/signature" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

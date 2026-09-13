@@ -1,0 +1,171 @@
+{
+  "bundle": "day1-safety",
+  "scope": "D3: shared Day-1 policies + already decoded Action -> actual legacy WASM plan/evaluate. Decoder, SDK Core, signature and RPC integration are separate stages.",
+  "baseline_reference": "fixtures/baseline-verdicts.json: reuse the existing four bounded/unlimited approval, burn transfer and opaque-call verdicts unchanged.",
+  "case_input_rules": "Clone the selected Action template, its metadata and tx; apply set paths, then omit paths. Expected decisions are pinned independently of evaluated output.",
+  "fact_scope": "requires_facts=[] means no external policy_rpc results. The current Action DTO still requires its structural fields, including Swap live_inputs and Permit2 nonce wrappers. Fixture values are synthetic inputs, not fetched or validated market/nonce data.",
+  "approve_boundary_reference": "fixtures/decoder-policy/approve-policy.test.mjs already covers raw-decoded zero, normal, uint160 max, uint256 max, uint256 max-minus-one and both Permit2 spender exemptions; D3 adds the uint160 lower neighbor and decimal-to-canonical normalization against all five policies.",
+  "common_required_inputs": ["meta.submitted_at", "meta.submitter", "meta.nature", "tx.chain_id", "tx.from", "tx.to"],
+  "policies": [
+    {
+      "id": "unlimited-approval-deny",
+      "severity": "warn",
+      "reason": null,
+      "trigger": { "where": { "action.tag": { "eq": "erc20_approve" } } },
+      "requires_facts": [],
+      "decision_inputs": ["action.action", "action.amount", "action.spender"],
+      "action_required_inputs": ["domain", "action", "token", "spender", "amount"]
+    },
+    {
+      "id": "send-first-time-or-burn-recipient-warn",
+      "severity": "deny",
+      "reason": "This send goes to a burn address (0x000…000 / 0x…dead) — funds sent there are permanently lost",
+      "trigger": { "where": { "action.tag": { "eq": "erc20_transfer" } } },
+      "requires_facts": [],
+      "decision_inputs": ["action.action", "action.recipient"],
+      "action_required_inputs": ["domain", "action", "token", "recipient", "amount"]
+    },
+    {
+      "id": "unknown-blind-sign-warning",
+      "severity": "warn",
+      "reason": null,
+      "trigger": { "where": { "action.domain": { "eq": "unknown" } } },
+      "requires_facts": [],
+      "decision_inputs": ["action.domain"],
+      "action_required_inputs": ["domain", "target", "chain", "calldata", "value"]
+    },
+    {
+      "id": "permit2-sign-allowance-confirm",
+      "severity": "warn",
+      "reason": "Signing a Permit2 token allowance — confirm the spender and amount before approving",
+      "trigger": { "where": { "action.tag": { "eq": "permit2_sign_allowance" } } },
+      "requires_facts": [],
+      "decision_inputs": ["action.action"],
+      "action_required_inputs": ["domain", "action", "token", "spender", "amount", "expires_at", "sig_deadline", "nonce"]
+    },
+    {
+      "id": "swap-recipient-not-self-deny",
+      "severity": "deny",
+      "reason": "This swap sends the bought tokens to an address that is not your wallet",
+      "trigger": { "where": { "action.tag": { "eq": "swap" } } },
+      "requires_facts": [],
+      "decision_inputs": ["action.action", "action.params.recipient", "tx.from"],
+      "action_required_inputs": ["domain", "action", "venue", "params.token_in", "params.direction", "params.recipient", "params.slippage_bp", "live_inputs.route", "live_inputs.expected_amount_out", "live_inputs.price_impact_bp", "live_inputs.gas_estimate"]
+    }
+  ],
+  "tx": {
+    "chain_id": "eip155:1",
+    "from": "0x000000000000000000000000000000000000aaaa",
+    "to": "0x00000000000000000000000000000000deadbeef"
+  },
+  "meta_templates": {
+    "onchain": {
+      "submitted_at": 1700000000,
+      "submitter": "0x000000000000000000000000000000000000aaaa",
+      "nature": {
+        "kind": "onchain_tx",
+        "chain": "eip155:1",
+        "nonce": 1,
+        "gas_limit": "0x30d40",
+        "gas_price": { "value": "0x1", "source": { "kind": "user_supplied" }, "synced_at": 1700000000 },
+        "value": "0x0"
+      }
+    },
+    "offchain": {
+      "submitted_at": 1700000000,
+      "submitter": "0x000000000000000000000000000000000000aaaa",
+      "nature": {
+        "kind": "offchain_sig",
+        "domain": { "name": "Permit2", "chain_id": 1, "verifying_contract": "0x000000000022d473030f116ddee9f6b43ac78ba3" },
+        "deadline": 1700000600
+      }
+    }
+  },
+  "action_templates": {
+    "approve": {
+      "meta": "onchain",
+      "action": {
+        "domain": "token", "action": "erc20_approve",
+        "token": { "key": { "standard": "erc20", "chain": "eip155:1", "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" } },
+        "spender": "0x00000000000000000000000000000000deadbeef",
+        "amount": "0x1"
+      }
+    },
+    "transfer": {
+      "meta": "onchain",
+      "action": {
+        "domain": "token", "action": "erc20_transfer",
+        "token": { "key": { "standard": "erc20", "chain": "eip155:1", "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" } },
+        "recipient": "0x00000000000000000000000000000000deadbeef",
+        "amount": "0x1"
+      }
+    },
+    "unknown": {
+      "meta": "onchain",
+      "action": {
+        "domain": "unknown",
+        "target": "0x00000000000000000000000000000000deadbeef",
+        "chain": "eip155:1",
+        "calldata": "0xdeadbeef",
+        "value": "0x0"
+      }
+    },
+    "permit2": {
+      "meta": "offchain",
+      "action": {
+        "domain": "token", "action": "permit2_sign_allowance",
+        "token": { "key": { "standard": "erc20", "chain": "eip155:1", "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" } },
+        "spender": "0x00000000000000000000000000000000deadbeef",
+        "amount": "0x1",
+        "expires_at": 1700003600,
+        "sig_deadline": 1700000600,
+        "nonce": { "value": ["0x0", 0], "source": { "kind": "user_supplied" }, "synced_at": 1700000000 }
+      }
+    },
+    "swap": {
+      "meta": "onchain",
+      "action": {
+        "domain": "amm", "action": "swap",
+        "venue": { "name": "uniswap_v3", "chain": "eip155:1", "pool": "0x00000000000000000000000000000000deadbeef", "fee_tier_bp": 500 },
+        "params": {
+          "token_in": { "key": { "standard": "erc20", "chain": "eip155:1", "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" } },
+          "token_out": { "key": { "standard": "erc20", "chain": "eip155:1", "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2" } },
+          "direction": { "kind": "exact_input", "amount_in": "0x1", "min_amount_out": "0x1" },
+          "recipient": "0x000000000000000000000000000000000000aaaa",
+          "slippage_bp": 50
+        },
+        "live_inputs": {
+          "route": { "value": { "paths": [] }, "source": { "kind": "user_supplied" }, "synced_at": 1700000000 },
+          "expected_amount_out": { "value": "0x1", "source": { "kind": "user_supplied" }, "synced_at": 1700000000 },
+          "price_impact_bp": { "value": 0, "source": { "kind": "user_supplied" }, "synced_at": 1700000000 },
+          "gas_estimate": { "value": "0x30d40", "source": { "kind": "user_supplied" }, "synced_at": 1700000000 }
+        }
+      }
+    }
+  },
+  "cases": [
+    { "id": "approve-uint160-max-minus-one", "action": "approve", "set": { "action.amount": "0xfffffffffffffffffffffffffffffffffffffffe" }, "expected": { "kind": "pass" } },
+    { "id": "approve-decimal-uint160-max", "action": "approve", "set": { "action.amount": "1461501637330902918203684832716283019655932542975" }, "expected": { "kind": "warn", "policy_id": "unlimited-approval-deny" } },
+    { "id": "transfer-zero-address-even-zero-amount", "action": "transfer", "set": { "action.recipient": "0x0000000000000000000000000000000000000000", "action.amount": "0x0" }, "expected": { "kind": "fail", "policy_id": "send-first-time-or-burn-recipient-warn" } },
+    { "id": "transfer-burn-mixed-case", "action": "transfer", "set": { "action.recipient": "0x000000000000000000000000000000000000dEaD" }, "expected": { "kind": "fail", "policy_id": "send-first-time-or-burn-recipient-warn" } },
+    { "id": "transfer-burn-neighbor", "action": "transfer", "set": { "action.recipient": "0x000000000000000000000000000000000000deae" }, "expected": { "kind": "pass" } },
+    { "id": "unknown-empty-calldata", "action": "unknown", "set": { "action.calldata": "0x" }, "expected": { "kind": "warn", "policy_id": "unknown-blind-sign-warning" } },
+    { "id": "permit2-allowance", "action": "permit2", "expected": { "kind": "warn", "policy_id": "permit2-sign-allowance-confirm" } },
+    { "id": "permit2-zero-allowance", "action": "permit2", "set": { "action.amount": "0x0" }, "expected": { "kind": "warn", "policy_id": "permit2-sign-allowance-confirm" } },
+    { "id": "swap-other-recipient", "action": "swap", "set": { "action.params.recipient": "0x000000000000000000000000000000000000aaab" }, "expected": { "kind": "fail", "policy_id": "swap-recipient-not-self-deny" } },
+    { "id": "swap-self-recipient", "action": "swap", "expected": { "kind": "pass" } },
+    { "id": "swap-self-mixed-case-no-token-out", "action": "swap", "set": { "action.params.recipient": "0x000000000000000000000000000000000000AaAa" }, "omit": ["action.params.token_out"], "expected": { "kind": "pass" } }
+  ],
+  "missing_input_cases": [
+    { "id": "approve-missing-amount", "action": "approve", "omit": ["action.amount"], "missing_field": "amount" },
+    { "id": "approve-missing-spender", "action": "approve", "omit": ["action.spender"], "missing_field": "spender" },
+    { "id": "transfer-missing-recipient", "action": "transfer", "omit": ["action.recipient"], "missing_field": "recipient" },
+    { "id": "unknown-missing-calldata", "action": "unknown", "omit": ["action.calldata"], "missing_field": "calldata" },
+    { "id": "permit2-missing-spender", "action": "permit2", "omit": ["action.spender"], "missing_field": "spender" },
+    { "id": "permit2-missing-nonce", "action": "permit2", "omit": ["action.nonce"], "missing_field": "nonce" },
+    { "id": "swap-missing-recipient", "action": "swap", "omit": ["action.params.recipient"], "missing_field": "recipient" },
+    { "id": "swap-missing-live-inputs", "action": "swap", "omit": ["action.live_inputs"], "missing_field": "live_inputs" },
+    { "id": "missing-tx-from", "action": "swap", "omit": ["tx.from"], "missing_field": "from" },
+    { "id": "missing-meta-submitter", "action": "approve", "omit": ["meta.submitter"], "missing_field": "submitter" }
+  ]
+}

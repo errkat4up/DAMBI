@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -16,7 +17,7 @@ type BaselineCase = {
 };
 
 type Baseline = {
-  source: { policy_set: string; sha256: string };
+  source: { bundle: string; sha256: string };
   fixed_meta: unknown;
   fixed_tx: unknown;
   cases: BaselineCase[];
@@ -26,8 +27,11 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const baseline = JSON.parse(
   readFileSync(resolve(root, "fixtures/baseline-verdicts.json"), "utf8"),
 ) as Baseline;
-const policySetBytes = readFileSync(resolve(root, baseline.source.policy_set));
-const bundles = JSON.parse(policySetBytes.toString()) as unknown;
+const { loadPolicyBundle, serializePolicyBundle } = createRequire(import.meta.url)(
+  "../scripts/sdk/policy-bundle.cjs",
+);
+const bundles = loadPolicyBundle(root, baseline.source.bundle);
+const policySetBytes = Buffer.from(serializePolicyBundle(bundles), "utf8");
 
 describe("Phase 0 browser-free verdict baseline", () => {
   beforeAll(async () => {

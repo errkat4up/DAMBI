@@ -126,6 +126,9 @@ jobs:
       - name: Decoder fixtures (Node + real WASM)
         run: npm run decoder:test
 
+      - name: Shared Day-1 policy fixtures (Node + real WASM)
+        run: npm run policy:test
+
       - name: Upload wasm pkg (reused by the extension build)
         uses: actions/upload-artifact@v4
         with:

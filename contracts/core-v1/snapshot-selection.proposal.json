@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "status": "proposed",
+  "name": "day1-initial",
+  "decision": null,
+  "path_base": "repository-root",
+  "description": "D4-2 product-scope proposal. Not an active runtime configuration or an approved D4-3 generation input.",
+  "source_selection_ref": "fixtures/decoder-policy/registry-selection.json",
+  "handoff_ref": "fixtures/decoder-policy/handoff-index.json",
+  "coverage_ref": "fixtures/decoder-policy/coverage.md",
+  "source_keys": [
+    "manifest",
+    "transfer_manifest",
+    "permit_manifest",
+    "permit2_single_manifest",
+    "permit2_batch_manifest",
+    "nfpm_multicall_manifest",
+    "nfpm_mint_manifest",
+    "nfpm_refund_eth_manifest",
+    "bundler3_manifest",
+    "morpho_flash_loan_manifest",
+    "morpho_supply_collateral_manifest"
+  ],
+  "erc20_expansion_tokens": [
+    { "chain_id": 1, "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" },
+    { "chain_id": 10, "address": "0x0b2c639c533813f4aa9d7837caf62653d097ff85" },
+    { "chain_id": 8453, "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" },
+    { "chain_id": 42161, "address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831" }
+  ],
+  "token_scope_note": "These token files expand approve/transfer targets only. They are not an allowlist for Permit2 message tokens, NFPM token pairs, or Morpho market parameters.",
+  "proposed_request_paths": [
+    {
+      "source_keys": ["manifest", "transfer_manifest"],
+      "request_kind": "transaction",
+      "chain_ids": [1, 10, 8453, 42161],
+      "target_scope": "erc20_expansion_tokens",
+      "verification": "DEC-01/03 raw request to Action; DEC-02 raw approve to policy verdict",
+      "limits": ["No expansion to other ERC-20 targets", "Existing gas metadata contains a Pyth stub"]
+    },
+    {
+      "source_keys": ["permit_manifest"],
+      "request_kind": "typed-data",
+      "chain_ids": [1],
+      "target_scope": "source concrete mainnet USDC verifyingContract",
+      "proposed_mode": "strict-v4",
+      "legacy_v3": "regression-only",
+      "fallback_from_strict_failure": false,
+      "verification": "DEC-04b full-input consistency checks",
+      "limits": ["No cryptographic verification of the user's EIP-712 signature", "No onchain nonce/domain lookup", "No transaction permit coverage"]
+    },
+    {
+      "source_keys": ["permit2_single_manifest", "permit2_batch_manifest"],
+      "request_kind": "typed-data",
+      "chain_ids": [1, 10, 8453, 42161],
+      "target_scope": "source concrete Permit2 verifyingContract",
+      "proposed_mode": "legacy-v3-with-documented-limitations",
+      "strict_v4": "unsupported",
+      "fallback_from_strict_failure": false,
+      "verification": "DEC-05 v3 decoding and legacy diagnostic fixtures",
+      "limits": ["No full EIP-712 consistency or signature verification", "Nonce model, malformed fallback, uint160/uint48 ranges and large times remain uncorrected", "No transaction permit coverage"]
+    },
+    {
+      "source_keys": ["nfpm_multicall_manifest", "nfpm_mint_manifest", "nfpm_refund_eth_manifest"],
+      "request_kind": "transaction",
+      "chain_ids": [1, 10, 8453, 42161],
+      "target_scope": "source concrete NFPM deployments",
+      "verification": "DEC-06a/06c fixture decoding, ordering and partial diagnostics",
+      "limits": ["Pool state/current price are placeholders and pool address is calculated locally", "Nested live_inputs declarations must be inventoried; null handoff live_inputs_ref does not imply absence", "No proof of EVM execution or actual child msg.value"]
+    },
+    {
+      "source_keys": ["bundler3_manifest", "morpho_flash_loan_manifest", "morpho_supply_collateral_manifest"],
+      "request_kind": "transaction",
+      "chain_ids": [1],
+      "target_scope": "source concrete Bundler3 and GeneralAdapter1 deployments",
+      "verification": "DEC-06b/06c Call[] and callback fixture decoding",
+      "limits": ["No callback authentication or proof of EVM execution", "skipRevert/callbackHash are not execution guarantees", "SupplyCollateral live_inputs are a skeleton; enrichment remains deferred"]
+    }
+  ],
+  "multicall": {
+    "result": "Keep decoded order plus Unknown/partial diagnostics for unregistered or limit-truncated segments",
+    "whole_request_errors": "Malformed ABI/emit, missing required inputs and short self children remain whole-request errors; do not recover them as Unknown/partial",
+    "global_max_depth": 4,
+    "global_max_nodes": 256,
+    "self_path_max_depth": 3,
+    "call_array_path_max_depth": 4,
+    "max_children_per_array": 64,
+    "dynamic_bundle_discovery_and_install": "unverified"
+  },
+  "policy_package_ref": "policy-bundles/day1-safety/package.json",
+  "policy_ids": [
+    "unlimited-approval-deny",
+    "send-first-time-or-burn-recipient-warn",
+    "unknown-blind-sign-warning",
+    "permit2-sign-allowance-confirm",
+    "swap-recipient-not-self-deny"
+  ],
+  "policy_scope": {
+    "preserve_cedar_manifest_and_severity": true,
+    "external_fact_methods": [],
+    "action_to_verdict": "D3 covers all five policies using the existing WASM evaluator",
+    "raw_approve_to_verdict": "DEC-02 verified",
+    "full_day1_raw_request_to_verdict": "not verified",
+    "swap_raw_decoder": "deferred; shipping the policy source does not provide a swap decoder",
+    "live_dto_inputs": "Not eliminated by external_fact_methods being empty"
+  },
+  "deferred": [
+    "Additional ERC-20 targets/chains beyond the selected expansion inputs",
+    "Swap raw decoding, pool resolver and live-input validation",
+    "Permit2 strict EIP-712 and existing v3 model corrections",
+    "USDC Permit/Permit2 transaction routes (index presence is not decoder coverage)",
+    "Source-context materialization and dynamic bundle discovery/install",
+    "Publisher signatures, Core runtime and SDK independent build"
+  ],
+  "d4_3_requirements": [
+    "Do not consume this proposal until the product scope decision is recorded",
+    "Resolve the explicit source keys and exact token inputs; do not follow future selection additions automatically",
+    "Record the distinction between artifact/index inclusion and supported request paths; existing permit calldata entries are not approved transaction support",
+    "Inventory nested live_inputs declarations and distinguish generation dependencies from runtime data requirements",
+    "Pin generation inputs and implement reproducible output, per-bundle JCS digests and a separate local snapshot digest",
+    "Core must respect supported request paths; artifact installation alone is not runtime acceptance or product release verification"
+  ]
+}

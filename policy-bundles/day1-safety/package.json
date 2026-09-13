@@ -7,7 +7,7 @@
   "description": "모든 지갑 사용자가 반드시 마주치는 3가지 순간(승인/서명, 송금, 스왑)에서 가장 흔하고 가장 치명적인 사고만 막는 최소 필수 5종. 5개 모두 외부 의존 없이 순수 Cedar로 즉시 동작한다.",
   "source": {
     "repo": "errkat4up/DAMBI",
-    "path": "browser-extension/default-bundles/day1-safety"
+    "path": "policy-bundles/day1-safety"
   },
   "policies": [
     {

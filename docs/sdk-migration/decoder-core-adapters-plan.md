@@ -38,7 +38,7 @@ feat/adapters:                   Policy API / RPC 등 실제 외부 데이터 �
 | 영역 | 책임 | 주로 다룰 경로 |
 | --- | --- | --- |
 | Decoder | selector·chain·대상 주소·typed-data 매칭, ABI/emit 규칙, Action·오류 결과 | `registryV2/manifests/`, `registryV2/tokens/`, `registryV2/scripts/` |
-| 정책 콘텐츠 | Cedar 본문, manifest, 적용 조건·severity·필요 Fact 선언 | 현재 `browser-extension/default-bundles/day1-safety/`; D3에서 공유 원본으로 정리 |
+| 정책 콘텐츠 | Cedar 본문, manifest, 적용 조건·severity·필요 Fact 선언 | `policy-bundles/day1-safety/`; D3에서 공유 원본으로 이관 |
 | 검증 사례 | 원문 요청·예상 Action·정책 ID·판정, 오류·경계 사례 | 신규 `fixtures/decoder-policy/` |
 | 기존 실행기 | Decoder·정책 정확성 검증에 우선 재사용. 확인된 결함만 좁게 수정 | `crates/policy-engine-wasm/src/declarative_exports.rs`, `action_eval_exports.rs` |
 | Core | 신뢰 검증, 순수 Rust 실행기, 계획 고정, Fact 의미 검증, Store/Cache, 최종 판정 | `packages/core/src/`, Core 단계의 신규 `crates/dambi-core/`, `crates/dambi-core-wasm/` |
@@ -292,6 +292,16 @@ Call tuple `(to,data,value,skipRevert,callbackHash)`의 순서·동적 offset/le
 
 ### D3. 정책 콘텐츠와 manifest 정리
 
+**2026-09-13 상태: D3 구현·정적 검토·사용자 검증 완료.** 다음 단계는 D4 계약·제품 범위 확정이다. 빌드·시험·설치·커밋·푸시는 사용자 직접 실행 방침을 유지한다. 실행 결과는 [SDK fixture README](../../fixtures/sdk/README.md#결과-기록) 한 곳을 따른다.
+
+| 작업 | 구현 범위 | 상태 |
+| --- | --- | --- |
+| D3-1 공유 원본 | Day-1 5개 Cedar/manifest를 `policy-bundles/day1-safety/`로 이동. 공유 loader/생성기로 DEC-02·baseline·확장 복사 경로 전환. 본문·manifest·판정·baseline hash 유지 | 구현·정적 검토·사용자 검증 완료 |
+| D3-2 정책 사례 | `fixtures/sdk/`에 5개 정책의 trigger·severity·Fact 목록과 적용/비적용·경계·필수 Action 누락 사례. 실제 기존 WASM plan/evaluate 검증 작성 | 구현·정적 검토·사용자 검증 완료 |
+| D3-3 Fact 인계 | Day-1 외부 Fact 0개를 명시. A2 첫 method는 기존 `portfolio.balance`의 ERC-20 잔고로 선정하고 params·원본 응답·projection·오류 범위를 별도 fixture로 고정. Day-1 활성 정책에는 추가하지 않음 | 인계 자료 작성 완료, runtime 검증은 후속 단계 |
+
+공유 생성기는 `package.json`의 순서대로 `{id, policy, manifest}`를 직렬화한다. 정책/manifest 누락 시 빈 set 또는 합성 manifest로 대체하지 않고 실패한다. baseline은 공유 원본에서 메모리로 재생성한 동일 바이트를 검사하므로 확장 public 산출물 생성이 선행 조건이 아니다. 기존 raw approve→판정 시험은 유지하고 신규 시험은 나머지 정책 의미와 이관 경계를 중심으로 작성한다. WASM 실행부·입력 정규화·Store는 이번 이관에 포함하지 않는다.
+
 - 초기 대상으로 Day-1 정책 묶음을 정하고, 새 공유 원본 경로 `policy-bundles/day1-safety/`로 정리한다. 이 이동은 decoder 기능 변경과 다른 커밋으로 한다.
 - SDK 시험과 정책 생성은 공유 원본을 소비하도록 바꾼다. 이관 중 기존 동작을 비교하는 데 필요한 소비 경로만 함께 조정하며, 확장 유지·빌드를 SDK 완료 조건으로 넣지 않는다. 런타임 구현과 UI 코드는 옮기지 않는다.
 - `fixtures/baseline-verdicts.json`이 참조하는 확장 public 정책 파일을 공유 원본에서 재현하는 경로로 전환한다. 내용이 같으면 정책 hash를 유지하며, 경로만 옮기기 위해 판정이나 기대값을 변경하지 않는다.
@@ -305,7 +315,23 @@ Call tuple `(to,data,value,skipRevert,callbackHash)`의 순서·동적 offset/le
 
 **Decoder 부분 상태:** DEC-07 구현·정적 검토·사용자 검증 및 Decoder 인계 완료. [인계 자료·실행 기록](../../fixtures/decoder-policy/README.md#dec-07--decoder-인계)을 따른다. D4 전체 및 C2c·C5 완료를 뜻하지 않는다.
 
-- 신규 `contracts/core-v1/`에 payload/envelope 타입·Schema·정상/오류 fixture를 만든다. 정책의 7개 필드는 API 담당이 준 형태를 기준으로 한다.
+**D4-1 현재 상태:** 정책 wire의 SDK 초안·정상/오류 fixture·구조 및 참조 서명 시험의 구현·정적 검토·사용자 검증 완료. 실제 API와의 합의는 별도이며 [계약과 실행 기록](../../contracts/core-v1/README.md)을 따른다.
+
+**2026-09-13 세부 실행 계획:** 아래 세 단위로 진행한다. DEC-07 시험용 선택을 제품 snapshot으로 자동 승격하지 않는다.
+
+| 작업 | 구현 범위·완료 조건 | 상태 |
+| --- | --- | --- |
+| D4-1 정책 wire 계약 | `contracts/core-v1/`에 payload/envelope 타입·JSON Schema·정상/오류 예시와 구조 검증. B 문자열 UTF-8 원문 서명, `registry_ref: null`, 정책/decoder 키 역할 구분. 필드·시간/sequence 단위는 SDK 초안으로 작성한 뒤 실제 API와 대조 | SDK 초안·구조/참조 서명 시험의 사용자 검증 완료. API 합의는 별도 |
+| D4-2 제품 snapshot 선택 | chain·token·transaction/typed 경로·정책 적용 범위를 명시한 제품 선택 목록. DEC-07의 검증 범위 및 Permit2 v3·multicall 한계, Day-1 swap 정책에 필요한 decoder의 미검증 범위를 대조 | [제품 선택안](../../contracts/core-v1/snapshot-selection.proposal.json) 작성, 사용자 범위 결정 대기 |
+| D4-3 재현 생성·인계 | 선택 manifest/token/정적 프로토콜 자료와 builder 의존 목록 고정. `scripts/sdk/` 생성 진입점, 정렬된 snapshot·개별 bundle JCS digest·전체 로컬 digest·coverage. 확장/서버/cache 없이 같은 입력으로 재생성 | 미착수 |
+
+D4-1의 정상 예시는 D3 공유 정책을 사용하고 payload 객체는 거절한다. 필수 필드 누락·빈 manifest·잘못된 타입/버전·비-null registry_ref를 구조 오류로 구분한다. 중복 정책 ID·manifest ID 일치·시간 관계·서명 변조·잘못된 역할의 키는 의미/암호 검증용 사례로 구분하고 실제 Core 검증 완료 표시는 C3까지 보류한다. API wrapper의 실제 필드명·알고리즘 표기·인증 헤더·운영 키/제한값은 확인 전 제안으로만 기록한다. 원복된 `backup/core-sdk-b219617`의 계약은 참고 자료이며 서버 합의의 근거로 사용하지 않는다. 과거의 “API 담당이 준 7개 필드”라는 표현은 확인 가능한 원문이 없고 사용자도 해당 계약을 확인하지 못했으므로 확정 요구사항에서 제거한다. 백업의 `policies`, `sequence`, `issued_at`, `expires_at`, `env`, `profile`, `registry_ref`는 SDK 초안 후보일 뿐이다.
+
+D4-2는 제품 지원 범위를 바꾸는 결정이다. 현재 고정 시험의 일부 USDC와 11개 manifest만 포함하거나 전체 Registry를 포함하는 선택 모두 별도 근거가 필요하다. 지원 chain/token과 typed strict 여부를 확인한 뒤 생성 입력을 고정하며, 미검증 경로를 지원 완료 목록에 넣지 않는다. D4-3의 생성·시험 실행은 사용자에게 명령으로 제공하고, 사용자 실행 결과 확인 전 재현 완료로 기록하지 않는다.
+
+2026-09-13 기존 사용자 범위 조정: 모든 번들 작업을 끝내는 것을 전제로 하지 않으며, 당시 범위는 D3 구현 및 D4 계획 정리까지였다. 이후 D3 사용자 검증을 완료하고 후속 요청으로 D4-1 계약 초안을 작성했다. D4-1은 전체 decoder 번들 완성과 분리해서 진행한다. 현재 DEC-07은 11개 manifest·4개 USDC token의 시험 자료이며 Swap Action 경로가 없어 Day-1 스왑 정책의 원문 요청부터 판정까지는 미검증이다. 스왑 decoder 후보의 pool resolver·live 입력과 추가 token/chain 범위는 별도 후속 작업으로 남긴다.
+
+- 신규 `contracts/core-v1/`에 payload/envelope 타입·Schema·정상/오류 fixture를 만든다. 필드 구조는 SDK 초안과 실제 API 합의 여부를 구분한다.
 - B 방식 문자열 payload, `registry_ref: null`, 역할별 키 분리 방향을 반영한다. 실제 API 필드명·인증·운영값의 미확정 항목은 제안과 구분한다.
 - Registry 빌드의 **개별 bundle digest**와 SDK 고정 스냅샷 전체의 **로컬 digest**를 구분한다. 아직 없는 원격 root digest/ref를 만들어 계약으로 사용하지 않는다.
 - SDK에 포함할 snapshot 범위·생성 입력·정렬·digest·coverage 목록을 기록하고 재현 가능한 빌드 결과를 만든다. 전체 Registry를 무조건 번들링하거나 이전 백업의 세 토큰만 제품 범위로 확정하지 않는다.

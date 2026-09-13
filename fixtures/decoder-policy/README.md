@@ -1,5 +1,7 @@
 # DEC-01~07: 실제 Registry·WASM Decoder 기준 시험
 
+D3 정책 입력은 공유 원본 `policy-bundles/day1-safety/`로 전환했다. 현재 정책 이관 범위와 사용자 실행 명령은 [SDK 정책 fixture](../sdk/README.md)를 따른다. 아래 과거 실행 기록의 이전 경로는 당시 기록으로 유지한다.
+
 ## DEC-07 — Decoder 인계
 
 **구현·정적 검토·사용자 검증 완료, DEC-07 Decoder 인계 완료.** 착수 HEAD는 `a0fd27a`이며 구현 커밋 `2a0eafb`(Registry 검사)·`0304e23`(인계 구현)·`cdb805b`(CI·문서)을 확인했다. 추가로 검증한 변경은 `registryV2/scripts/__tests__/build-index.test.ts`의 `runBuild()` stderr 보존 수정이다. MJS·TS 구문, JSON 및 `git diff --check`의 정적 검토를 마쳤다. 에이전트는 빌드·시험·설치·커밋·푸시를 실행하지 않았다.
@@ -1419,7 +1421,7 @@ Action meta의 gas price에는 기존 실행부가 만든 Pyth source stub이 �
 
 ## DEC-02 정책 입력·기대값·오류 구분
 
-정책 원본은 `browser-extension/default-bundles/day1-safety/policies/unlimited-approval-deny/{policy.cedar,manifest.json}`이다. 파일을 그대로 읽어 사용하며 본문·manifest·severity는 변경하지 않는다. 이름에 `deny`가 있어도 실제 annotation은 `@severity("warn")`이다. 정책은 `context.amount`가 정확히 40개 또는 64개의 `f`인 U256 hex 문자열일 때, spender가 원문 allowlist의 Permit2 주소 `0x000000000022d473030f116ddee9f6b43ac78ba3`가 아니면 경고한다. 시험에 고정한 주소를 해당 Cedar set literal과 대조한다.
+정책 원본은 `policy-bundles/day1-safety/policies/unlimited-approval-deny/{policy.cedar,manifest.json}`이다. 파일을 그대로 읽어 사용하며 본문·manifest·severity는 변경하지 않는다. 이름에 `deny`가 있어도 실제 annotation은 `@severity("warn")`이다. 정책은 `context.amount`가 정확히 40개 또는 64개의 `f`인 U256 hex 문자열일 때, spender가 원문 allowlist의 Permit2 주소 `0x000000000022d473030f116ddee9f6b43ac78ba3`가 아니면 경고한다. 시험에 고정한 주소를 해당 Cedar set literal과 대조한다.
 
 | DEC-01 원문 입력 | spender | 승인량의 독립 검산 | 기대 DTO `kind` |
 | --- | --- | --- | --- |
@@ -1607,7 +1609,7 @@ Native 합계는 181개다. 각 Native의 ignored/measured는 0이며, helper �
 
 ## 남아 있는 임시 경로 의존
 
-이 시험은 최종 SDK 소유 구조나 독립 빌드 완료 증거가 아니다. 아래 경로는 이관 전 기준 시험을 위한 의존이며, 이번에 이동하지 않는다.
+이 시험은 최종 SDK 소유 구조나 독립 빌드 완료 증거가 아니다. 아래는 현재 남은 경로 의존이다. Day-1 정책 원본은 D3에서 공유 경로로 이동했다.
 
 | 원본 경로 | 현재 소비 함수/시험 | 향후 대상과 제거 단계 |
 | --- | --- | --- |
@@ -1615,7 +1617,7 @@ Native 합계는 181개다. 각 Native의 ignored/measured는 0이며, helper �
 | `registryV2/node_modules/{tsx,canonicalize}` | 실제 TypeScript builder 실행과 `resolveIndexBundle`의 JCS | 현재 Registry lockfile로 설치. D4/C5에서 SDK 소스·빌드 입력으로 필요한 부분을 명시하고 이전 설치물 재사용 제거 |
 | `crates/adapters/mappers/src/declarative/fn_whitelist.json` | 실제 builder가 스크립트 위치 기준으로 읽는 `$fn` 허용 목록. approve가 `$fn`을 쓰지 않아도 파일을 읽음 | SDK 소유 `crates/adapters/mappers/`의 공유 원본으로 포함, DEC-07 인계·C5 독립 소스 빌드에서 검증 |
 | `crates/policy-engine-wasm/src/declarative_exports.rs`, `crates/policy-engine-wasm/pkg/` | worker의 install·transaction·typed WASM export와 생성 JS/WASM import | `crates/dambi-core/src/decode/`, `crates/dambi-core-wasm/`, SDK WASM/glue. C2a·C2b 이관 후 C5에 runner/build 경로 교체 |
-| `browser-extension/default-bundles/day1-safety/policies/unlimited-approval-deny/` | `approve-policy.test.mjs`가 읽는 실제 Cedar/manifest. 이관 전 기준 시험의 임시 입력 | D3에서 `policy-bundles/day1-safety/` 및 공유 fixture로 이관한 뒤 시험 입력 경로 교체. 최종 SDK 의존 구조가 아님 |
+| `policy-bundles/day1-safety/policies/unlimited-approval-deny/` | `approve-policy.test.mjs`가 읽는 공유 Cedar/manifest | D3에서 원본·시험 입력 경로 전환. 확장 디렉터리를 읽지 않음 |
 | `crates/policy-engine-wasm/src/action_eval_exports.rs`, `src/dto.rs` | worker가 호출하는 실제 planner/evaluator 및 판정 계약 | C2a·C2b·C5에서 SDK 실행부/WASM 경계로 이관하며 DEC-02 회귀 사례 유지 |
 | `crates/adapters/abi-resolver/src/{bridge,decode}.rs`, `crates/adapters/mappers/src/declarative/{args_json,action_builder}.rs` | WASM 내부 ABI 해석·수량 변환·Action 생성 | SDK 소유 decoder 의존으로 재사용. C2a·C2b·C5에서 기존 WASM wrapper에 대한 의존 제거 |
 | `crates/policy-server/asset-model/{state,action,transition}/` | 기존 WASM이 사용하는 Action/meta/primitives 직렬화 | `crates/asset-model/{state,action,transition}/`, C2-0a에서 Cargo 경로 이관 |

@@ -16,9 +16,8 @@ const policyId = "unlimited-approval-deny";
 const ordinarySpender = "0x00000000000000000000000000000000deadbeef";
 // Independently pinned, then checked against the actual Cedar allowlist below.
 const permit2Spender = "0x000000000022d473030f116ddee9f6b43ac78ba3";
-// Temporary pre-D3 baseline input; this is not the final SDK dependency path.
 const policyDirectory = join(repoRoot,
-  "browser-extension/default-bundles/day1-safety/policies", policyId);
+  "policy-bundles/day1-safety/policies", policyId);
 
 // Expectations come from the policy's two exact sentinel comparisons and
 // independent raw-calldata analysis, never from an evaluated verdict/Action.

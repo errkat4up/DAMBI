@@ -2,7 +2,7 @@
   "format": 1,
   "description": "Browser-free real-WASM verdict baseline for the Phase 0 SDK split.",
   "source": {
-    "policy_set": "browser-extension/public/default-policies/policy-set-v2.json",
+    "bundle": "day1-safety",
     "sha256": "f6cfe0094c3c209f8ea47c970289efeceeb3fa56ecedad24b1f65301f75d0765"
   },
   "fixed_meta": {

@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "status": "development_handoff_not_runtime_verified",
+  "purpose": "D3에서 선정한 첫 외부 Fact를 C1·C5·C6·A2로 인계한다. 운영 Policy API 합의나 SDK 구현 완료를 뜻하지 않는다.",
+  "method": "portfolio.balance",
+  "scope": {
+    "selected_path": "ERC-20 balanceOf(owner) via eth_call",
+    "policy_activation": "none; Day-1의 다섯 정적 정책에는 외부 Fact를 추가하지 않는다.",
+    "excluded_paths": ["native eth_getBalance", "ERC-721", "ERC-1155", "server implementation", "live RPC verification"],
+    "existing_server_behavior": "현재 policy-server의 portfolio_balance는 동기화된 WalletState에서 잔고를 읽는다. 직접 balanceOf를 호출하는 SDK adapter는 별도 구현 대상이며 이 서버 함수를 SDK에서 import하지 않는다."
+  },
+  "manifest_reference": {
+    "path": "crates/policy-engine/tests/fixtures/policy_catalog_v2/action/transfer/transfer-full-balance-sweep/manifest.json",
+    "policy_id": "transfer-full-balance-sweep",
+    "schema_version": 2,
+    "trigger": { "where": { "action.tag": { "eq": "erc20_transfer" } } },
+    "policy_rpc": [{
+      "id": "owner-balance",
+      "method": "portfolio.balance",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "owner": "$.root.from",
+        "asset": "$.action.token"
+      },
+      "outputs": [{ "kind": "context", "field": "balance", "type": "String", "from": "$.result.balance", "required": false }],
+      "optional": true
+    }],
+    "custom_context": { "fields": { "balance": "String" } },
+    "failure_semantics": "원본 optional:true·required:false를 유지한다. 현재 materialize_v2는 결과 누락과 projection/type 실패를 call.optional로 처리하며 output.required로 분기하지 않는다. 이 catalog 정책은 balance가 없으면 해당 정책의 warn이 발생하지 않는다. 전체 판정은 다른 정책에 따라 달라진다."
+  },
+  "planned_call_example": {
+    "manifest_id": "transfer-full-balance-sweep",
+    "call_id": "transfer-full-balance-sweep::owner-balance",
+    "method": "portfolio.balance",
+    "params": {
+      "chain_id": "eip155:1",
+      "owner": "0x1111111111111111111111111111111111111111",
+      "asset": {
+        "key": {
+          "standard": "erc20",
+          "chain": "eip155:1",
+          "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        }
+      }
+    },
+    "outputs": [{ "kind": "context", "field": "balance", "type": "String", "from": "$.result.balance", "required": false }],
+    "optional": true
+  },
+  "parameter_handoff": {
+    "chain_id": "현재 planner의 $.root.chain_id는 CAIP-2 문자열이다. method-catalog의 Long 선언과 이전 method 설명은 이 경계와 다르므로 숫자 1로 바꿔 전달하지 않는다.",
+    "asset": "$.action.token은 lowered context의 TokenRef이며 실제 주소는 asset.key.address다. 첫 adapter는 asset.key.standard == erc20만 처리한다.",
+    "future_validation": [
+      "chain_id가 지원하는 eip155 CAIP-2 값인지 확인하고 해당 chain RPC로 라우팅한다.",
+      "asset.key.chain과 chain_id의 일치를 확인한다.",
+      "owner와 asset.key.address가 0x 접두의 정확한 20바이트 hex 주소인지 확인한 뒤 ABI 인코딩한다. 주소의 대소문자는 값을 바꾸지 않는다.",
+      "owner는 계획에 고정된 요청자의 주소다. 응답의 owner나 별도 호스트 입력으로 교체하지 않는다.",
+      "현재 planner는 selector를 대입하며 위 method별 주소·chain 검사를 수행하는 검증기가 아니다. 현재 서버 portfolio_balance도 owner를 직접 검사하지 않는다."
+    ],
+    "validation_status": "SDK adapter의 입력 검증은 A2, 계획과 요청 결속 검증은 C5 이후 구현·시험 대상이다."
+  },
+  "response_layers_example": {
+    "status": "synthetic_example_not_captured_rpc_response",
+    "transport_request": {
+      "jsonrpc": "2.0",
+      "id": "first-fact-example",
+      "method": "eth_call",
+      "params": [
+        {
+          "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+          "data": "0x70a082310000000000000000000000001111111111111111111111111111111111111111"
+        },
+        "0x1312d00"
+      ]
+    },
+    "transport_response": {
+      "jsonrpc": "2.0",
+      "id": "first-fact-example",
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000064"
+    },
+    "unwrapped_method_response": { "balance": "0x64" },
+    "existing_engine_results": {
+      "transfer-full-balance-sweep::owner-balance": { "balance": "0x64" }
+    },
+    "projected_context_fragment": { "custom": { "balance": "0x64" } },
+    "boundary_rules": [
+      "Adapter가 JSON-RPC envelope를 검사하고 ABI word를 U256으로 해석해 portfolio.balance의 의미 응답 {balance}를 만든다.",
+      "Core에 전달할 원본 Fact는 projection 전 메서드 의미 응답 {balance}다. transport JSON-RPC envelope나 result의 ABI hex 문자열 자체가 아니다.",
+      "$.result.balance의 result는 engine selector의 루트 이름이다. 기존 results[call_id]에 {result:{balance}}로 중첩하지 않는다.",
+      "Core가 manifest에 따라 한 번 projection한다. Adapter가 balance 문자열만 추출해 Fact value로 전달하지 않는다."
+    ]
+  },
+  "balance_representation": {
+    "type": "String",
+    "pattern": "^0x(?:0|[1-9a-f][0-9a-f]{0,63})$",
+    "meaning": "raw U256 잔고의 lowercase hex, leading zero 없음, zero는 0x0. token decimals나 USD 환산을 적용하지 않는다.",
+    "canonical_examples": ["0x0", "0x64", "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"],
+    "noncanonical_examples": ["100", "0x00", "0x064", "0X64", "0xAB", "0x", "0x10000000000000000000000000000000000000000000000000000000000000000"],
+    "current_limit": "현재 engine String projection은 U256 canonical 형식을 검사하지 않는다. SDK adapter의 결과 검증으로 연결할 필요가 있으며 이 fixture는 그 구현 완료를 주장하지 않는다.",
+    "conversion_note": "기존 sync decoder의 erc20_balance는 decimal String을 반환한다. 해당 로직을 재사용할 경우 U256 파싱 후 canonical hex로 변환해야 하며 decimal을 그대로 전달하면 Cedar의 amount/balance 문자열 비교가 어긋난다.",
+    "failure_rule": "RPC error·revert·잘못된 응답·누락을 0x0으로 대체하지 않는다. 실제 관측된 zero와 조회 실패를 구분한다."
+  },
+  "provenance_handoff": {
+    "status": "C1 contract alignment and C5/C6/A2 implementation pending",
+    "current_scaffold": "packages/core/src/ports/fact.ts에는 source·observedAt·blockNumber가 이미 선언되어 있으나 value 주석은 투영 후 값이다. C1에서 projection 전 의미 응답과 맞추고 공개 계약 차이를 설명해야 한다.",
+    "future_fact_example": {
+      "value": { "balance": "0x64" },
+      "source": "onchain:eip155:1:eth_call",
+      "observedAt": 1800000000000,
+      "blockNumber": "20000000"
+    },
+    "units": { "observedAt": "Unix milliseconds", "blockNumber": "decimal integer string" },
+    "requirements": [
+      "예시 source 이름·관측시각·블록은 합성 데이터이며 운영 provider 응답이 아니다.",
+      "관측시각은 조회한 Fact의 시각을 보존하며 cache 재사용 때 현재 시각으로 덮어쓰지 않는다.",
+      "eth_call 응답에는 blockNumber가 없으므로 정확히 사용한 블록을 별도로 확보해 기록한다. latest 요청에 근거 없는 고정 블록 번호를 붙이지 않는다.",
+      "source 문자열은 출처 표시이며 인증 증명이 아니다. 응답/요청·계획 일치와 신선도 검증은 별도 구현 대상이다."
+    ]
+  },
+  "future_cases": {
+    "status": "planned_not_executed",
+    "required_fact_context": "필수 Fact 검사는 후속 SDK 시험 전용 manifest의 optional:false로 구성한다. 기존 catalog manifest의 optional:true·required:false를 변경하거나 Day-1 활성화 목록에 넣지 않는다. 정확한 SDK 오류 API는 C1에서 정한다.",
+    "cases": [
+      { "id": "canonical-u256", "values": ["0x0", "0x64", "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"], "expected": "정상 의미 응답을 받아 balance 문자열을 한 번 투영하며 정밀도를 보존한다." },
+      { "id": "noncanonical-u256", "values": ["100", "0x00", "0x064", "0X64", "0xAB", "0x", "0x10000000000000000000000000000000000000000000000000000000000000000"], "expected": "portfolio.balance provider 결과로 거절한다. 현재 engine String projection만으로 검출된다고 간주하지 않는다." },
+      { "id": "required-result-missing", "results": {}, "expected": "필수 시험 call의 결과 누락을 오류로 처리하며 성공 판정을 만들지 않는다." },
+      { "id": "required-leaf-missing", "value": {}, "expected": "필수 시험 call의 $.result.balance 누락을 오류로 처리한다." },
+      { "id": "required-leaf-wrong-type", "values": [{ "balance": 100 }, { "balance": null }, { "balance": {} }], "expected": "숫자·null·객체를 balance String으로 자동 변환하지 않는다." },
+      { "id": "double-result-wrapper", "value": { "result": { "balance": "0x64" } }, "expected": "잘못된 중첩을 풀어 보정하지 않는다. 필수 시험 call의 projection 실패를 처리한다." },
+      { "id": "transport-or-projected-value-at-core-boundary", "values": ["0x64", { "jsonrpc": "2.0", "id": "first-fact-example", "result": "0x0000000000000000000000000000000000000000000000000000000000000064" }], "expected": "이미 투영된 leaf와 transport envelope를 {balance} 의미 응답으로 오인하지 않는다." },
+      { "id": "optional-catalog-result-missing", "results": {}, "expected": "원래 optional catalog 정책은 balance 부재 상태를 유지한다. 임의 zero나 해당 정책의 warn을 만들지 않는다." },
+      { "id": "invalid-owner-or-token-address", "values": ["0x1234", "0xgg11111111111111111111111111111111111111"], "expected": "A2 adapter가 RPC 전송 전에 잘못된 주소를 거절한다." },
+      { "id": "chain-mismatch", "params": { "chain_id": "eip155:1", "asset_chain": "eip155:10" }, "expected": "A2 adapter가 다른 chain으로 조회하지 않고 불일치를 거절한다." },
+      { "id": "rpc-error-or-malformed-word", "expected": "JSON-RPC id 불일치·error·잘린 ABI word를 성공 Fact로 반환하지 않는다. zero로 대체하지 않는다." },
+      { "id": "provenance-and-freshness", "expected": "C5/C6/A2에서 실제 사용 블록·observedAt 단위·cache 시각 보존·계획 결속을 검증한다. 현재 fixture의 예시만으로 통과 처리하지 않는다." }
+    ]
+  },
+  "source_references": [
+    { "path": "schema/method-catalog.json", "symbol": "methods.portfolio.balance", "note": "메서드·selector 참고. chain_id Long은 현재 planner CAIP-2 string과 불일치한다." },
+    { "path": "crates/policy-engine/src/policy_rpc/planning_v2.rs", "symbol": "PlannedCallV2; policy_rpc_call_id_v2; root_selector_json", "note": "실제 call_id·resolved params·CAIP-2 경계." },
+    { "path": "crates/policy-engine/src/policy_rpc/materialize_v2.rs", "symbol": "materialize_v2; apply_call_outputs; materialize_value", "note": "unwrapped 의미 응답과 optional 처리·String projection." },
+    { "path": "crates/policy-engine/src/lowering_v2/token/erc20_transfer.rs", "symbol": "lower", "note": "$.action.token 및 amount canonical hex." },
+    { "path": "crates/policy-engine/src/lowering_v2/common/cedar.rs", "symbol": "u256_hex", "note": "정책 비교에 쓰는 lowercase·무패딩 U256 표현." },
+    { "path": "crates/policy-server/server/src/methods.rs", "symbol": "portfolio_balance", "note": "기존 WalletState 기반 {balance} 응답. owner 직접 검증은 없음." },
+    { "path": "crates/policy-server/server/src/handler.rs", "symbol": "portfolio.balance dispatch", "note": "현재 서버 결과 map 삽입 경로. SDK 구현 완료 근거는 아님." },
+    { "path": "crates/policy-server/sync/src/sources/fetchers/decoder.rs", "symbol": "function_selector; encode_address; decode_u256_as_string", "note": "balanceOf 인코딩 및 기존 decimal String decoder." },
+    { "path": "packages/core/src/ports/fact.ts", "symbol": "FactResult", "note": "provenance 필드와 C1에서 정리할 value 의미." },
+    { "path": "crates/policy-engine/tests/fixtures/policy_catalog_v2/_methods/portfolio.balance.md", "symbol": "method design", "note": "설계 참고이며 코드가 우선한다. 과거 dispatcher 부재·numeric chain 설명을 현재 사실로 사용하지 않는다." }
+  ]
+}
