@@ -62,7 +62,7 @@ fi
 # Must match the proxy path allowlist (registry-api/src/validation.ts): index / tokens
 # / bundles / signatures / contexts; manifests uploaded for provenance per v2 convention.
 # Strip OS cruft before upload so it never pollutes the private bucket.
-find bundles contexts tokens signatures manifests index -name '.DS_Store' -delete 2>/dev/null || true
+find bundles contexts tokens signatures manifests index policy-bundles -name '.DS_Store' -delete 2>/dev/null || true
 
 # Phase 1 — additive upload, LEAVES before POINTERS (no inconsistency window).
 # index entries are 3-ref docs the proxy resolves by re-reading bundles/<sha> +
@@ -71,7 +71,7 @@ find bundles contexts tokens signatures manifests index -name '.DS_Store' -delet
 # signatures/ goes BEFORE index/ too: the extension derives the sig URL from a
 # new bundle_sha256 the moment the index lands, so the sig must already be present
 # or a REQUIRE-on install would 404 its signature during the publish window.
-for prefix in bundles contexts tokens signatures manifests index; do
+for prefix in bundles contexts tokens signatures manifests policy-bundles index; do
   if [[ -d "${prefix}" ]]; then
     echo "  rsync (additive) ${prefix}/ → gs://${BUCKET}/${prefix}"
     gcloud storage rsync --recursive "${prefix}" "gs://${BUCKET}/${prefix}"
@@ -84,7 +84,7 @@ done
 # it prunes in the leaves group alongside bundles, AFTER index.
 if [[ "${PRUNE:-0}" == "1" ]]; then
   echo "  PRUNE=1 — orphan 객체 삭제 (pointers→leaves 순)"
-  for prefix in index manifests tokens contexts signatures bundles; do
+  for prefix in index policy-bundles manifests tokens contexts signatures bundles; do
     if [[ -d "${prefix}" ]]; then
       gcloud storage rsync --recursive --delete-unmatched-destination-objects "${prefix}" "gs://${BUCKET}/${prefix}"
     fi

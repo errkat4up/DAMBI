@@ -11,7 +11,8 @@ info:
     Status as of 2026-09-07:
     - `GET /v1/registry/selectors` and `GET /v1/registry/by-callkey` are
       **implemented and live**.
-    - `GET /v1/bundle` and `POST /v1/audit` are **planned, not implemented**.
+    - `POST /v1/audit` is **planned, not implemented**. `GET /v1/bundle` is
+      implemented but transitional (bundle content moves on-chain later).
       Their shapes below are the agreed contract, not yet backed by code.
       `POST /v1/audit` additionally still needs its home decided — see
       `docs/decisions/0001-cloud-split.md` (current lean: Policy Hub, the
@@ -162,10 +163,13 @@ paths:
     get:
       tags: [bundle]
       summary: Fetch a signed policy bundle
-      x-status: planned — payload schema + parameter contract decided
-        2026-09-07 (see docs/decisions/0001-cloud-split.md); not implemented
-        yet. The core's `SignedPolicyBundle.payload` stays `unknown` — this
-        shape lives only on the wire and in whatever parses payload after
+      x-status: implemented 2026-09-09 (route + object allow-list in
+        registry-api, publisher in registryV2/scripts/publish-policy-bundle.ts).
+        Transitional — the bundle content moves on-chain in full at a later,
+        unscheduled date (docs/decisions/0001-cloud-split.md, 2026-09-09
+        addendum); this endpoint then becomes a mirror of on-chain content.
+        The core's `SignedPolicyBundle.payload` stays `unknown` — this shape
+        lives only on the wire and in whatever parses payload after
         verification, not in packages/core's types.
       description: |
         Signature scheme (fixed, from `registryV2/scripts/sign-bundles.ts`,
@@ -226,8 +230,11 @@ paths:
     post:
       tags: [audit]
       summary: Record a client-computed judgment (deduplicated by event id)
-      x-status: planned — not implemented; home service (Policy Hub vs
-        Registry Sync) not finalized, see docs/decisions/0001-cloud-split.md
+      x-status: served by Policy Hub (policy-server), implemented there
+        2026-09-12 — see crates/policy-server/server/openapi.yaml for the
+        authoritative definition (X-Api-Key auth, 202/400/401/503). Kept here
+        only so the cross-service contract is visible in one place; this
+        service does not route it.
       description: |
         Audit records are the **client's own report of what it decided**, not
         a server-verified judgment — the server never re-runs Cedar. A

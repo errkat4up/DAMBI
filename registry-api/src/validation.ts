@@ -10,6 +10,8 @@
  *   GET /bundles/<sha>.json
  *   GET /signatures/<sha>.sig
  *   GET /contexts/<source...>/<chainId>/<address>.json
+ *   GET /policy-bundles/<profile>/<sequence>.json     (immutable, sequence IS the version)
+ *   GET /policy-bundles/<profile>/latest.json         (mutable pointer)
  *
  * 이 regex 는 browser-extension/backend/service-worker/registry/client.ts
  * (CALL_KEY_ADDRESS_RE / CALL_KEY_SELECTOR_RE) 를 미러. 단 to/address/selector
@@ -35,6 +37,14 @@ const BUNDLE_FILE_RE = new RegExp(`^${SHA256_LC}\\.json$`);
 // Detached bundle signature sidecar = <bundle_sha256>.sig (content-addressed,
 // 0x + 64 lowercase hex). Tightly bounded → path-traversal-safe.
 const SIG_FILE_RE = new RegExp(`^${SHA256_LC}\\.sig$`);
+// Policy bundle = <profile>/<sequence|latest>.json. profile is ^[a-z0-9-]+$ (the
+// GET /v1/bundle contract, docs/decisions/0001-cloud-split.md); sequence is a
+// positive integer with no leading zeros so "007" and "7" can't name two
+// objects. Both fragments are tightly bounded → path-traversal-safe.
+const POLICY_PROFILE = "[a-z0-9-]+";
+const POLICY_BUNDLE_RE = new RegExp(
+  `^(${POLICY_PROFILE})/(${CHAIN_ID}|latest)\\.json$`,
+);
 
 // typed-data key = <chainId>__<verifyingContract.lower>__<primaryType>.
 // primaryType 는 EIP-712 콜론(:)이 "__" 로 escape 된 형태라 자체적으로 "__" 를
@@ -63,6 +73,9 @@ export function isValidAddressSegment(s: string): boolean {
 export function isValidSignatureFile(s: string): boolean {
   return SIG_FILE_RE.test(s);
 }
+export function isValidPolicyBundleFile(s: string): boolean {
+  return POLICY_BUNDLE_RE.test(s);
+}
 
 export interface ProxyTargetOk {
   ok: true;
@@ -80,6 +93,7 @@ const TOKENS_PREFIX = "/tokens/";
 const BUNDLES_PREFIX = "/bundles/";
 const SIGNATURES_PREFIX = "/signatures/";
 const CONTEXTS_PREFIX = "/contexts/";
+const POLICY_BUNDLES_PREFIX = "/policy-bundles/";
 const JSON_SUFFIX = ".json";
 
 /**
@@ -155,6 +169,16 @@ export function parseProxyTarget(pathname: string): ProxyTarget {
     const file = pathname.slice(SIGNATURES_PREFIX.length);
     return SIG_FILE_RE.test(file)
       ? { ok: true, objectName: `signatures/${file}` }
+      : { ok: false };
+  }
+
+  // Signed policy bundles for GET /v1/bundle — {payload, signature, key_id}
+  // served verbatim. <sequence>.json never changes once written; latest.json
+  // is a pointer the publish script overwrites.
+  if (pathname.startsWith(POLICY_BUNDLES_PREFIX)) {
+    const file = pathname.slice(POLICY_BUNDLES_PREFIX.length);
+    return POLICY_BUNDLE_RE.test(file)
+      ? { ok: true, objectName: `policy-bundles/${file}` }
       : { ok: false };
   }
 

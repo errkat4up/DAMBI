@@ -213,6 +213,17 @@ async function routeRequest(input: RouteInput): Promise<void> {
     }
   }
 
+  // GET /v1/bundle — signed policy bundle (docs/decisions/0001-cloud-split.md).
+  //   ?profile=&version=   → policy-bundles/<profile>/<version>.json (immutable)
+  //   ?profile=            → policy-bundles/<profile>/latest.json    (mutable pointer)
+  // profile defaults to "default". Malformed profile/version falls through to
+  // parseProxyTarget's 404 — never a 400, same as every other route here.
+  if (method === "GET" && url.pathname === "/v1/bundle") {
+    const profile = url.searchParams.get("profile") ?? "default";
+    const version = url.searchParams.get("version") ?? "latest";
+    proxyPath = `/policy-bundles/${profile}/${version}.json`;
+  }
+
   if (
     method === "GET" &&
     (proxyPath.startsWith("/index/by-callkey/") ||
@@ -221,7 +232,8 @@ async function routeRequest(input: RouteInput): Promise<void> {
       proxyPath.startsWith("/tokens/") ||
       proxyPath.startsWith("/bundles/") ||
       proxyPath.startsWith("/signatures/") ||
-      proxyPath.startsWith("/contexts/"))
+      proxyPath.startsWith("/contexts/") ||
+      proxyPath.startsWith("/policy-bundles/"))
   ) {
     await handleProxy(input, proxyPath);
     return;
@@ -702,10 +714,16 @@ function sendCacheValue(
   input.response.end(value.body);
 }
 
-/** Content-addressed leaves — the sha IS the version, so safe to cache forever. */
+const POLICY_BUNDLE_SEQUENCE_RE = /^\/policy-bundles\/[a-z0-9-]+\/[1-9][0-9]*\.json$/;
+
+/** Content-addressed leaves — the sha IS the version, so safe to cache forever.
+ *  policy-bundles/<profile>/<sequence>.json counts too: a sequence is never
+ *  rewritten (a rollback issues a new, higher sequence), only latest.json moves. */
 function isContentAddressed(proxyPath: string): boolean {
   return (
-    proxyPath.startsWith("/bundles/") || proxyPath.startsWith("/signatures/")
+    proxyPath.startsWith("/bundles/") ||
+    proxyPath.startsWith("/signatures/") ||
+    POLICY_BUNDLE_SEQUENCE_RE.test(proxyPath)
   );
 }
 

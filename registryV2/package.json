@@ -1,7 +1,7 @@
 {
   "name": "dambi-registryV2",
   "version": "0.3.0",
-  "description": "Dambi Adapter Loader registry v3 — PDF FSM spec (hierarchical emit.body + live_inputs.source)",
+  "description": "Dambi Adapter Loader registry v3 \u2014 PDF FSM spec (hierarchical emit.body + live_inputs.source)",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -15,7 +15,8 @@
     "sign": "tsx scripts/sign-bundles.ts",
     "gen-signing-key": "tsx scripts/gen-signing-key.ts",
     "typecheck": "tsc --noEmit",
-    "serve": "python3 -m http.server 8000"
+    "serve": "python3 -m http.server 8000",
+    "publish:policy-bundle": "tsx scripts/publish-policy-bundle.ts"
   },
   "devDependencies": {
     "@google-cloud/kms": "^5.5.1",
