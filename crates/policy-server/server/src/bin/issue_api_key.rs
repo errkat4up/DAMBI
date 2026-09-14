@@ -3,8 +3,10 @@
 //! Stores only the SHA-256 of the key and prints the plaintext ONCE on stdout.
 //! Reads DATABASE_URL like the server. Does not run migrations.
 //!
-//!   cargo run -p policy-server --bin issue_api_key -- --label browser-extension
-//!   cargo run -p policy-server --bin issue_api_key -- --revoke <key-uuid>
+//! ```text
+//! cargo run -p policy-server --bin issue_api_key -- --label browser-extension
+//! cargo run -p policy-server --bin issue_api_key -- --revoke <key-uuid>
+//! ```
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
