@@ -299,7 +299,7 @@ The canonical deployment, verified against the live project:
 | Bucket | `gs://dambi-registry-v3-unseo` — `STANDARD`, **UBLA**, **Public Access Prevention enforced**, **versioning on**, soft-delete 7 days, lifecycle: keep the 3 newest noncurrent versions, delete others ≥ 30 days noncurrent |
 | KMS | keyring `registry-signing` / key `bundle-sign-p256` / `ASYMMETRIC_SIGN` `EC_SIGN_P256_SHA256` / **HSM** protection (FIPS 140-2 L3, non-extractable) / version `1` enabled |
 | Proxy service | Cloud Run `registry-api-v3` (see [`../registry-api`](../registry-api)) |
-| Artifact Registry | `asia-northeast1-docker.pkg.dev/project-c2aefc18-2bfc-495a-a3d/dambi` (Docker) |
+| Artifact Registry | `asia-northeast3-docker.pkg.dev/project-c2aefc18-2bfc-495a-a3d/dambi` (Docker, Seoul — a different region from the Cloud Run service) |
 
 **Two service accounts, split by least privilege:**
 

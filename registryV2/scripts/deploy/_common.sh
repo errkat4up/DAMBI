@@ -28,7 +28,11 @@ BUCKET="${BUCKET:-dambi-registry-v3-unseo}"
 SA_NAME="${SA_NAME:-registry-api-v3-sa}"
 SA_EMAIL="${SA_EMAIL:-${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com}"
 SERVICE_NAME="${SERVICE_NAME:-registry-api-v3}"
-AR_REPO="${AR_REPO:-${REGION}-docker.pkg.dev/${PROJECT_ID}/dambi/registry-api}"
+# Artifact Registry lives in a DIFFERENT region from the Cloud Run service:
+# the `dambi` Docker repo was created in Seoul (asia-northeast3) while the
+# service runs in Tokyo (asia-northeast1). Verified 2026-09-14.
+AR_LOCATION="${AR_LOCATION:-asia-northeast3}"
+AR_REPO="${AR_REPO:-${AR_LOCATION}-docker.pkg.dev/${PROJECT_ID}/dambi/registry-api}"
 
 # --- Bundle signing (Cloud KMS, asymmetric EC_SIGN_P256_SHA256) ---------------
 # The detached signatures/<sha>.sig published with the index are produced by
