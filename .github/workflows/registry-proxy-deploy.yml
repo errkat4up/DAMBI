@@ -100,7 +100,7 @@ jobs:
           # push authenticates with the SA token (artifactregistry.writer) and has no
           # staging bucket in the path. --provenance=false → a plain single-arch image
           # Cloud Run accepts (no attestation manifest list).
-          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          gcloud auth configure-docker "${AR_LOCATION}-docker.pkg.dev" --quiet
           echo "build → ${IMAGE}"
           docker build --platform linux/amd64 --provenance=false -t "${IMAGE}" registry-api
           echo "push → ${IMAGE}"
