@@ -17,11 +17,11 @@
 # NOT called here: that guard pins a local gcloud config + operator account,
 # whereas CI authenticates keylessly as the deploy SA via WIF below.
 #
-# Required repository secrets — DEDICATED to the registry (dambi-registry),
+# Required repository secrets — DEDICATED to the registry (project-c2aefc18-2bfc-495a-a3d),
 # DISTINCT from policy-server-deploy.yml's GCP_* secrets (your-gcp-project-id).
 # Shared with registry-publish.yml:
-#   REGISTRY_WIF_PROVIDER  - full Workload Identity *provider* resource name (dambi-registry)
-#   REGISTRY_DEPLOY_SA     - deploy SA email. Needs, on PROJECT_ID=dambi-registry:
+#   REGISTRY_WIF_PROVIDER  - full Workload Identity *provider* resource name (project-c2aefc18-2bfc-495a-a3d)
+#   REGISTRY_DEPLOY_SA     - deploy SA email. Needs, on PROJECT_ID=project-c2aefc18-2bfc-495a-a3d:
 #                       roles/run.admin, roles/cloudbuild.builds.editor,
 #                       roles/artifactregistry.writer, and
 #                       roles/iam.serviceAccountUser on the runtime SA
@@ -46,7 +46,7 @@ jobs:
       # avoids GCS entirely (docker push, see below), but `gcloud run deploy` still
       # needs a billing project for its API calls — gcloud's modern clients read this
       # and attach x-goog-user-project (SA holds serviceUsageConsumer there).
-      CLOUDSDK_BILLING_QUOTA_PROJECT: dambi-registry
+      CLOUDSDK_BILLING_QUOTA_PROJECT: project-c2aefc18-2bfc-495a-a3d
     steps:
       - uses: actions/checkout@v4
 

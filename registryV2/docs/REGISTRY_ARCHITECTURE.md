@@ -231,7 +231,7 @@ uptime failure (`<50%` of probes passing / 10 min) — plus a **log-based error 
 beta `gcloud monitoring channels` component — see the script header).
 
 `provision-budget.sh` (operator-run; needs `BILLING_ACCOUNT`) sets a Cloud Billing budget scoped
-to `dambi-registry` with 50/90/100% actual + 100% forecast thresholds — a denial-of-wallet /
+to `project-c2aefc18-2bfc-495a-a3d` with 50/90/100% actual + 100% forecast thresholds — a denial-of-wallet /
 egress-spike safety net (**notify-only, not a hard cap**).
 
 Bucket **lifecycle** (`bucket-lifecycle.json`, applied by `provision-infra.sh`): a single rule
@@ -300,35 +300,35 @@ and broad `editor` bindings on a shared project are a poor home for one.
 
 | | **Prod (canonical)** |
 |---|---|
-| Project ID | `dambi-registry` (org `<ORG_ID>`) |
+| Project ID | `project-c2aefc18-2bfc-495a-a3d` (org `<ORG_ID>`) |
 | Project # | `<PROJECT_NUMBER>` |
-| Bucket | `gs://dambi-registry-v3-seoul` |
+| Bucket | `gs://dambi-registry-v3-unseo` |
 | KMS key | `registry-signing/bundle-sign-p256` — **HSM** |
 | Proxy (Cloud Run) | `registry-api-v3` → `https://<registry-proxy-host>` (stable) |
-| Runtime SA | `registry-api-v3-sa@dambi-registry` (objectViewer only) |
-| Signer SA (CI/WIF) | `registry-signer@dambi-registry` (signerVerifier + objectAdmin) |
+| Runtime SA | `registry-api-v3-sa@project-c2aefc18-2bfc-495a-a3d` (objectViewer only) |
+| Signer SA (CI/WIF) | `registry-signer@project-c2aefc18-2bfc-495a-a3d` (signerVerifier + objectAdmin) |
 | WIF | pool `github-pool` / provider `github-provider` (repo-pinned `errkat4up/DAMBI`) |
 | gcloud config | `dambi` |
 
-Bucket settings: `asia-northeast3` · versioning on · Public Access Prevention enforced ·
+Bucket settings: `asia-northeast1` · versioning on · Public Access Prevention enforced ·
 UBLA. The extension's channel pin is this project's HSM public key — see §6.
 
 ### Provisioning (idempotent gcloud / scripts)
-1. `gcloud projects create dambi-registry --organization=<ORG_ID>` + billing link + enable
+1. `gcloud projects create project-c2aefc18-2bfc-495a-a3d --organization=<ORG_ID>` + billing link + enable
    APIs (cloudkms, run, storage, artifactregistry, iamcredentials, sts, cloudbuild).
 2. Bucket (versioning + PAP + UBLA).
 3. KMS **HSM** keyring/key (`EC_SIGN_P256_SHA256`); extract the public key → channel pin.
-4. Runtime SA + `objectViewer`; AR repo `dambi`; **`PROJECT_ID=dambi-registry deploy-proxy.sh`**
+4. Runtime SA + `objectViewer`; AR repo `dambi`; **`PROJECT_ID=project-c2aefc18-2bfc-495a-a3d deploy-proxy.sh`**
    (verify: proxy-fetch sha == bucket sha, CORS behaviour, 404 on a bad path).
 5. Signer SA + KMS `signerVerifier` + bucket `objectAdmin`; WIF pool/provider **pinned to
    `errkat4up/DAMBI`**; `workloadIdentityUser` binding.
-6. In-repo targeting: `_common.sh` defaults (`PROJECT_ID=dambi-registry`, config map) and
+6. In-repo targeting: `_common.sh` defaults (`PROJECT_ID=project-c2aefc18-2bfc-495a-a3d`, config map) and
    `registry-publish.yml` env (`PROJECT_ID` / `BUCKET`).
 
 ### Manual finish steps (operator)
 - **GitHub secrets** (repo `errkat4up/DAMBI`) for CI keyless signing/publish:
   - `GCP_WIF_PROVIDER = projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/github-pool/providers/github-provider`
-  - `GCP_DEPLOY_SA = registry-signer@dambi-registry.iam.gserviceaccount.com`
+  - `GCP_DEPLOY_SA = registry-signer@project-c2aefc18-2bfc-495a-a3d.iam.gserviceaccount.com`
 - **Signing**: every published bundle carries a detached signature under `signatures/`,
   produced by CI (`registry-publish.yml`, KMS via WIF) once those secrets are set.
 - **Custom domain**: not used for the registry proxy — the `*.run.app` host is the stable

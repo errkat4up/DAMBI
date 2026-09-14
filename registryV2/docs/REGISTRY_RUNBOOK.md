@@ -5,7 +5,7 @@ identifier (project, bucket, KMS key, SA, proxy URL, pins) lives in
 `REGISTRY_ARCHITECTURE.md` §10 — this doc does not duplicate them, it tells you which
 command to run. **Run every command below from the `registryV2/` directory** (where this
 doc lives); the `scripts/deploy/…` paths are relative to it. All deploy scripts source
-`scripts/deploy/_common.sh`, which pins the prod target (`PROJECT_ID=dambi-registry`,
+`scripts/deploy/_common.sh`, which pins the prod target (`PROJECT_ID=project-c2aefc18-2bfc-495a-a3d`,
 config `dambi`) and guards the active gcloud account. Override with env
 (`PROJECT_ID=… GCLOUD_CONFIG=…`) to target the legacy PoC.
 
@@ -35,11 +35,11 @@ GA gcloud has no `channels` group; install the beta component once:
 gcloud components install beta
 gcloud beta monitoring channels create --type=email \
   --display-name="registry oncall" \
-  --channel-labels=email_address=YOU@example.com --project=dambi-registry
-gcloud beta monitoring channels list --project=dambi-registry --format='value(name)'
+  --channel-labels=email_address=YOU@example.com --project=project-c2aefc18-2bfc-495a-a3d
+gcloud beta monitoring channels list --project=project-c2aefc18-2bfc-495a-a3d --format='value(name)'
 ```
 Re-run monitoring with that resource name to wire paging:
-`NOTIFICATION_CHANNEL=projects/dambi-registry/notificationChannels/ID bash scripts/deploy/provision-monitoring.sh`
+`NOTIFICATION_CHANNEL=projects/project-c2aefc18-2bfc-495a-a3d/notificationChannels/ID bash scripts/deploy/provision-monitoring.sh`
 
 ---
 
@@ -47,15 +47,15 @@ Re-run monitoring with that resource name to wire paging:
 
 | Alert | First checks | Likely fix |
 |---|---|---|
-| **uptime /health failing** | `gcloud run services describe registry-api-v3 --region asia-northeast3 --format='value(status.url,status.conditions)'`; hit `${URL}/health` | bad revision → roll back revision (below); GCS unreachable → check bucket IAM |
+| **uptime /health failing** | `gcloud run services describe registry-api-v3 --region asia-northeast1 --format='value(status.url,status.conditions)'`; hit `${URL}/health` | bad revision → roll back revision (below); GCS unreachable → check bucket IAM |
 | **5xx burst** | Cloud Run logs `severity>=ERROR` (log-metric `registry_api_errors`); is GCS reachable / object present? | a bad publish (missing object) → republish / `rollback-index.sh`; transient → watch |
 | **p95 latency** | min-instances warm? cold-start? GCS latency? | ensure `MIN_INSTANCES≥1`; the JIT fetch shares the 8s pre-sign budget |
 | **signature coverage gap** (REQUIRE on) | `SKIP_FAITHFULNESS=1 bash scripts/deploy/verify-bucket-parity.sh` | a sha without a `.sig` → re-run `sign-bundles.ts` + publish `signatures/` |
 
 ### Roll back a bad proxy revision
 ```
-gcloud run revisions list --service registry-api-v3 --region asia-northeast3
-gcloud run services update-traffic registry-api-v3 --region asia-northeast3 --to-revisions <PRIOR>=100
+gcloud run revisions list --service registry-api-v3 --region asia-northeast1
+gcloud run services update-traffic registry-api-v3 --region asia-northeast1 --to-revisions <PRIOR>=100
 ```
 Cloud Run keeps prior revisions; an unhealthy new revision fails the deploy and traffic stays
 on the old one, so most "deploys" never need this.
@@ -138,7 +138,7 @@ build artifacts are produced if this variable is not exactly `true`.
 | What | Where | Value |
 |---|---|---|
 | WIF provider secret | repo Secrets `GCP_WIF_PROVIDER` | `projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/github-pool/providers/github-provider` |
-| Deploy/sign SA secret | repo Secrets `GCP_DEPLOY_SA` | `registry-signer@dambi-registry.iam.gserviceaccount.com` |
+| Deploy/sign SA secret | repo Secrets `GCP_DEPLOY_SA` | `registry-signer@project-c2aefc18-2bfc-495a-a3d.iam.gserviceaccount.com` |
 | `production` Environment | repo Settings → Environments | + required reviewer (gates publish + proxy-deploy) |
 | Extension build vars | repo Variables | `REGISTRY_BASE_URL` / `PINNED_BUNDLE_PUBLIC_KEY` / `DAMBI_REQUIRE_BUNDLE_SIGNATURE` |
 

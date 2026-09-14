@@ -29,7 +29,7 @@ output**, never hand-edited.
    publish-index.sh / registry-publish.yml
        │  gcloud storage rsync (leaves before pointers)
        ▼
-   gs://dambi-registry-v3-seoul   (PRIVATE, versioned)
+   gs://dambi-registry-v3-unseo   (PRIVATE, versioned)
        │
        ▼  ../registry-api Cloud Run proxy (read-only)
    browser extension
@@ -43,8 +43,8 @@ output**, never hand-edited.
 > bucket or proxy can withhold or corrupt a bundle (availability), but cannot forge one the
 > extension will accept (integrity) — see [Signing & verification](#signing--verification).
 
-> **Self-hosting:** the canonical deployment is GCP project `dambi-registry`
-> (`asia-northeast3`), but all resource names are env-overridable via
+> **Self-hosting:** the canonical deployment is GCP project `project-c2aefc18-2bfc-495a-a3d`
+> (`asia-northeast1`), but all resource names are env-overridable via
 > `scripts/deploy/_common.sh`.
 
 ---
@@ -295,18 +295,18 @@ The canonical deployment, verified against the live project:
 
 | Resource | Value |
 |---|---|
-| Project | `dambi-registry` (`asia-northeast3`) |
-| Bucket | `gs://dambi-registry-v3-seoul` — `STANDARD`, **UBLA**, **Public Access Prevention enforced**, **versioning on**, soft-delete 7 days, lifecycle: keep the 3 newest noncurrent versions, delete others ≥ 30 days noncurrent |
+| Project | `project-c2aefc18-2bfc-495a-a3d` (`asia-northeast1`) |
+| Bucket | `gs://dambi-registry-v3-unseo` — `STANDARD`, **UBLA**, **Public Access Prevention enforced**, **versioning on**, soft-delete 7 days, lifecycle: keep the 3 newest noncurrent versions, delete others ≥ 30 days noncurrent |
 | KMS | keyring `registry-signing` / key `bundle-sign-p256` / `ASYMMETRIC_SIGN` `EC_SIGN_P256_SHA256` / **HSM** protection (FIPS 140-2 L3, non-extractable) / version `1` enabled |
 | Proxy service | Cloud Run `registry-api-v3` (see [`../registry-api`](../registry-api)) |
-| Artifact Registry | `asia-northeast3-docker.pkg.dev/dambi-registry/dambi` (Docker) |
+| Artifact Registry | `asia-northeast1-docker.pkg.dev/project-c2aefc18-2bfc-495a-a3d/dambi` (Docker) |
 
 **Two service accounts, split by least privilege:**
 
 | Service account | Role(s) | Used by |
 |---|---|---|
-| `registry-signer@dambi-registry.iam.gserviceaccount.com` | `roles/cloudkms.signerVerifier` on the key (sign + `getPublicKey`, **not** export) + `roles/storage.objectAdmin` on the bucket + Cloud Run deployer | CI publish & proxy-deploy (the WIF identity) |
-| `registry-api-v3-sa@dambi-registry.iam.gserviceaccount.com` | `roles/storage.objectViewer` on the bucket | the proxy **runtime** (read-only) |
+| `registry-signer@project-c2aefc18-2bfc-495a-a3d.iam.gserviceaccount.com` | `roles/cloudkms.signerVerifier` on the key (sign + `getPublicKey`, **not** export) + `roles/storage.objectAdmin` on the bucket + Cloud Run deployer | CI publish & proxy-deploy (the WIF identity) |
+| `registry-api-v3-sa@project-c2aefc18-2bfc-495a-a3d.iam.gserviceaccount.com` | `roles/storage.objectViewer` on the bucket | the proxy **runtime** (read-only) |
 
 The bucket is not anonymously readable (`Public Access Prevention` is enforced and there
 is no `allUsers` bucket binding). Admin/project legacy IAM bindings still exist, so the
@@ -384,7 +384,7 @@ Build's GCS staging bucket.
 
 Both workflows authenticate via WIF (`REGISTRY_WIF_PROVIDER` + `REGISTRY_DEPLOY_SA`
 secrets), gate on the `production` GitHub Environment, and pin
-`CLOUDSDK_BILLING_QUOTA_PROJECT=dambi-registry` so external-account credentials attach
+`CLOUDSDK_BILLING_QUOTA_PROJECT=project-c2aefc18-2bfc-495a-a3d` so external-account credentials attach
 `x-goog-user-project`.
 
 ---

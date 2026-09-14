@@ -16,6 +16,9 @@
  *                                     → generated per-target context object
  *   GET /v1/registry/by-callkey?chain_id&to&selector
  *                                     → spec §6.1 callkey proxy alias (secondary)
+ *   GET /v1/registry/selectors?chain_id&selector
+ *                                     → by-selector proxy alias (address-agnostic
+ *                                       adapters, e.g. standard NFT setApprovalForAll)
  *   OPTIONS <any>                     → 204 CORS preflight
  *
  * Proxy 의미 (핵심 — 익스텐션 negative cache 가 의존):
@@ -181,6 +184,45 @@ async function routeRequest(input: RouteInput): Promise<void> {
     const selector = (url.searchParams.get("selector") ?? "").toLowerCase();
     proxyPath = `/index/by-callkey/${chainId}__${to}__${selector}.json`;
   }
+  // Public decoder lookup — ONE route, the parameter shape picks the index:
+  //   chain_id + to + selector                          → by-callkey
+  //   chain_id + selector            (no `to`)          → by-selector (address-agnostic)
+  //   chain_id + verifying_contract + primary_type      → by-typed-data (EIP-712)
+  // No server-side fallback between shapes (callkey miss does NOT retry as
+  // by-selector): whether an address-agnostic decoder may stand in is the
+  // client's call, gated by the decoder's own verified declaration. A mixed
+  // or incomplete shape falls through to the 404 below.
+  if (method === "GET" && url.pathname === "/v1/registry/selectors") {
+    const q = url.searchParams;
+    const chainId = q.get("chain_id") ?? "";
+    const to = q.get("to");
+    const selector = q.get("selector");
+    const verifyingContract = q.get("verifying_contract");
+    const primaryType = q.get("primary_type");
+    const isTx = selector !== null && verifyingContract === null && primaryType === null;
+    const isTypedData =
+      verifyingContract !== null && primaryType !== null && to === null && selector === null;
+    if (isTx && to !== null) {
+      proxyPath = `/index/by-callkey/${chainId}__${to.toLowerCase()}__${selector.toLowerCase()}.json`;
+    } else if (isTx) {
+      proxyPath = `/index/by-selector/${chainId}__${selector.toLowerCase()}.json`;
+    } else if (isTypedData) {
+      // primary_type keeps its case (it is the struct name); a ":" namespace
+      // separator is escaped as "__" like build-index's typedDataFilename.
+      proxyPath = `/index/by-typed-data/${chainId}__${verifyingContract.toLowerCase()}__${primaryType.replace(/:/g, "__")}.json`;
+    }
+  }
+
+  // GET /v1/bundle — signed policy bundle (docs/decisions/0001-cloud-split.md).
+  //   ?profile=&version=   → policy-bundles/<profile>/<version>.json (immutable)
+  //   ?profile=            → policy-bundles/<profile>/latest.json    (mutable pointer)
+  // profile defaults to "default". Malformed profile/version falls through to
+  // parseProxyTarget's 404 — never a 400, same as every other route here.
+  if (method === "GET" && url.pathname === "/v1/bundle") {
+    const profile = url.searchParams.get("profile") ?? "default";
+    const version = url.searchParams.get("version") ?? "latest";
+    proxyPath = `/policy-bundles/${profile}/${version}.json`;
+  }
 
   if (
     method === "GET" &&
@@ -190,7 +232,8 @@ async function routeRequest(input: RouteInput): Promise<void> {
       proxyPath.startsWith("/tokens/") ||
       proxyPath.startsWith("/bundles/") ||
       proxyPath.startsWith("/signatures/") ||
-      proxyPath.startsWith("/contexts/"))
+      proxyPath.startsWith("/contexts/") ||
+      proxyPath.startsWith("/policy-bundles/"))
   ) {
     await handleProxy(input, proxyPath);
     return;
@@ -626,6 +669,17 @@ async function materializeIfRefIndex(
   };
 }
 
+/**
+ * Weak content hash of the served bytes, quoted per RFC 9110 §8.8.3. Computed
+ * from the response body itself (not the upstream object name), so it also
+ * covers materialized/ref-resolved responses (`materializeIfRefIndex`) —
+ * those bytes differ from the raw GCS object, so a caller comparing against
+ * `bundle_sha256` alone would miss a change to the resolved shape.
+ */
+function computeEtag(body: Buffer): string {
+  return `"${createHash("sha256").update(body).digest("hex")}"`;
+}
+
 function sendCacheValue(
   input: RouteInput,
   value: CacheValue,
@@ -640,18 +694,36 @@ function sendCacheValue(
   const cacheControl = isContentAddressed(proxyPath)
     ? input.config.immutableCacheControlValue
     : input.config.cacheControlValue;
+  const etag = computeEtag(value.body);
+  const ifNoneMatch = input.request.headers["if-none-match"];
+  if (typeof ifNoneMatch === "string" && ifNoneMatch === etag) {
+    input.response.writeHead(304, {
+      ...CORS_HEADERS,
+      "cache-control": cacheControl,
+      etag,
+    });
+    input.response.end();
+    return;
+  }
   input.response.writeHead(200, {
     ...CORS_HEADERS,
     "content-type": value.contentType,
     "cache-control": cacheControl,
+    etag,
   });
   input.response.end(value.body);
 }
 
-/** Content-addressed leaves — the sha IS the version, so safe to cache forever. */
+const POLICY_BUNDLE_SEQUENCE_RE = /^\/policy-bundles\/[a-z0-9-]+\/[1-9][0-9]*\.json$/;
+
+/** Content-addressed leaves — the sha IS the version, so safe to cache forever.
+ *  policy-bundles/<profile>/<sequence>.json counts too: a sequence is never
+ *  rewritten (a rollback issues a new, higher sequence), only latest.json moves. */
 function isContentAddressed(proxyPath: string): boolean {
   return (
-    proxyPath.startsWith("/bundles/") || proxyPath.startsWith("/signatures/")
+    proxyPath.startsWith("/bundles/") ||
+    proxyPath.startsWith("/signatures/") ||
+    POLICY_BUNDLE_SEQUENCE_RE.test(proxyPath)
   );
 }
 

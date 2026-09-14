@@ -5,6 +5,7 @@
 //! - [`oauth`]: Google OAuth 2.0 callback that maps a Google account to a user.
 //! - [`middleware`]: axum extractor for bearer tokens.
 
+pub mod api_key;
 pub mod jwt;
 pub mod middleware;
 pub mod oauth;

@@ -11,7 +11,7 @@ describe("loadConfig", () => {
   it("defaults to the registry-v3 production bucket", () => {
     delete process.env.REGISTRY_BUCKET;
 
-    expect(loadConfig().bucketName).toBe("dambi-registry-v3-seoul");
+    expect(loadConfig().bucketName).toBe("dambi-registry-v3-unseo");
   });
 
   it("allows REGISTRY_BUCKET to override the default bucket", () => {

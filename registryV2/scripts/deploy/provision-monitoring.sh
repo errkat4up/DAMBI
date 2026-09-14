@@ -6,7 +6,7 @@
 # delete-then-re-run). See deploy/_common.sh for project/region/service.
 #
 #   bash registryV2/scripts/deploy/provision-monitoring.sh
-#   NOTIFICATION_CHANNEL=projects/dambi-registry/notificationChannels/123… \
+#   NOTIFICATION_CHANNEL=projects/project-c2aefc18-2bfc-495a-a3d/notificationChannels/123… \
 #     bash registryV2/scripts/deploy/provision-monitoring.sh        # + paging
 #   ERR_5XX_PER_5M=20 LATENCY_P95_MS=1500 bash …/provision-monitoring.sh
 #
@@ -20,8 +20,8 @@
 #   gcloud components install beta
 #   gcloud beta monitoring channels create --type=email \
 #     --display-name="registry oncall" \
-#     --channel-labels=email_address=you@example.com --project=dambi-registry
-#   gcloud beta monitoring channels list --project=dambi-registry \
+#     --channel-labels=email_address=you@example.com --project=project-c2aefc18-2bfc-495a-a3d
+#   gcloud beta monitoring channels list --project=project-c2aefc18-2bfc-495a-a3d \
 #     --format='value(name)'
 # then pass that resource name via NOTIFICATION_CHANNEL. Without it the policies
 # are still created (they surface in the console); attach a channel later.

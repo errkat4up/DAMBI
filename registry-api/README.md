@@ -21,7 +21,7 @@ media endpoint, and `canonicalize` for 3-ref materialization integrity checks.
   browser           │  Cloud Run service:  registry-api-v3   (THIS repo)       │
   extension         │  Google Front End (GFE) + autoscaler                     │
   (anonymous   ───► │    min 1 / max 3 instances · concurrency 80 · 15s timeout│ ──► GCS bucket
-   HTTPS GET)       │  per request:                                            │     dambi-registry-v3-seoul
+   HTTPS GET)       │  per request:                                            │     dambi-registry-v3-unseo
                     │    rate-limit → path allowlist → LRU+TTL cache →         │     (PRIVATE, PAP enforced)
                     │    single-flight → GCS read (runtime SA via ADC)          │ ◄── object bytes
                     └──────────────────────────────────────────────────────────┘
@@ -34,8 +34,8 @@ The objects in the bucket are produced by the sibling package [`../registryV2`](
 which is the registry **source of truth** (it builds the index, signs every bundle, and
 publishes to the bucket). This proxy never writes — it is strictly read-only.
 
-> **Self-hosting:** the canonical deployment runs in GCP project `dambi-registry`
-> (`asia-northeast3`), but every resource name (bucket, service, SA, region) is
+> **Self-hosting:** the canonical deployment runs in GCP project `project-c2aefc18-2bfc-495a-a3d`
+> (`asia-northeast1`), but every resource name (bucket, service, SA, region) is
 > env-overridable through `../registryV2/scripts/deploy/_common.sh`. Nothing here is
 > hard-coded to one tenant.
 
@@ -256,7 +256,7 @@ All env vars are read in `config.ts` with the defaults below.
 |---|---|---|
 | `HOST` | `0.0.0.0` | bind host |
 | `PORT` | `8080` | bind port |
-| `REGISTRY_BUCKET` | `dambi-registry-v3-seoul` | private GCS bucket to proxy |
+| `REGISTRY_BUCKET` | `dambi-registry-v3-unseo` | private GCS bucket to proxy |
 | `CACHE_MAX_ENTRIES` | `1024` | LRU cache capacity |
 | `CACHE_TTL_MS` | `300000` | positive entry TTL (5 min) |
 | `CACHE_NEGATIVE_TTL_MS` | `60000` | 404 entry TTL (60 s) |
@@ -280,8 +280,8 @@ The live deployment shape (from `_common.sh`, verified against the running servi
 
 | Setting | Value | Why |
 |---|---|---|
-| service | `registry-api-v3` (`asia-northeast3`) | |
-| runtime SA | `registry-api-v3-sa@dambi-registry.iam.gserviceaccount.com` | read-only `storage.objectViewer` on the bucket |
+| service | `registry-api-v3` (`asia-northeast1`) | |
+| runtime SA | `registry-api-v3-sa@project-c2aefc18-2bfc-495a-a3d.iam.gserviceaccount.com` | read-only `storage.objectViewer` on the bucket |
 | CPU / memory | `1` / `256Mi` (+ startup CPU boost) | tiny JSON proxy |
 | min / max instances | `1` / `3` | **min 1** keeps a warm instance — the extension's JIT registry fetch has no per-fetch timeout, so a scale-to-zero cold start would blow the 8 s pre-sign budget and surface `__engine::timeout`. **max 3** is the denial-of-wallet cost ceiling. |
 | concurrency | `80` | requests per instance |
@@ -292,7 +292,7 @@ The live deployment shape (from `_common.sh`, verified against the running servi
 The currently deployed image tag can lag the checked-out source until a
 `registry-proxy-v*` release or manual default-branch proxy deploy runs. Treat the table
 above as the live **runtime shape**; verify the exact image with `gcloud run services
-describe registry-api-v3 --region asia-northeast3 --project dambi-registry`.
+describe registry-api-v3 --region asia-northeast1 --project project-c2aefc18-2bfc-495a-a3d`.
 
 There is **no external load balancer** — the Compute Engine API isn't even enabled in the
 project. "Load balancing" is Cloud Run's built-in: the Google Front End terminates TLS and

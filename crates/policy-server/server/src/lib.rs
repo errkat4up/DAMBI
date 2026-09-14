@@ -35,6 +35,7 @@
 #![allow(clippy::result_large_err)]
 
 pub mod app;
+pub mod audit_handlers;
 pub mod auth;
 pub mod capabilities_handlers;
 pub mod config;

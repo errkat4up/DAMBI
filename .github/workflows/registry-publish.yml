@@ -8,12 +8,12 @@
 #
 # Signing runs in KMS mode under keyless Workload Identity Federation — the
 # private key never leaves the HSM, and no SA key file ever touches the runner.
-# One-time WIF setup. These are DEDICATED registry secrets (dambi-registry),
+# One-time WIF setup. These are DEDICATED registry secrets (project-c2aefc18-2bfc-495a-a3d),
 # DISTINCT from policy-server-deploy.yml's GCP_* secrets (your-gcp-project-id) —
 # the two target different projects/SAs, so they cannot share secret names.
 #
 # Required repository secrets:
-#   REGISTRY_WIF_PROVIDER  - full Workload Identity *provider* resource name (dambi-registry)
+#   REGISTRY_WIF_PROVIDER  - full Workload Identity *provider* resource name (project-c2aefc18-2bfc-495a-a3d)
 #   REGISTRY_DEPLOY_SA     - signer/publisher SA email (needs roles/cloudkms.signerVerifier
 #                       on the key + roles/storage.objectAdmin on the bucket)
 #
@@ -41,9 +41,9 @@ on:
 # CHANGE THESE for your own project.
 # ----------------------------------------------------------------------------
 env:
-  PROJECT_ID: dambi-registry
-  REGION: asia-northeast3
-  BUCKET: dambi-registry-v3-seoul
+  PROJECT_ID: project-c2aefc18-2bfc-495a-a3d
+  REGION: asia-northeast1
+  BUCKET: dambi-registry-v3-unseo
   KMS_KEYRING: registry-signing
   KMS_KEY: bundle-sign-p256
   KMS_KEY_VERSION: "1"
@@ -53,7 +53,7 @@ env:
   # project (gcloud reads this on every call) makes it attach x-goog-user-project
   # to the storage rsync below. The local owner publish never hits this: user creds
   # carry an implicit quota project.
-  CLOUDSDK_BILLING_QUOTA_PROJECT: dambi-registry
+  CLOUDSDK_BILLING_QUOTA_PROJECT: project-c2aefc18-2bfc-495a-a3d
 
 permissions:
   contents: read
