@@ -14,7 +14,7 @@
 #   bash registryV2/scripts/deploy/verify-bucket-parity.sh
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1   # registryV2/
-PROD_BUCKET="${PROD_BUCKET:-${BUCKET:-dambi-registry-v3-seoul}}"
+PROD_BUCKET="${PROD_BUCKET:-${BUCKET:-dambi-registry-v3-unseo}}"
 POC_BUCKET="${POC_BUCKET:-}"
 RC=0
 
