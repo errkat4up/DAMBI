@@ -15,10 +15,13 @@
 timeout: 3600s
 
 options:
-  # A full Rust workspace release build is slow on the default 2-vCPU machine.
-  # E2_HIGHCPU_8 cuts it to roughly a third for ~$0.3-0.5 per build. Note this
-  # machine type is NOT covered by the 2,500 free build-minutes/month.
-  machineType: E2_HIGHCPU_8
+  # A full Rust workspace release build is slow on the default 2-vCPU machine,
+  # and with `[profile.release] lto = "fat", codegen-units = 1` the four
+  # policy-server binaries link in parallel at several GB each: on
+  # E2_HIGHCPU_8 (8 GB RAM) rustc was SIGKILLed (OOM) linking `migrate`
+  # (build a98b8fc3, 2026-09-14). E2_HIGHCPU_32 has 32 GB; ~$1-2 per build.
+  # Not covered by the 2,500 free build-minutes/month.
+  machineType: E2_HIGHCPU_32
   # Avoids needing a user-managed logs bucket.
   logging: CLOUD_LOGGING_ONLY
 
