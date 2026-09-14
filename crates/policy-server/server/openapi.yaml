@@ -23,6 +23,8 @@ servers:
     description: Local dev
 
 tags:
+  - name: audit
+    description: Host-reported verdicts (API key, not user JWT)
   - name: auth
     description: Google OAuth + JWT lifecycle
   - name: wallets
@@ -800,10 +802,47 @@ paths:
     get:
       tags: [meta]
       summary: Server-Sent Events feed (wallet sync and tx lifecycle)
-      description: Requires `Authorization: Bearer <jwt>`. Native EventSource cannot set headers; clients must use a header-capable SSE/fetch stream.
+      description: "Requires `Authorization: Bearer <jwt>`. Native EventSource cannot set headers; clients must use a header-capable SSE/fetch stream."
       responses:
         "200":
           description: SSE stream
+
+  /v1/audit:
+    post:
+      tags: [audit]
+      summary: Record a client-computed judgment (deduplicated per key + event id)
+      description: |
+        The integrating host reports the verdict its local dambi-core computed.
+        The server never re-runs Cedar. Authenticates with `X-Api-Key`
+        (issued by the `issue_api_key` binary; one key = one host app, no
+        tenant grouping in v0.1 — ADR 0001). Unknown fields are rejected:
+        no wallet address, calldata or signature can reach this endpoint.
+        Replaying the same `event_id` under the same key returns 202 with
+        `recorded: false`.
+      security:
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AuditEvent" }
+      responses:
+        "202":
+          description: Accepted (recorded, or already recorded)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  event_id: { type: string }
+                  recorded: { type: boolean, description: false when this (key, event_id) was already stored }
+        "400":
+          description: Malformed event (bad digest/verdict/id, unknown field, invalid JSON)
+        "401":
+          description: Missing, malformed, unknown or revoked API key
+        "503":
+          description: Key or audit store unavailable
 
 components:
   securitySchemes:
@@ -811,6 +850,10 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Api-Key
 
   parameters:
     AddressParam:
@@ -821,6 +864,17 @@ components:
       example: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045"
 
   schemas:
+    AuditEvent:
+      type: object
+      additionalProperties: false
+      required: [event_id, request_digest, verdict, policy_version, engine_version]
+      properties:
+        event_id: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9._:-]+$", description: Client-generated dedup key. }
+        request_digest: { type: string, pattern: "^0x[0-9a-f]{64}$", description: Hash of the evaluated request — never the raw calldata or signature payload. }
+        verdict: { type: string, enum: [allow, warn, deny] }
+        policy_version: { type: string, maxLength: 64, description: Bundle `sequence` the verdict was computed against. }
+        engine_version: { type: string, maxLength: 64 }
+        submitted_at: { type: integer, minimum: 0, description: Unix seconds, client clock. }
     CreateMarketReportRequest:
       type: object
       required: [reason]

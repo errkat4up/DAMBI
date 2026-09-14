@@ -7,7 +7,7 @@
 
 use axum::extract::{FromRef, Request, State};
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
-use axum::middleware::{from_fn, Next};
+use axum::middleware::{from_fn, from_fn_with_state, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post};
 use axum::{Extension, Json, Router};
@@ -27,6 +27,8 @@ use policy_sync::sources::fetchers::rpc::multicall::{
 };
 use policy_sync::{CoinGeckoClient, EtherscanClient, Orchestrator};
 
+use crate::audit_handlers;
+use crate::auth::api_key::require_api_key;
 use crate::auth::{require_auth, AuthUser};
 use crate::capabilities_handlers;
 use crate::config::ServerConfig;
@@ -294,8 +296,19 @@ pub fn build_router_with_config(state: AppState, config: &ServerConfig) -> Route
         .route("/auth/google/callback", get(crate::auth::google_callback))
         .route("/auth/refresh", post(crate::auth::refresh_token));
 
+    // Host-facing routes authenticate with an API key (X-Api-Key), not a user
+    // JWT — see auth::api_key. Kept as its own group so the two identity kinds
+    // never share a middleware stack. `route_layer`, not `layer`: the latter
+    // also wraps this router's fallback, and after `merge` that fallback won —
+    // every unknown path then answered 401 instead of 404
+    // (tests/local_only_policy_verdict_routes.rs caught it).
+    let host_api = Router::new()
+        .route("/v1/audit", post(audit_handlers::record_audit_event))
+        .route_layer(from_fn_with_state(state.clone(), require_api_key));
+
     public
         .merge(protected)
+        .merge(host_api)
         .layer(TraceLayer::new_for_http().make_span_with(sanitized_trace_span))
         .layer(RequestBodyLimitLayer::new(config.http_body_limit_bytes))
         .layer(cors_layer(config))
@@ -332,7 +345,11 @@ fn cors_layer(config: &ServerConfig) -> CorsLayer {
             Method::DELETE,
             Method::OPTIONS,
         ])
-        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+        .allow_headers([
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            HeaderName::from_static(crate::auth::api_key::API_KEY_HEADER),
+        ])
         .allow_private_network(config.allow_private_network)
 }
 

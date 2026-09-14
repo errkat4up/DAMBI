@@ -1,5 +1,6 @@
 //! PostgreSQL-backed stores used by the policy server.
 
+pub mod audit;
 pub mod market;
 pub mod postgres;
 

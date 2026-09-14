@@ -178,6 +178,74 @@ binding) and flagged one genuinely open item plus one real schema bug:
   Hub/Registry Sync has an actual `sequence` cut frequency to check it
   against.
 
+## Addendum (2026-09-09) — policy bundles move on-chain later, in full
+
+New information from the user (not in any prior planning doc): the policy
+bundle contract is a **transitional off-chain form**. At an unscheduled later
+date (after v0.4 as far as anything is planned) the **entire
+bundle content** goes on-chain, not just a hash. This changes the weight of
+several decisions above:
+
+| Decision above | After on-chain |
+|---|---|
+| Separate P-256 KMS key for policy bundles | **Replaced.** Signature becomes the attester's chain signature; SDK `trustedKeys` becomes an attester-address / schema allow-list. |
+| `signature` + `key_id` fields | **Replaced** by attestation UID + attester address. |
+| `payload` as a JCS string | **Survives.** The exact bytes are what gets written on-chain; fixed bytes are a prerequisite, not a casualty. |
+| `sequence` monotonic | **Survives** as an attestation data field / block-order mapping. |
+| `registry_ref: null` reserved | **Survives** — this is the slot for the on-chain reference. |
+| `GET /v1/bundle` | **Demoted to a cache mirror** of on-chain content, not removed. |
+
+Consequences, effective now:
+
+- **Do not provision the GCP KMS policy-bundle key.** The separate-key
+  decision stands in principle (it costs nothing to keep the pipeline shaped
+  that way), but the key itself is a throwaway asset. v0.1 signs with
+  `sign-bundles.ts`'s `local` mode dev key; a KMS key is provisioned only if
+  a non-demo consumer needs off-chain bundles before the on-chain cut.
+- `GET /v1/bundle` is built as decided (the serving path is reused as the
+  mirror), but no further off-chain-only investment goes into it — no
+  retention policy, no multi-profile, no bundle-level SLO.
+- The `sequence` counter lives in a repo-committed file
+  (`registryV2/policy-bundles/default/sequence`) rather than being derived
+  from a bucket listing. Reason: it is reviewable in a PR, works offline, and
+  is the same value the on-chain attestation will later carry.
+- `expires_at` stays `null` in v0.1 (72 h `maxBundleAgeSec` is the only
+  freshness bound). Anything that would only make sense off-chain is not
+  worth adding.
+
+Implemented the same day (working tree, `feat/registry-sync`): `GET
+/v1/bundle` route + `policy-bundles/` allow-list in `registry-api`,
+`registryV2/scripts/publish-policy-bundle.ts` (assemble → JCS → sign → write
+`<sequence>.json` + `latest.json`, bump counter), `gen-signing-key --policy`
+for the separate dev key, and `policy-bundles/` added to
+`publish-index.sh`'s upload order (before `index/`).
+
+## Addendum (2026-09-12) — audit API keys: no tenant concept in v0.1
+
+Decided with the user: `POST /v1/audit` API keys are issued **per host app**
+(one key = one integrator), with no tenant/organization grouping above them.
+v0.1 has exactly two hosts (the extension and the demo Snap), so a tenant
+table would be structure with nothing to hold. Adding one later is an
+additive column on the key table, not a contract change. `profile` in the
+bundle payload remains unrelated to this (not a tenant binding).
+
+Implemented the same day on Policy Hub (`policy-server`, working tree):
+migration `0013_api_keys_audit_events.sql`, `policy_db::audit`,
+`auth::api_key` (X-Api-Key middleware, SHA-256-hashed keys), `POST /v1/audit`
+handler with `deny_unknown_fields`, the `issue_api_key` binary, and the
+`#[ignore]`-gated Postgres integration test that CI's postgres-integration
+job runs. Rate limiting/quota (backlog 19) is not part of this.
+
+Also recorded 2026-09-12, from live checks against the real GCP project
+(`project-c2aefc18-2bfc-495a-a3d`, asia-northeast1, bucket
+`dambi-registry-v3-unseo` — the repo's `dambi-registry`/`-seoul`/northeast3
+values were never real and have been corrected): the deployed decoder
+registry is signed with a **local dev key** (`local-27576fda5c31`), no KMS
+key exists, and bucket versioning / public-access prevention are off. User
+decision: **keep the local decoder key for v0.1** rather than provisioning
+KMS now; revisit at the on-chain transition. Open: which machine holds that
+key file.
+
 ## Addendum (2026-09-07) — security audit commissioning timing
 
 A separate, since-superseded 12-day sprint doc placed audit commissioning at
