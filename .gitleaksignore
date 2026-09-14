@@ -1,0 +1,5 @@
+# Public test-only signing keys documented in contracts/core-v1/README.md.
+# Ignore only these two findings in the introducing commit; future keys and
+# changes to this file remain subject to the normal secret-scanning rules.
+763c4fac6a04bfd5c49dfff92ae54eaf52a0e6ad:contracts/core-v1/examples/test-only-keys.json:private-key:8
+763c4fac6a04bfd5c49dfff92ae54eaf52a0e6ad:contracts/core-v1/examples/test-only-keys.json:private-key:14

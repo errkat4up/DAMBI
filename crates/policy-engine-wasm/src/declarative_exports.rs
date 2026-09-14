@@ -3592,6 +3592,8 @@ fn rederive_for_child(
 }
 
 /// Self multicall uses the current absolute frame and shared request budget.
+// Like the call-array helper, plus the shared target needed by self calls.
+#[allow(clippy::too_many_arguments)]
 fn build_multicall_recurse_body_with_context(
     chain_id: u64,
     to: &str,
