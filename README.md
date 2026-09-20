@@ -2,7 +2,6 @@
 
 [![CI](https://github.com/errkat4up/DAMBI/actions/workflows/ci.yml/badge.svg)](https://github.com/errkat4up/DAMBI/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
-[![Latest release](https://img.shields.io/github/v/release/errkat4up/DAMBI?sort=semver)](https://github.com/errkat4up/DAMBI/releases/latest)
 
 <!-- TRUST404-SUBMISSION:START -->
 
@@ -24,7 +23,8 @@ During the official TRUST404 build period, `errkat4up`:
 
 - expanded real-transaction decoding coverage for ERC-20 `approve` and
   `transfer` calls;
-- strengthened validation of complete EIP-712 permit inputs;
+- added strict EIP-712 input validation for supported EIP-2612 permit
+  requests;
 - added Permit2 Single and Batch typed-data decoding coverage;
 - expanded NFPM and Bundler3 multicall decoding coverage;
 - added bounded multicall traversal while preserving security diagnostics;
@@ -34,7 +34,7 @@ During the official TRUST404 build period, `errkat4up`:
 The implementation and validation evidence is recorded in the
 [decoder fixture report](fixtures/decoder-policy/README.md), its
 [coverage and limitations](fixtures/decoder-policy/coverage.md), and the
-[relevant commits](https://github.com/errkat4up/DAMBI/compare/3066f0c0...40a268c5).
+[relevant commits](https://github.com/errkat4up/DAMBI/compare/23eaaa69...40a268c5).
 
 ### Track 05 security case
 
@@ -257,20 +257,26 @@ this script, so a normal extension build picks it up automatically.
 A Yarn 4 workspace at `browser-extension/` (the dashboard is a nested
 workspace). Loadable builds are produced by **two** pipelines into
 `dist/<browser>/`: webpack (SW / content scripts / popup / confirm) and Vite
-(the options-page dashboard).
+(the options-page dashboard). For a local smoke build of the current source:
 
 ```bash
 cd browser-extension
-yarn install
-yarn build:ext         # chrome (webpack) + dashboard (vite) → dist/chrome/
+yarn install --immutable
+DAMBI_ALLOW_INSECURE_REGISTRY=1 \
+  REGISTRY_BASE_URL=http://127.0.0.1:8000 \
+  yarn build:ext       # chrome (webpack) + dashboard (vite) → dist/chrome/
 # or, for live dev:
 yarn dev:chrome        # webpack --watch; run `cd dashboard && yarn dev` alongside for the dashboard
 ```
 
+The smoke-build override is for local verification only, not for a store or
+distribution package. Load `browser-extension/dist/chrome/` from
+`chrome://extensions` using **Developer mode → Load unpacked**.
+
 Build-time config is via env vars — most importantly `DAMBI_SERVER_URL` (the
 policy-server the extension calls; default `http://127.0.0.1:8788`) and
 `REGISTRY_BASE_URL`. See [`browser-extension/README.md`](browser-extension/README.md)
-for the full matrix, load instructions, and the local-server workflow.
+for the production configuration, full matrix, and local-server workflow.
 
 ### policy-server (local)
 
