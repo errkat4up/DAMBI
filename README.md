@@ -4,6 +4,78 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/errkat4up/DAMBI?sort=semver)](https://github.com/errkat4up/DAMBI/releases/latest)
 
+<!-- TRUST404-SUBMISSION:START -->
+
+> [!IMPORTANT]
+> **TRUST404 2026 · Track 05 Submission**
+>
+> Dambi is an existing wallet-security browser extension. `errkat4up` was one
+> of the developers of the original Dambi browser extension and has continued
+> developing its transaction-decoding and pre-sign security capabilities.
+>
+> This submission claims only the decoder and security-hardening work listed
+> below that `errkat4up` completed during the official TRUST404 build period.
+
+## TRUST404 Track 05 Submission Scope
+
+### Work claimed for this submission
+
+During the official TRUST404 build period, `errkat4up`:
+
+- expanded real-transaction decoding coverage for ERC-20 `approve` and
+  `transfer` calls;
+- strengthened validation of complete EIP-712 permit inputs;
+- added Permit2 Single and Batch typed-data decoding coverage;
+- expanded NFPM and Bundler3 multicall decoding coverage;
+- added bounded multicall traversal while preserving security diagnostics;
+- hardened decoder-registry collision and precedence validation; and
+- added reproducible fixtures and CI checks for these security paths.
+
+The implementation and validation evidence is recorded in the
+[decoder fixture report](fixtures/decoder-policy/README.md), its
+[coverage and limitations](fixtures/decoder-policy/coverage.md), and the
+[relevant commits](https://github.com/errkat4up/DAMBI/compare/3066f0c0...40a268c5).
+
+### Track 05 security case
+
+- **Threat Model** — A malicious or compromised dApp can construct wallet
+  transaction or typed-signature requests that hide excessive approvals,
+  redirected transfers, malformed typed data, or dangerous calls nested inside
+  multicalls. The attacker controls the request, but not the user's device, the
+  extension runtime, or the user's installed policy set.
+- **Protected Asset** — The user's wallet assets, token approval authority,
+  signature authority, and ability to understand what will execute before
+  signing.
+- **Failure Condition** — A dangerous or ambiguous request is decoded as a
+  benign action, decoder or traversal limits can be bypassed, or a decoding
+  failure is allowed to fail open without a visible warning or block.
+- **Validation Method** — Real calldata and typed-data fixtures are replayed
+  through the production registry and WASM decoder path, with malformed-input,
+  boundary, collision, precedence, and bounded-multicall regression cases. The
+  recorded DEC-07 validation completed 589/589 Node integration checks, 20/20
+  Registry checks, and 1/1 reproducibility check; scope and remaining limits
+  are documented in the linked reports above.
+
+### Project background and baseline
+
+Before the TRUST404 build period, Dambi already operated as a browser extension
+with wallet RPC interception, a Rust/WASM policy engine, Cedar-based policy
+evaluation, transaction and typed-signature decoding, and a base protocol
+decoder registry.
+
+This baseline is part of the Dambi codebase that `errkat4up` had already
+participated in developing. It is described here only to distinguish the
+existing product from the work claimed for this submission.
+
+### Ongoing work outside this submission
+
+Dambi is currently delivered as a browser extension. Its capabilities are
+being expanded into a reusable standalone SDK, but that SDK work is still in
+progress and is not claimed as part of this TRUST404 submission. Related API
+and deployment work is also outside this submission's claimed scope.
+
+<!-- TRUST404-SUBMISSION:END -->
+
 **Dambi** is an open-source wallet-side transaction and signature policy engine
 for Web3 signing safety. It maintains a reusable Rust/WASM policy evaluator,
 declarative EVM calldata and EIP-712 decoder registry, protocol coverage tests,
