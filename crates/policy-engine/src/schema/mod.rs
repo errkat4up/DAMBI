@@ -20,277 +20,263 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
 // core (Core namespace + Amm/Lending/Launchpad/Perp shared types hoisted here)
-const CORE_SCHEMA: &str = include_str!("../../../../schema/policy-schema/core.cedarschema");
+const CORE_SCHEMA: &str = include_str!("../../schema/policy-schema/core.cedarschema");
 
 // structural action bodies (Core::Multicall, Core::Unknown)
 const CORE_MULTICALL_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/multicall.cedarschema");
+    include_str!("../../schema/policy-schema/actions/multicall.cedarschema");
 const CORE_UNKNOWN_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/unknown.cedarschema");
+    include_str!("../../schema/policy-schema/actions/unknown.cedarschema");
 
 // airdrop (alphabetical)
 const AIRDROP_CLAIM_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/airdrop/claim.cedarschema");
+    include_str!("../../schema/policy-schema/actions/airdrop/claim.cedarschema");
 const AIRDROP_DELEGATE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/airdrop/delegate.cedarschema");
+    include_str!("../../schema/policy-schema/actions/airdrop/delegate.cedarschema");
 
 // amm (alphabetical)
 const AMM_ADD_LIQUIDITY_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/amm/add_liquidity.cedarschema");
+    include_str!("../../schema/policy-schema/actions/amm/add_liquidity.cedarschema");
 const AMM_CANCEL_INTENT_ORDER_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/amm/cancel_intent_order.cedarschema");
+    include_str!("../../schema/policy-schema/actions/amm/cancel_intent_order.cedarschema");
 const AMM_COLLECT_FEES_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/amm/collect_fees.cedarschema");
+    include_str!("../../schema/policy-schema/actions/amm/collect_fees.cedarschema");
 const AMM_GSM_SWAP_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/amm/gsm_swap.cedarschema");
+    include_str!("../../schema/policy-schema/actions/amm/gsm_swap.cedarschema");
 const AMM_PRE_SIGN_INTENT_ORDER_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/amm/pre_sign_intent_order.cedarschema");
+    include_str!("../../schema/policy-schema/actions/amm/pre_sign_intent_order.cedarschema");
 const AMM_REMOVE_LIQUIDITY_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/amm/remove_liquidity.cedarschema");
+    include_str!("../../schema/policy-schema/actions/amm/remove_liquidity.cedarschema");
 const AMM_SETTLE_INTENT_ORDER_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/amm/settle_intent_order.cedarschema");
+    include_str!("../../schema/policy-schema/actions/amm/settle_intent_order.cedarschema");
 const AMM_SIGN_INTENT_ORDER_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/amm/sign_intent_order.cedarschema");
+    include_str!("../../schema/policy-schema/actions/amm/sign_intent_order.cedarschema");
 const AMM_SWAP_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/amm/swap.cedarschema");
+    include_str!("../../schema/policy-schema/actions/amm/swap.cedarschema");
 
 // bridge
 const BRIDGE_SEND_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/bridge/send.cedarschema");
+    include_str!("../../schema/policy-schema/actions/bridge/send.cedarschema");
 
 // governance (alphabetical)
 const GOVERNANCE_ACTIVATE_VOTING_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/governance/activate_voting.cedarschema");
+    include_str!("../../schema/policy-schema/actions/governance/activate_voting.cedarschema");
 const GOVERNANCE_CANCEL_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/governance/cancel.cedarschema");
+    include_str!("../../schema/policy-schema/actions/governance/cancel.cedarschema");
 const GOVERNANCE_CLOSE_VOTE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/governance/close_vote.cedarschema");
+    include_str!("../../schema/policy-schema/actions/governance/close_vote.cedarschema");
 const GOVERNANCE_DELEGATE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/governance/delegate.cedarschema");
+    include_str!("../../schema/policy-schema/actions/governance/delegate.cedarschema");
 const GOVERNANCE_EXECUTE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/governance/execute.cedarschema");
+    include_str!("../../schema/policy-schema/actions/governance/execute.cedarschema");
 const GOVERNANCE_PROPOSE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/governance/propose.cedarschema");
+    include_str!("../../schema/policy-schema/actions/governance/propose.cedarschema");
 const GOVERNANCE_QUEUE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/governance/queue.cedarschema");
+    include_str!("../../schema/policy-schema/actions/governance/queue.cedarschema");
 const GOVERNANCE_REDEEM_CANCELLATION_FEE_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/governance/redeem_cancellation_fee.cedarschema"
+    "../../schema/policy-schema/actions/governance/redeem_cancellation_fee.cedarschema"
 );
 const GOVERNANCE_START_VOTE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/governance/start_vote.cedarschema");
-const GOVERNANCE_UPDATE_REPRESENTATIVE_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/governance/update_representative.cedarschema"
-);
+    include_str!("../../schema/policy-schema/actions/governance/start_vote.cedarschema");
+const GOVERNANCE_UPDATE_REPRESENTATIVE_SCHEMA: &str =
+    include_str!("../../schema/policy-schema/actions/governance/update_representative.cedarschema");
 const GOVERNANCE_VOTE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/governance/vote.cedarschema");
+    include_str!("../../schema/policy-schema/actions/governance/vote.cedarschema");
 
 // lending (alphabetical)
 const LENDING_BORROW_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/lending/borrow.cedarschema");
+    include_str!("../../schema/policy-schema/actions/lending/borrow.cedarschema");
 const LENDING_BUY_COLLATERAL_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/lending/buy_collateral.cedarschema");
+    include_str!("../../schema/policy-schema/actions/lending/buy_collateral.cedarschema");
 const LENDING_DELEGATE_BORROW_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/lending/delegate_borrow.cedarschema");
+    include_str!("../../schema/policy-schema/actions/lending/delegate_borrow.cedarschema");
 const LENDING_DISABLE_COLLATERAL_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/lending/disable_collateral.cedarschema");
+    include_str!("../../schema/policy-schema/actions/lending/disable_collateral.cedarschema");
 const LENDING_ENABLE_COLLATERAL_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/lending/enable_collateral.cedarschema");
+    include_str!("../../schema/policy-schema/actions/lending/enable_collateral.cedarschema");
 const LENDING_LIQUIDATE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/lending/liquidate.cedarschema");
-const LENDING_PERIPHERY_OPERATION_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/lending/periphery_operation.cedarschema"
-);
+    include_str!("../../schema/policy-schema/actions/lending/liquidate.cedarschema");
+const LENDING_PERIPHERY_OPERATION_SCHEMA: &str =
+    include_str!("../../schema/policy-schema/actions/lending/periphery_operation.cedarschema");
 const LENDING_REPAY_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/lending/repay.cedarschema");
+    include_str!("../../schema/policy-schema/actions/lending/repay.cedarschema");
 const LENDING_SET_EMODE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/lending/set_emode.cedarschema");
+    include_str!("../../schema/policy-schema/actions/lending/set_emode.cedarschema");
 const LENDING_SUPPLY_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/lending/supply.cedarschema");
+    include_str!("../../schema/policy-schema/actions/lending/supply.cedarschema");
 const LENDING_SWAP_RATE_MODE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/lending/swap_rate_mode.cedarschema");
+    include_str!("../../schema/policy-schema/actions/lending/swap_rate_mode.cedarschema");
 const LENDING_WITHDRAW_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/lending/withdraw.cedarschema");
+    include_str!("../../schema/policy-schema/actions/lending/withdraw.cedarschema");
 const LENDING_SET_AUTHORIZATION_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/lending/set_authorization.cedarschema");
+    include_str!("../../schema/policy-schema/actions/lending/set_authorization.cedarschema");
 
 // liquid_staking (alphabetical)
-const LIQUID_STAKING_CLAIM_WITHDRAWAL_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/liquid_staking/claim_withdrawal.cedarschema"
-);
+const LIQUID_STAKING_CLAIM_WITHDRAWAL_SCHEMA: &str =
+    include_str!("../../schema/policy-schema/actions/liquid_staking/claim_withdrawal.cedarschema");
 const LIQUID_STAKING_REQUEST_WITHDRAWAL_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/liquid_staking/request_withdrawal.cedarschema"
+    "../../schema/policy-schema/actions/liquid_staking/request_withdrawal.cedarschema"
 );
 const LIQUID_STAKING_STAKE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/liquid_staking/stake.cedarschema");
-const LIQUID_STAKING_TRANSFER_SHARES_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/liquid_staking/transfer_shares.cedarschema"
-);
+    include_str!("../../schema/policy-schema/actions/liquid_staking/stake.cedarschema");
+const LIQUID_STAKING_TRANSFER_SHARES_SCHEMA: &str =
+    include_str!("../../schema/policy-schema/actions/liquid_staking/transfer_shares.cedarschema");
 const LIQUID_STAKING_UNWRAP_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/liquid_staking/unwrap.cedarschema");
+    include_str!("../../schema/policy-schema/actions/liquid_staking/unwrap.cedarschema");
 const LIQUID_STAKING_WRAP_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/liquid_staking/wrap.cedarschema");
+    include_str!("../../schema/policy-schema/actions/liquid_staking/wrap.cedarschema");
 
 // yield (alphabetical)
 const YIELD_ADD_MARKET_LIQUIDITY_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/yield/add_market_liquidity.cedarschema");
+    include_str!("../../schema/policy-schema/actions/yield/add_market_liquidity.cedarschema");
 const YIELD_CANCEL_LIMIT_ORDER_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/yield/cancel_limit_order.cedarschema");
+    include_str!("../../schema/policy-schema/actions/yield/cancel_limit_order.cedarschema");
 const YIELD_CLAIM_YIELD_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/yield/claim_yield.cedarschema");
+    include_str!("../../schema/policy-schema/actions/yield/claim_yield.cedarschema");
 const YIELD_MINT_PY_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/yield/mint_py.cedarschema");
+    include_str!("../../schema/policy-schema/actions/yield/mint_py.cedarschema");
 const YIELD_MINT_SY_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/yield/mint_sy.cedarschema");
+    include_str!("../../schema/policy-schema/actions/yield/mint_sy.cedarschema");
 const YIELD_PT_SWAP_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/yield/pt_swap.cedarschema");
+    include_str!("../../schema/policy-schema/actions/yield/pt_swap.cedarschema");
 const YIELD_REDEEM_PY_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/yield/redeem_py.cedarschema");
+    include_str!("../../schema/policy-schema/actions/yield/redeem_py.cedarschema");
 const YIELD_REDEEM_SY_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/yield/redeem_sy.cedarschema");
-const YIELD_REMOVE_MARKET_LIQUIDITY_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/yield/remove_market_liquidity.cedarschema"
-);
+    include_str!("../../schema/policy-schema/actions/yield/redeem_sy.cedarschema");
+const YIELD_REMOVE_MARKET_LIQUIDITY_SCHEMA: &str =
+    include_str!("../../schema/policy-schema/actions/yield/remove_market_liquidity.cedarschema");
 const YIELD_SIGN_LIMIT_ORDER_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/yield/sign_limit_order.cedarschema");
+    include_str!("../../schema/policy-schema/actions/yield/sign_limit_order.cedarschema");
 const YIELD_YT_SWAP_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/yield/yt_swap.cedarschema");
+    include_str!("../../schema/policy-schema/actions/yield/yt_swap.cedarschema");
 
 // staking (alphabetical)
 const STAKING_CLAIM_REWARDS_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/staking/claim_rewards.cedarschema");
+    include_str!("../../schema/policy-schema/actions/staking/claim_rewards.cedarschema");
 const STAKING_COOLDOWN_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/staking/cooldown.cedarschema");
+    include_str!("../../schema/policy-schema/actions/staking/cooldown.cedarschema");
 const STAKING_GAUGE_DEPOSIT_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/staking/gauge_deposit.cedarschema");
+    include_str!("../../schema/policy-schema/actions/staking/gauge_deposit.cedarschema");
 const STAKING_GAUGE_WITHDRAW_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/staking/gauge_withdraw.cedarschema");
-const STAKING_INCREASE_LOCK_AMOUNT_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/staking/increase_lock_amount.cedarschema"
-);
+    include_str!("../../schema/policy-schema/actions/staking/gauge_withdraw.cedarschema");
+const STAKING_INCREASE_LOCK_AMOUNT_SCHEMA: &str =
+    include_str!("../../schema/policy-schema/actions/staking/increase_lock_amount.cedarschema");
 const STAKING_INCREASE_LOCK_TIME_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/staking/increase_lock_time.cedarschema");
+    include_str!("../../schema/policy-schema/actions/staking/increase_lock_time.cedarschema");
 const STAKING_LOCK_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/staking/lock.cedarschema");
+    include_str!("../../schema/policy-schema/actions/staking/lock.cedarschema");
 const STAKING_REDEEM_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/staking/redeem.cedarschema");
+    include_str!("../../schema/policy-schema/actions/staking/redeem.cedarschema");
 const STAKING_STAKE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/staking/stake.cedarschema");
+    include_str!("../../schema/policy-schema/actions/staking/stake.cedarschema");
 const STAKING_UNLOCK_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/staking/unlock.cedarschema");
+    include_str!("../../schema/policy-schema/actions/staking/unlock.cedarschema");
 const STAKING_VOTE_FOR_GAUGE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/staking/vote_for_gauge.cedarschema");
+    include_str!("../../schema/policy-schema/actions/staking/vote_for_gauge.cedarschema");
 
 // marketplace (Seaport NFT orders)
 const MARKETPLACE_SIGN_ORDER_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/marketplace/sign_order.cedarschema");
+    include_str!("../../schema/policy-schema/actions/marketplace/sign_order.cedarschema");
 const MARKETPLACE_FULFILL_ORDER_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/marketplace/fulfill_order.cedarschema");
+    include_str!("../../schema/policy-schema/actions/marketplace/fulfill_order.cedarschema");
 const MARKETPLACE_CANCEL_ORDER_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/marketplace/cancel_order.cedarschema");
+    include_str!("../../schema/policy-schema/actions/marketplace/cancel_order.cedarschema");
 
 // launchpad (alphabetical)
 const LAUNCHPAD_CLAIM_ALLOCATION_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/launchpad/claim_allocation.cedarschema");
+    include_str!("../../schema/policy-schema/actions/launchpad/claim_allocation.cedarschema");
 const LAUNCHPAD_CLAIM_VESTED_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/launchpad/claim_vested.cedarschema");
+    include_str!("../../schema/policy-schema/actions/launchpad/claim_vested.cedarschema");
 const LAUNCHPAD_COMMIT_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/launchpad/commit.cedarschema");
+    include_str!("../../schema/policy-schema/actions/launchpad/commit.cedarschema");
 const LAUNCHPAD_REFUND_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/launchpad/refund.cedarschema");
+    include_str!("../../schema/policy-schema/actions/launchpad/refund.cedarschema");
 const LAUNCHPAD_WITHDRAW_COMMIT_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/launchpad/withdraw_commit.cedarschema");
+    include_str!("../../schema/policy-schema/actions/launchpad/withdraw_commit.cedarschema");
 
 // perp (alphabetical)
 const PERP_ADJUST_MARGIN_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/perp/adjust_margin.cedarschema");
+    include_str!("../../schema/policy-schema/actions/perp/adjust_margin.cedarschema");
 const PERP_CANCEL_ORDER_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/perp/cancel_order.cedarschema");
+    include_str!("../../schema/policy-schema/actions/perp/cancel_order.cedarschema");
 const PERP_CHANGE_LEVERAGE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/perp/change_leverage.cedarschema");
+    include_str!("../../schema/policy-schema/actions/perp/change_leverage.cedarschema");
 const PERP_CHANGE_MARGIN_MODE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/perp/change_margin_mode.cedarschema");
+    include_str!("../../schema/policy-schema/actions/perp/change_margin_mode.cedarschema");
 const PERP_CLAIM_FUNDING_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/perp/claim_funding.cedarschema");
+    include_str!("../../schema/policy-schema/actions/perp/claim_funding.cedarschema");
 const PERP_CLOSE_POSITION_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/perp/close_position.cedarschema");
+    include_str!("../../schema/policy-schema/actions/perp/close_position.cedarschema");
 const PERP_DECREASE_POSITION_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/perp/decrease_position.cedarschema");
+    include_str!("../../schema/policy-schema/actions/perp/decrease_position.cedarschema");
 const PERP_INCREASE_POSITION_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/perp/increase_position.cedarschema");
+    include_str!("../../schema/policy-schema/actions/perp/increase_position.cedarschema");
 const PERP_OPEN_POSITION_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/perp/open_position.cedarschema");
+    include_str!("../../schema/policy-schema/actions/perp/open_position.cedarschema");
 const PERP_PLACE_ORDER_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/perp/place_order.cedarschema");
+    include_str!("../../schema/policy-schema/actions/perp/place_order.cedarschema");
 
 // permission (alphabetical)
 const PERMISSION_PROTOCOL_AUTHORIZATION_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/permission/protocol_authorization.cedarschema"
+    "../../schema/policy-schema/actions/permission/protocol_authorization.cedarschema"
 );
 
 // restaking (alphabetical)
-const RESTAKING_COMPLETE_WITHDRAWAL_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/restaking/complete_withdrawal.cedarschema"
-);
+const RESTAKING_COMPLETE_WITHDRAWAL_SCHEMA: &str =
+    include_str!("../../schema/policy-schema/actions/restaking/complete_withdrawal.cedarschema");
 const RESTAKING_DELEGATE_TO_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/restaking/delegate_to.cedarschema");
+    include_str!("../../schema/policy-schema/actions/restaking/delegate_to.cedarschema");
 const RESTAKING_DEPOSIT_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/restaking/deposit.cedarschema");
+    include_str!("../../schema/policy-schema/actions/restaking/deposit.cedarschema");
 const RESTAKING_QUEUE_WITHDRAWAL_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/restaking/queue_withdrawal.cedarschema");
+    include_str!("../../schema/policy-schema/actions/restaking/queue_withdrawal.cedarschema");
 const RESTAKING_REDELEGATE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/restaking/redelegate.cedarschema");
-const RESTAKING_REGISTER_OPERATOR_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/restaking/register_operator.cedarschema"
-);
+    include_str!("../../schema/policy-schema/actions/restaking/redelegate.cedarschema");
+const RESTAKING_REGISTER_OPERATOR_SCHEMA: &str =
+    include_str!("../../schema/policy-schema/actions/restaking/register_operator.cedarschema");
 const RESTAKING_UNDELEGATE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/restaking/undelegate.cedarschema");
+    include_str!("../../schema/policy-schema/actions/restaking/undelegate.cedarschema");
 
 // token (alphabetical)
 const TOKEN_ERC20_APPROVE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/token/erc20_approve.cedarschema");
+    include_str!("../../schema/policy-schema/actions/token/erc20_approve.cedarschema");
 const TOKEN_ERC20_PERMIT_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/token/erc20_permit.cedarschema");
+    include_str!("../../schema/policy-schema/actions/token/erc20_permit.cedarschema");
 const TOKEN_ERC20_TRANSFER_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/token/erc20_transfer.cedarschema");
+    include_str!("../../schema/policy-schema/actions/token/erc20_transfer.cedarschema");
 const TOKEN_NFT_APPROVE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/token/nft_approve.cedarschema");
-const TOKEN_NFT_SET_APPROVAL_FOR_ALL_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/token/nft_set_approval_for_all.cedarschema"
-);
+    include_str!("../../schema/policy-schema/actions/token/nft_approve.cedarschema");
+const TOKEN_NFT_SET_APPROVAL_FOR_ALL_SCHEMA: &str =
+    include_str!("../../schema/policy-schema/actions/token/nft_set_approval_for_all.cedarschema");
 const TOKEN_NFT_TRANSFER_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/token/nft_transfer.cedarschema");
+    include_str!("../../schema/policy-schema/actions/token/nft_transfer.cedarschema");
 const TOKEN_PERMIT2_APPROVE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/token/permit2_approve.cedarschema");
-const TOKEN_PERMIT2_SIGN_ALLOWANCE_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/token/permit2_sign_allowance.cedarschema"
-);
-const TOKEN_PERMIT2_SIGN_TRANSFER_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/token/permit2_sign_transfer.cedarschema"
-);
-const TOKEN_PERMIT2_TRANSFER_FROM_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/token/permit2_transfer_from.cedarschema"
-);
+    include_str!("../../schema/policy-schema/actions/token/permit2_approve.cedarschema");
+const TOKEN_PERMIT2_SIGN_ALLOWANCE_SCHEMA: &str =
+    include_str!("../../schema/policy-schema/actions/token/permit2_sign_allowance.cedarschema");
+const TOKEN_PERMIT2_SIGN_TRANSFER_SCHEMA: &str =
+    include_str!("../../schema/policy-schema/actions/token/permit2_sign_transfer.cedarschema");
+const TOKEN_PERMIT2_TRANSFER_FROM_SCHEMA: &str =
+    include_str!("../../schema/policy-schema/actions/token/permit2_transfer_from.cedarschema");
 const TOKEN_REVOKE_APPROVAL_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/token/revoke_approval.cedarschema");
+    include_str!("../../schema/policy-schema/actions/token/revoke_approval.cedarschema");
 const TOKEN_REFUND_NATIVE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/token/refund_native.cedarschema");
+    include_str!("../../schema/policy-schema/actions/token/refund_native.cedarschema");
 const TOKEN_UNWRAP_NATIVE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/token/unwrap_native.cedarschema");
+    include_str!("../../schema/policy-schema/actions/token/unwrap_native.cedarschema");
 const TOKEN_WRAP_NATIVE_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/token/wrap_native.cedarschema");
+    include_str!("../../schema/policy-schema/actions/token/wrap_native.cedarschema");
 
 // hyperliquid_core (alphabetical) — the thin off-chain L1 action model.
 const HL_CORE_LIMIT_ORDER_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/hyperliquid_core/core_limit_order.cedarschema"
+    "../../schema/policy-schema/actions/hyperliquid_core/core_limit_order.cedarschema"
 );
 const HL_WITHDRAW_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/hyperliquid_core/withdraw.cedarschema");
-const HL_SEND_ASSET_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/hyperliquid_core/send_asset.cedarschema"
-);
-const HL_TOKEN_DELEGATE_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/hyperliquid_core/token_delegate.cedarschema"
-);
+    include_str!("../../schema/policy-schema/actions/hyperliquid_core/withdraw.cedarschema");
+const HL_SEND_ASSET_SCHEMA: &str =
+    include_str!("../../schema/policy-schema/actions/hyperliquid_core/send_asset.cedarschema");
+const HL_TOKEN_DELEGATE_SCHEMA: &str =
+    include_str!("../../schema/policy-schema/actions/hyperliquid_core/token_delegate.cedarschema");
 
 /// Ordered list of all shipped cedarschema files. The merge in
 /// [`base_schema_text`] preserves this order so the resulting per-namespace
@@ -991,7 +977,7 @@ mod base_schema_tests {
             .map(std::string::ToString::to_string)
             .collect();
 
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema/policy-schema/actions");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("schema/policy-schema/actions");
         let expected = expected_action_ids_from_schema_files(&root);
         assert!(
             !expected.is_empty(),

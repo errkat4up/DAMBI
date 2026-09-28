@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copy `schema/policy-schema/extensions/<cat>/<action>.policy-rpc.json`
+// Copy `crates/policy-engine/schema/policy-schema/extensions/<cat>/<action>.policy-rpc.json`
 // into `browser-extension/public/default-manifests/` so the SW dev-seed
 // path can fetch them via `Browser.runtime.getURL`.
 //
@@ -15,7 +15,7 @@ const fs = require("fs");
 const path = require("path");
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
-const SRC = path.resolve(REPO_ROOT, "schema", "policy-schema", "extensions");
+const SRC = path.resolve(REPO_ROOT, "crates", "policy-engine", "schema", "policy-schema", "extensions");
 const DEST = path.resolve(__dirname, "..", "public", "default-manifests");
 
 function isProd() {

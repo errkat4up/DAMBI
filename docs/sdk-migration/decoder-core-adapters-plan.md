@@ -2,7 +2,7 @@
 
 **설계 상태: 작업 초안.** 단계·순서·미확정 설계는 실제 구현·검증 결과에 따라 보완한다. 검증 완료 기록과 명시적인 사용자 합의는 근거로 유지하고, 계획의 추정이나 제안을 구현 사실·확정 API로 취급하지 않는다. 최신 Core 세부 작업은 [Core 개발 계획](core-development-plan.md)을 따른다.
 
-**DEC-06c·DEC-06 현재 상태:** 구현·정적 검토·사용자 검증 완료. [확정 계약](decoder-design-plan.md#dec-06c--확정-계약과-실행-상태)을 유지하며 실행 근거는 [README 검증 기록](../../fixtures/decoder-policy/README.md#dec-06c--사용자-검증-완료-dec-06-완료) 한 곳을 따른다. 아래 06a/06b 상세는 해당 단계의 기존 기록이다. DEC-07은 구현·정적 검토·사용자 검증 및 Decoder 인계 완료다. SDK 소스 이관은 미착수다.
+**DEC-06c·DEC-06 현재 상태:** 구현·정적 검토·사용자 검증 완료. [확정 계약](decoder-design-plan.md#dec-06c--확정-계약과-실행-상태)을 유지하며 실행 근거는 [README 검증 기록](../../fixtures/decoder-policy/README.md#dec-06c--사용자-검증-완료-dec-06-완료) 한 곳을 따른다. 아래 06a/06b 상세는 해당 단계의 기존 기록이다. DEC-07은 구현·정적 검토·사용자 검증 및 Decoder 인계 완료다. 공유 모델·schema 이관과 workspace 분리는 완료했으며 Core 실행부 추출(C2a~c)은 미착수다.
 
 **2026-09-12 DEC-06b 구현 당시 상태:** 실제 Bundler3 Call[] 연결 **구현·정적 검토 완료, 사용자 실행 대기**다. 요청 43개 + 구조 6개 = **49개**, 기존 514개 포함 통합 **563개 정의**이며 통과 수가 아니다. DEC-06a는 self 48/48·통합 514/514 및 분리 커밋 `9923487`까지 확인했다. 06c는 별도 미구현이며 06b 사용자 검증 후 진행한다.
 
@@ -348,7 +348,7 @@ D4-2는 제품 지원 범위를 바꾸는 결정이다. 현재 고정 시험의 
 
 **Core 착수 계획(2026-09-17 수정):** 단계별 실행과 VS Code 환경은 [Core 세부 개발 계획](core-development-plan.md)을 따른다. D3·D4-1 및 DEC-07 자료를 바탕으로 C1-1의 정책 API·fixture 정합화부터 시작한다. D4-2·D4-3의 제품 범위 확정·재현 생성은 C1/C2와 fixture 기반 Core 개발의 전체 선행 조건이 아니며, 제품 snapshot 연결과 최종 배포 완료의 후속 의존 항목으로 유지한다.
 
-**C1 상태:** 공개 계약·소비자 검증 완료. 결과는 [계약 README](../../contracts/core-v1/README.md#결과-기록)를 따르며 다음은 C2-0a다.
+**현재 상태:** C1·C2-0a~c 완료. 다음 단계는 C2a Decoder 인스턴스화다. 세부 상태는 [Core 계획](core-development-plan.md)을 따른다.
 
 실제 API/RPC는 아직 연결하지 않는다. D 단계의 실제 정책·디코더와 서명된 테스트 번들, 기록된 원본 Fact를 반환하는 mock 포트로 실행부를 개발한다. 평가·암호 검증 자체는 mock하지 않는다.
 
@@ -370,7 +370,7 @@ C1에서 기존 scaffold의 `PolicySource.payload: unknown`, Fact의 '투영 후
 
 **C2-0b workspace 변경:** 루트 `Cargo.toml`을 SDK와 필요한 순수 공통 crate를 위한 workspace로 관리한다. `policy-db`, `policy-sync`, `policy-server`는 서버 측 별도 workspace/manifest로 분리하고 공통 crate의 새 위치를 의존하게 한다. 이동으로 의존 버전이 자동 갱신되지 않도록 manifest·lockfile을 함께 검토한다. SDK/API CI는 각각 자신의 workspace 명령을 사용한다. 서버 Dockerfile의 Cargo 진입점과 바이너리 COPY 원본도 새 workspace의 실제 출력 경로에 맞춘다. 기존 `/app/target/release`가 자동 유지된다고 가정하지 않으며 API 담당과 배포 경계를 확인한다. 기존 WASM wrapper는 비교 기간에만 사용하며 C5 전환 완료 시 최종 SDK workspace와 소스 입력 목록에서 제외한다.
 
-**C2-0c schema 변경:** 현재 중립 원본은 `schema/policy-schema/`다. 이를 `crates/policy-engine/schema/policy-schema/`로 옮기고 `src/schema/mod.rs`의 include 경로, schema 목록 시험, 관련 생성·소비 스크립트를 조정한다. 서버의 `static/policy-schema.json`을 SDK 원본으로 사용하거나 수동 복제하지 않는다.
+**C2-0c schema 변경:** 중립 원본을 `schema/policy-schema/`에서 `crates/policy-engine/schema/policy-schema/`로 옮기고 `src/schema/mod.rs`의 include 경로, schema 목록 시험, 관련 생성·소비 스크립트를 조정했다. 서버의 `static/policy-schema.json`을 SDK 원본으로 사용하거나 수동 복제하지 않는다.
 
 **C2c 시험 변경:** `fixtures/baseline-verdicts.*`, 기존 WASM의 `hl_exchange_deny_e2e.rs`, `est_roundtrip.rs` 등에서 SDK에 필요한 사례와 정적 입력을 인계한다. fixture 출력은 SDK 경로나 임시 디렉터리에 쓴다. 앱 UI 전용 시험은 SDK 시험과 구분하되, 필수 SDK 회귀 사례를 제외하거나 fixture 미존재 시 skip해서 검증을 통과시키지 않는다. 필수 case ID/실행 수를 기록해 누락을 확인한다.
 

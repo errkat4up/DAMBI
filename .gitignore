@@ -1,4 +1,5 @@
 /target
+/crates/policy-server/target
 **/*.rs.bk
 .DS_Store
 # Generated field-type audit report (field-type-audit.test.ts, FIELD_AUDIT=1). Artifact.

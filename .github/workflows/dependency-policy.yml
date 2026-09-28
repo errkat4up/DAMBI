@@ -6,9 +6,11 @@ on:
   pull_request:
     paths:
       - 'Cargo.lock'
+      - 'crates/policy-server/Cargo.lock'
       - 'Cargo.toml'
       - '**/Cargo.toml'
       - 'deny.toml'
+      - '.cargo/audit.toml'
       - '.github/workflows/dependency-policy.yml'
   schedule:
     - cron: '0 1 * * 1' # 매주 월요일 (신규 RUSTSEC 공지 픽업)
@@ -20,6 +22,13 @@ permissions:
 jobs:
   dependency-policy:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - workspace: .
+            cache-key: sdk
+          - workspace: crates/policy-server
+            cache-key: server
     steps:
       - uses: actions/checkout@v4
 
@@ -29,7 +38,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "ws"
+          shared-key: "${{ matrix.cache-key }}"
+          workspaces: "${{ matrix.workspace }} -> target"
 
       # Prebuilt binaries instead of `cargo install` from source (much faster,
       # same checks).
@@ -38,9 +48,9 @@ jobs:
         with:
           tool: cargo-audit,cargo-deny
 
+      # Keep the repository root as cwd so both scans read .cargo/audit.toml.
       - name: Dependency audit
-        run: cargo audit --deny warnings --ignore RUSTSEC-2024-0388 --ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2025-0048
+        run: cargo audit --file "${{ matrix.workspace }}/Cargo.lock" --deny warnings --ignore RUSTSEC-2024-0388 --ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2025-0048
 
       - name: Dependency policy
-        run: cargo deny check
-
+        run: cargo deny --manifest-path "${{ matrix.workspace }}/Cargo.toml" check --config deny.toml

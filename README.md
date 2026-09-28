@@ -104,26 +104,29 @@ documented until it is actually deleted.
 | `browser-extension/sdk/` | The `@dambi/sdk` extension client the dashboard talks to. |
 | `crates/policy-engine/` | Core runtime: the `ActionBody` → Cedar lowering, the Cedar `PolicyEngine` wrapper, and bundled schema composition. |
 | `crates/policy-engine-wasm/` | `wasm-bindgen` bridge that exposes the engine (+ typed `.d.ts`) to the extension. |
-| `crates/policy-server/` | Stateful backend. Sub-crates: `server/` (Axum HTTP), `db/`, `sync/`, and the `asset-model/{state,action,transition}` reducer. See [local deploy README](crates/policy-server/server/deploy/local/README.md). |
+| `crates/policy-server/` | Stateful backend. Sub-crates: `server/` (Axum HTTP), `db/`, and `sync/`. See [local deploy README](crates/policy-server/server/deploy/local/README.md). |
+| `crates/asset-model/` | Shared `policy-state`, `policy-action`, and `policy-transition` types/reducer for the engine, WASM, and server. |
 | `crates/adapters/` | Decode support: `abi-resolver` (Sourcify-backed ABI lookup) and `mappers`. |
 | `crates/integration-tests/` | `ActionBody[]` decode harness — replays real calldata / typed-data through the production decoders. Local-only — not tracked in git (see `.gitignore`). |
 | `registryV2/` | Adapter manifests, token metadata, and the build script that emits the runtime decode `index/`. |
 | `registry-api/` | Cloud Run reverse-proxy that fronts the private adapter registry. See [its README](registry-api/README.md). |
-| `schema/policy-schema/` | Cedar schema: `core.cedarschema` + per-domain action schemas under `actions/`. |
+| `crates/policy-engine/schema/policy-schema/` | Cedar schema: `core.cedarschema` + per-domain action schemas under `actions/`. |
 
-The authoritative Rust crate list is the `[workspace] members` in
-[`Cargo.toml`](Cargo.toml).
+Rust has two workspaces: [`Cargo.toml`](Cargo.toml) owns the SDK/engine and
+shared models; [`crates/policy-server/Cargo.toml`](crates/policy-server/Cargo.toml)
+owns `db`, `sync`, and `server`. Each has its own lockfile and `target/` directory.
+The server consumes shared models by path without making server crates SDK members.
 
 ## Action model
 
 The policy input is the v3 hierarchical **`ActionBody`** tree, defined in
-`crates/policy-server/asset-model/action` (`policy-action`) and re-exported by
+`crates/asset-model/action` (`policy-action`) and re-exported by
 `crates/policy-engine` as `action::v3`. An `Action` is `{ meta, body }` where
 `meta` carries submission info (`OnchainTx` vs `OffchainSig`) and `body` is one
 domain variant:
 
 ```rust
-// crates/policy-server/asset-model/action/src/lib.rs
+// crates/asset-model/action/src/lib.rs
 pub enum ActionBody {
     Token(TokenAction),
     Amm(AmmAction),
@@ -145,7 +148,7 @@ pub enum ActionBody {
 ```
 
 Each domain has a matching Cedar schema fragment under
-`schema/policy-schema/actions/<domain>/`. `Multicall` recurses (a Universal
+`crates/policy-engine/schema/policy-schema/actions/<domain>/`. `Multicall` recurses (a Universal
 Router execution decodes into nested `ActionBody` entries), and `Unknown` is the
 fail-closed branch for calls no adapter recognizes.
 
@@ -154,12 +157,12 @@ fail-closed branch for calls no adapter recognizes.
 ### Rust workspace
 
 ```bash
-cargo test --workspace        # or: scripts/test-all.sh  (adds clippy/fmt + extension)
+cargo test --locked --workspace  # SDK; scripts/test-all.sh also checks the server and extension
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
 
-`scripts/test-all.sh` runs the full sweep (cargo test + clippy + fmt, then the
+`scripts/test-all.sh` runs the full sweep (both Cargo workspaces: test + clippy + fmt, then the
 extension typecheck / vitest / chrome build); `scripts/lint.sh` is the
 fix-everything counterpart (`cargo fmt` + `clippy --fix` + `yarn lint`).
 
@@ -204,7 +207,7 @@ for the full matrix, load instructions, and the local-server workflow.
 
 ```bash
 cp .env.local.example .env.local       # fill JWT_SECRET, GOOGLE_*, DATABASE_URL, …
-scripts/start-policy-server.sh local   # = cargo run -p policy-server --bin policy-server
+scripts/start-policy-server.sh local   # runs the separate server Cargo workspace
 # or via the root package.json:
 yarn server:local
 curl http://127.0.0.1:8788/readyz
@@ -247,12 +250,13 @@ through the Workload Identity Federation setup CI needs.
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every PR and
 push to `main`; new pushes cancel the previous in-flight run for that branch.
-`rust` and `wasm` run in parallel; `extension` waits only on the wasm pkg
+`rust`, `rust-server`, and `wasm` run in parallel; `extension` waits only on the wasm pkg
 artifact.
 
-- **rust** — builds the `registryV2` index (npm), then `cargo fmt --check`,
+- **rust** — SDK workspace: builds the `registryV2` index (npm), then `cargo fmt --check`,
   `cargo clippy -D warnings`, `cargo test` (doctests included), and
   `cargo doc` with `-D warnings`.
+- **rust-server** — separate server workspace fmt, clippy, tests and docs.
 - **wasm** — `wasm-pack build crates/policy-engine-wasm` (artifact reused by
   the extension job) and headless-Chrome `wasm-bindgen` tests.
 - **extension** — `yarn typecheck`, vitest, Chrome MV3 build + zip, the
@@ -263,8 +267,9 @@ artifact.
 [`dependency-policy.yml`](.github/workflows/dependency-policy.yml) (`cargo
 audit` + `cargo deny`) runs when dependency files change and weekly.
 
-To reproduce the suite locally, run `cargo test` (with the registry index built,
-above) and `cd browser-extension && yarn test`.
+To reproduce the suite locally, use `scripts/test-all.sh` with the registry index
+built as above. For server-only checks, pass
+`--manifest-path crates/policy-server/Cargo.toml` to Cargo from the repository root.
 
 ## Policy RPC & remote facts
 

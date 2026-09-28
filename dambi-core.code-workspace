@@ -8,6 +8,7 @@
   "settings": {
     "typescript.tsdk": "node_modules/typescript/lib",
     "rust-analyzer.checkOnSave": false,
+    "rust-analyzer.linkedProjects": ["Cargo.toml", "crates/policy-server/Cargo.toml"],
     "rust-analyzer.cargo.buildScripts.enable": false,
     "rust-analyzer.procMacro.enable": false,
     "files.watcherExclude": {
@@ -180,6 +181,25 @@
         "group": "test",
         "problemMatcher": [],
         "detail": "공유 정책 번들·Day-1 정책의 D3 검사를 실행합니다. 기존 policy-engine-wasm/pkg가 준비돼 있어야 합니다."
+      },
+      {
+        "label": "Server Rust: workspace 컴파일 검사",
+        "type": "process",
+        "command": "cargo",
+        "args": [
+          "check",
+          "--manifest-path",
+          "crates/policy-server/Cargo.toml",
+          "--locked",
+          "--workspace",
+          "--all-targets"
+        ],
+        "options": {
+          "cwd": "${workspaceFolder:DAMBI}"
+        },
+        "group": "test",
+        "problemMatcher": [],
+        "detail": "분리된 API/server workspace만 컴파일 검사합니다. 시험 실행·DB 연결·서버 기동은 수행하지 않습니다."
       },
       {
         "label": "Legacy Rust: 정책 엔진 library 시험",

@@ -128,7 +128,7 @@ curl -i http://127.0.0.1:8788/market/listings # 401 (마켓=OAuth, 무토큰이�
 **5) (선택) 동기화 워커도** — 다른 터미널에서:
 ```bash
 set -a; source .env.local; set +a
-cargo run -p policy-server --bin sync_worker
+cargo run --locked --manifest-path crates/policy-server/Cargo.toml -p policy-server --bin sync_worker
 ```
 
 **6) 정리**: `docker rm -f dambi-pg dambi-redis`
@@ -138,7 +138,7 @@ cargo run -p policy-server --bin sync_worker
 docker run -d --name dambi-pg-test -p 5433:5432 \
   -e POSTGRES_USER=dambi -e POSTGRES_PASSWORD=dambi -e POSTGRES_DB=dambi_test postgres:16
 TEST_DATABASE_URL=postgres://dambi:dambi@127.0.0.1:5433/dambi_test \
-  cargo test -p policy-server -p policy-db -p policy-sync
+  cargo test --locked --manifest-path crates/policy-server/Cargo.toml -p policy-server -p policy-db -p policy-sync
 ```
 
 ### 방법 B — minikube (프로덕션에 가깝게, 선택/고급)

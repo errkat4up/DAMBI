@@ -1,5 +1,5 @@
 //! ```text
-//! cargo test -p policy-sync --test rpc_live -- --ignored
+//! cargo test --manifest-path crates/policy-server/Cargo.toml -p policy-sync --test rpc_live -- --ignored
 //! ```
 
 use policy_state::ChainId;

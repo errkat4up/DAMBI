@@ -37,6 +37,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
 ```
 
+The commands above target the SDK workspace. For the server workspace, use
+`--manifest-path crates/policy-server/Cargo.toml`; keep the repository root as
+the current directory so shared local configuration still resolves. Both
+workspaces have separate lockfiles.
+
 For a full local sweep:
 
 ```bash
@@ -67,9 +72,9 @@ npm run check:surface
 
 When changing `ActionBody`, lowering, or schemas, keep these files aligned:
 
-- `crates/policy-server/asset-model/action/`
+- `crates/asset-model/action/`
 - `crates/policy-engine/src/lowering_v2/`
-- `schema/policy-schema/actions/`
+- `crates/policy-engine/schema/policy-schema/actions/`
 - `crates/policy-engine/tests/`
 - `crates/policy-engine-wasm/tests/`
 

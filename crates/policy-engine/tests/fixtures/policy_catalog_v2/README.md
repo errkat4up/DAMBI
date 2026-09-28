@@ -106,7 +106,7 @@ OFAC near-match/PEP 는 provider-dependent(warn). 상세 = `compliance/README.md
 
 - **VOCAB 권위**: trigger tag 는 `crates/policy-engine/src/schema/per_policy.rs` `RESOLVER_TABLE`
   (`(domain, action_tag)`; HL 은 `hl_` prefix, `unknown`/`multicall` 은 `action.domain` 으로 trigger, `set_e_mode`).
-  context field 는 `schema/policy-schema/actions/**/*.cedarschema`.
+  context field 는 `crates/policy-engine/schema/policy-schema/actions/**/*.cedarschema`.
 - 신규 정책: ① manifest trigger(RESOLVER_TABLE tag) → ② precedence 로 bucket → ③ `<bucket>/<sub>/<id>/`(id==leaf) →
   ④ cedar + 헤더 주석/tags → ⑤ method 가 `_methods/` 에 있는지(없으면 추가) → ⑥ `policy_catalog_v2` gate green.
 

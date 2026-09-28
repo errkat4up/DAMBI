@@ -974,7 +974,7 @@ fn render_custom_body(
 ) -> Result<String, PolicyRpcError> {
     let snake_tag = entry.action_tag.unwrap_or(entry.domain);
     // Source of truth for an action's base context fields is its OWN shipped
-    // `.cedarschema` (`schema/policy-schema/actions/...`), parsed from the
+    // `.cedarschema` (`crates/policy-engine/schema/policy-schema/actions/...`), parsed from the
     // `type <Stub>Context = { ... }` block — NOT a hardcoded table. This keeps
     // the collision check aligned with the `policy-transition` action shapes.
     let base_fields = context_base_fields(entry.schema_text, entry.pascal_stub);
@@ -1361,7 +1361,7 @@ mod tests {
     #[test]
     fn base_fields_derive_from_cedarschema_not_legacy_table() {
         // `tokenIn` is a REAL base field of the new `Amm::SwapContext`
-        // (schema/policy-schema/actions/amm/swap.cedarschema) but is ABSENT
+        // (crates/policy-engine/schema/policy-schema/actions/amm/swap.cedarschema) but is ABSENT
         // from the legacy `manifest_fragment::base_field_names("swap")` table
         // (which lists the stale `inputToken`/`outputToken`). Deriving base
         // fields from the cedarschema (source of truth) must reject it.

@@ -1,6 +1,6 @@
 # Dambi Core 세부 개발 계획
 
-작성일: 2026-09-14. 수정일: 2026-09-28. 상위 계획은 [Decoder·정책 → Core → Adapters](decoder-core-adapters-plan.md)이며, 이 문서는 Core의 C1~C6 실행 순서와 VS Code 작업 기준을 구체화한다. **C1 공개 계약·소비자 검증 완료. 다음은 C2-0a 공통 Rust 모델 이관이다. Core 실행부는 후속 단계다.**
+작성일: 2026-09-14. 수정일: 2026-09-28. 상위 계획은 [Decoder·정책 → Core → Adapters](decoder-core-adapters-plan.md)이며, 이 문서는 Core의 C1~C6 실행 순서와 VS Code 작업 기준을 구체화한다. **C1·C2-0a~c 완료. 다음 단계는 C2a Decoder 인스턴스화다.**
 
 문서 상태: **v0.1 작업 초안**. 구현·검증에서 확인한 의존성과 비용에 따라 단계 분할·순서·설계를 수정할 수 있다. 이미 검증한 동작과 명시적으로 합의한 계약, 아직 제안인 API·제품 범위를 구분한다. 계획의 추정을 구현 사실로 취급하거나 계획을 맞추기 위해 불필요한 절차를 추가하지 않는다. 이 문서 버전은 현재 SDK 패키지 버전 `0.0.1`과 별개다.
 
@@ -198,9 +198,22 @@ Fact는 정확한 `planId`와 알려진 `callId`에만 결합한다. 공개 `cal
 | C2-0b | SDK root와 API/server Cargo workspace 분리. manifest·lockfile·CI와 서버 Dockerfile/Cloud Build 입력 경로 정리 | SDK가 서버 member manifest를 읽지 않고 서버 빌드·바이너리 COPY도 새 경로로 유지. dependency 자동 갱신·시험 때만 member 제거 금지 |
 | C2-0c | `schema/policy-schema/` → `crates/policy-engine/schema/policy-schema/`, `src/schema/mod.rs` include 경로 갱신 | schema 원본 한 곳, Cargo package에 포함, 기존 경로 fallback 없음 |
 
+C2-0a는 기존 모델 시험과 분리 전 전체 workspace 컴파일을 사용자 실행으로 확인했다. workspace 분리 후 루트 Cargo 명령은 SDK만 대상으로 한다.
+
 각 이동은 실제 의존 순서대로 수행한다. 경로 이동과 정책·DTO·수치 처리 변경을 같은 작업에 섞지 않는다. 새 workspace를 위해 lockfile 생성이 필요하면 사용자가 실행할 명령과 이유를 제공한다.
 
-현재 [서버 Dockerfile](../../crates/policy-server/server/Dockerfile)은 저장소 root에서 Cargo를 실행하고 `/app/target/release`의 바이너리를 복사한다. workspace 분리 시 Cargo 진입점·target 출력·Cloud Build의 build context가 맞는지 함께 확인하며 API 담당의 배포 구성을 별도로 보존한다.
+C2-0b는 서버 manifest를 `crates/policy-server/Cargo.toml`, 서버 출력 위치를 `crates/policy-server/target/`로 분리한다. [서버 Dockerfile](../../crates/policy-server/server/Dockerfile)은 저장소 root build context를 유지하되 새 manifest와 출력 경로를 사용한다. 공유 모델·기존 release profile·의존성 버전은 유지한다.
+
+C2-0b는 두 workspace의 lockfile 정리·컴파일을 사용자 실행으로 확인했다. 외부 dependency의 version/source/checksum은 기존과 같고 필요한 항목만 남았다.
+
+C2-0c는 원본 schema를 crate 안으로 이동하고 Rust include·목록 시험·기존 확장 생성 경로를 새 위치로 맞춘다. Cargo의 기본 패키지 포함 규칙을 사용하며 별도 원본 복사본이나 fallback은 두지 않는다. 사용자 검증:
+
+```sh
+cargo test --locked -p policy-engine --lib schema::
+cargo package --locked --offline --allow-dirty -p policy-engine --list | rg -c '^schema/policy-schema/.*\.cedarschema$'
+```
+
+두 번째 명령은 패키지 파일 목록 확인이며 현재 schema 파일 수는 111개다. 실제 패키지 빌드·배포는 수행하지 않는다.
 
 ### C2a — Decoder 인스턴스화
 
@@ -292,7 +305,7 @@ Core 기능 구현 완료와 제품 출시 완료를 구분한다. 최종 SDK는
 
 **workspace 파일은 필수가 아니다.** 저장소 폴더만 열어도 개발할 수 있다. 이 프로젝트에서는 수동 검사 명령·오류 위치 탐색·fixture 디버깅 설정을 함께 사용하도록 [dambi-core.code-workspace](../../dambi-core.code-workspace)를 유지한다. Rust/Cargo workspace와는 별개이며, 이 파일을 연다고 브랜치나 소스 구조가 바뀌지 않는다.
 
-현재 `feat/core` 준비는 완료됐다. 커밋이나 추가 merge 없이 아래 명령으로 연다.
+아래 명령으로 저장소의 Core workspace를 연다.
 
 ```sh
 code /Users/spu/SDKdambi/DAMBI/dambi-core.code-workspace
@@ -301,9 +314,9 @@ code /Users/spu/SDKdambi/DAMBI/dambi-core.code-workspace
 CLI를 쓰지 않으면 VS Code의 `File → Open Workspace from File…`에서 같은 파일을 선택한다. 하나의 저장소 root를 사용하므로 필요한 과거 실행부를 찾아볼 수 있고 중첩 workspace로 같은 파일이 중복 표시되지 않는다.
 
 - 저장소 TypeScript 경로는 `node_modules/typescript/lib`다. TS 파일을 연 뒤 `TypeScript: Select TypeScript Version` → `Use Workspace Version`을 선택한다. Yarn은 저장소에 포함된 4.14.1 실행 파일을 Task에서 직접 호출한다. Node 20 이상·TS 5.7.3·Rust 1.95.0·WASM 도구 핀은 현재 설정을 유지한다.
-- Rust Analyzer와 Cedar 확장을 추천 목록에 넣는다. Rust Analyzer는 현재 로컬에 없어 사용자가 설치한다. TypeScript/JSON 지원은 VS Code 기본 기능을 사용한다.
+- Rust Analyzer는 SDK·서버 두 Cargo manifest를 읽도록 연결했고, Cedar 확장과 함께 추천 목록에 넣는다. Rust Analyzer는 현재 로컬에 없어 사용자가 설치한다. TypeScript/JSON 지원은 VS Code 기본 기능을 사용한다.
 - `checkOnSave`, `cargo.buildScripts.enable`, `procMacro.enable`을 꺼서 자동 Cargo 검사·build.rs 실행을 막는다. 이에 따라 일부 매크로 기반 분석은 제한된다. [Rust Analyzer 설정 근거](https://rust-analyzer.github.io/book/configuration.html)
-- `Tasks: Run Task`에 §5의 **수동 작업 12개**를 연결했다. `Cmd+Shift+B`는 Core 타입 검사이며 TypeScript 오류는 `Problems`에서 해당 소스로 이동한다. 빌드·pack·계약·정책·기존 Rust/Decoder 회귀를 필요할 때 선택한다. 폴더를 열 때 실행되는 Task·설치·빌드·시험은 없다.
+- `Tasks: Run Task`에 §5의 **수동 작업 13개**를 연결했다. `Cmd+Shift+B`는 Core 타입 검사이며 TypeScript 오류는 `Problems`에서 해당 소스로 이동한다. 빌드·pack·계약·정책·기존 Rust/Decoder 회귀를 필요할 때 선택한다. 폴더를 열 때 실행되는 Task·설치·빌드·시험은 없다.
 - **F5 디버깅:** `contracts/core-v1/contract.test.mjs`를 열고 시험 본문에 중단점을 설정한 뒤 `Core 계약: C1-1 참조 시험 디버깅`을 선택한다. Node 시험 runner의 자식 프로세스에도 연결한다. 이는 현재 존재하는 계약 fixture용이며 Rust/WASM 내부나 미구현 Core 실행부의 디버깅은 아니다. 자동 선행 빌드는 없다.
 - 생성물과 dependency 폴더만 검색·감시에서 제외한다. 기존 확장/서버 소스는 추출 작업에 필요하므로 숨기지 않는다. 새 Core crate·WASM runner가 생기는 C2/C5에서 해당 Task/launch를 실제 경로로 추가한다.
 
@@ -328,7 +341,9 @@ C1 결과는 [계약 README](../../contracts/core-v1/README.md#결과-기록) �
 | 개발 계획·VS Code workspace | 구체화·정적 검토 완료 |
 | C1-1 정책 API·fixture 정합화 | 사용자 검증 완료. [결과 기록](../../contracts/core-v1/README.md#결과-기록) |
 | C1-2/3 타입·소비자 검증 | 완료 |
-| C2-0a/b/c 소스 경계 | 미착수 |
+| C2-0a 공통 모델 이관 | 사용자 검증 완료 |
+| C2-0b workspace 분리 | 사용자 검증 완료 |
+| C2-0c schema 경계 | 사용자 검증 완료 |
 | C2a/b/c Decoder·평가·fixture 추출 | 미착수 |
 | C3 parser·서명·의미 | 미착수 |
 | C4 snapshot·Store | 미착수 |

@@ -19,6 +19,7 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # SDK workspace; keep the existing check name for branch protection rules.
   rust:
     runs-on: ubuntu-latest
     steps:
@@ -31,7 +32,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "ws"
+          shared-key: "sdk"
 
       # The v3 decode harness (crates/integration-tests) reads `registryV2/index/`
       # at test runtime. That index is a build artifact (no longer tracked);
@@ -69,20 +70,50 @@ jobs:
       # `cargo clippy --all-targets --all-features` already type-checks/builds
       # everything, so a preceding `cargo check` is redundant.
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       # `cargo test`는 doctest를 포함하므로 별도 `cargo test --doc`은 두지 않는다.
       - name: Test
         env:
           DAMBI_V3_HARNESS_REPRESENTATIVE_SOURCE_REFS: '1'
-        run: cargo test --all-features
+        run: cargo test --locked --workspace --all-features
 
       - name: Docs
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --no-deps --all-features
+        run: cargo doc --locked --workspace --no-deps --all-features
 
-  # rust 잡과 의존이 없으므로 병렬로 돈다 — extension은 이 잡의 wasm pkg만 기다린다.
+  rust-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "server"
+          workspaces: "crates/policy-server -> target"
+
+      - name: Format
+        run: cargo fmt --manifest-path crates/policy-server/Cargo.toml --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --manifest-path crates/policy-server/Cargo.toml --locked --workspace --all-targets --all-features -- -D warnings
+
+      # Database-backed ignored tests run with Postgres in policy-server.yml.
+      - name: Test
+        run: cargo test --manifest-path crates/policy-server/Cargo.toml --locked --workspace --all-features
+
+      - name: Docs
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --manifest-path crates/policy-server/Cargo.toml --locked --workspace --no-deps --all-features
+
+  # Rust 잡과 의존이 없으므로 병렬로 돈다 — extension은 이 잡의 wasm pkg만 기다린다.
   wasm:
     runs-on: ubuntu-latest
     steps:
