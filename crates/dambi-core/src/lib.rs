@@ -5,4 +5,5 @@ pub mod bundle;
 pub mod decode;
 pub mod json;
 pub mod runtime;
+pub mod session;
 pub mod snapshot;
