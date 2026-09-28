@@ -1,0 +1,20 @@
+[package]
+name = "dambi-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+abi-resolver.workspace = true
+alloy-json-abi.workspace = true
+alloy-primitives.workspace = true
+hex.workspace = true
+mappers.workspace = true
+policy-state.workspace = true
+policy-transition.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+alloy-dyn-abi.workspace = true

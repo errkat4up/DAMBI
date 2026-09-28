@@ -9,6 +9,7 @@ resolver = "2"
 # API services own their manifest, dependency graph and build output.
 exclude = ["crates/policy-server"]
 members = [
+    "crates/dambi-core",
     "crates/policy-engine",
     "crates/policy-engine-wasm",
     # crates/integration-tests is LOCAL-ONLY (gitignored, no production logic) —
@@ -43,6 +44,7 @@ sha2 = "0.10"
 thiserror = "2"
 
 # Internal crates referenced by path.
+dambi-core = { path = "crates/dambi-core", version = "0.1.0" }
 policy-engine = { path = "crates/policy-engine", version = "0.1.0" }
 abi-resolver = { path = "crates/adapters/abi-resolver", version = "0.1.0" }
 mappers = { path = "crates/adapters/mappers", version = "0.1.0" }
