@@ -1,11 +1,11 @@
-/** Public contracts only. The Rust/WASM runtime is introduced in C2–C6. */
+/** Public contracts and the instance-owned Rust/WASM runtime entry point. */
 import type { CheckRequest, UnsupportedRequest } from "./types/request.js";
 import type { Verdict } from "./types/verdict.js";
 import type { CorePlan, FactBatch } from "./types/plan.js";
 import type { CallOptions } from "./types/options.js";
 import type { CoreLimits, CoreTrust, DecoderSnapshot } from "./types/config.js";
 import type { CoreDiagnostic } from "./types/errors.js";
-import { CoreError } from "./types/errors.js";
+import { initializeCore } from "./runtime/core-runtime.js";
 import type { PolicySource } from "./ports/policy.js";
 import type { FactProvider } from "./ports/fact.js";
 import type { Clock } from "./ports/clock.js";
@@ -59,12 +59,12 @@ export interface DambiCore {
 }
 
 /**
- * Async scaffold: always rejects with NOT_IMPLEMENTED. A future implementation
- * will return only a fully initialized instance and clean up on failure.
+ * Returns only a fully authenticated and initialized instance. Failures release
+ * partial state; plan/evaluate are available while check orchestration awaits C6.
  */
 export async function createCore(
-  _config: CoreConfig,
-  _options?: CallOptions,
+  config: CoreConfig,
+  options?: CallOptions,
 ): Promise<DambiCore> {
-  throw new CoreError("NOT_IMPLEMENTED", "@dambi/core is a scaffold; the Core runtime is not implemented.");
+  return initializeCore(config, options);
 }

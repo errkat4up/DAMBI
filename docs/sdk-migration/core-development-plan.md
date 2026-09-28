@@ -1,6 +1,6 @@
 # Dambi Core 세부 개발 계획
 
-작성일: 2026-09-14. 수정일: 2026-09-28. 상위 계획은 [Decoder·정책 → Core → Adapters](decoder-core-adapters-plan.md)이며, 이 문서는 Core의 C1~C6 실행 순서와 VS Code 작업 기준을 구체화한다. **C1·C2-0a~c·C2a/b/c·C3-1/2/3 완료. C4 구현 및 Store 사용자 검증 완료·Decoder 시험 결과 확인 대기.**
+작성일: 2026-09-14. 수정일: 2026-09-28. 상위 계획은 [Decoder·정책 → Core → Adapters](decoder-core-adapters-plan.md)이며, 이 문서는 Core의 C1~C6 실행 순서와 VS Code 작업 기준을 구체화한다. **C1·C2-0a~c·C2a/b/c·C3-1/2/3 완료. C4 구현 및 Store 사용자 검증 완료·Decoder 시험 결과 확인 대기. C5 구현 및 타입·JS/WASM 사용자 검증 완료·Native session 시험 결과 확인 대기.**
 
 문서 상태: **v0.1 작업 초안**. 구현·검증에서 확인한 의존성과 비용에 따라 단계 분할·순서·설계를 수정할 수 있다. 이미 검증한 동작과 명시적으로 합의한 계약, 아직 제안인 API·제품 범위를 구분한다. 계획의 추정을 구현 사실로 취급하거나 계획을 맞추기 위해 불필요한 절차를 추가하지 않는다. 이 문서 버전은 현재 SDK 패키지 버전 `0.0.1`과 별개다.
 
@@ -8,7 +8,7 @@
 
 - 현재 작업 브랜치는 `feat/core`, 기준 커밋은 `3f0ad6b`이며 로컬 `main`도 같은 커밋이다. 2026-09-28 GitHub 비교 API로 원격 `main`도 동일함을 재확인했다. `feat/decoder`는 `4803a2a`다. Core 브랜치 준비는 끝났으며 이 문서의 API 대조 기준도 `3f0ad6b`다.
 - [Decoder 인계](../../fixtures/decoder-policy/README.md#dec-07--decoder-인계), [D3 정책 검증](../../fixtures/sdk/README.md#결과-기록), [D4-1 계약 fixture 검증](../../contracts/core-v1/README.md#결과-기록)은 완료됐다. 기존 통과 수와 로그는 해당 기록을 따르며 여기 복제하지 않는다.
-- `packages/core`는 0.0.1 scaffold다. `createCore()`는 비동기로 `CoreError(NOT_IMPLEMENTED)`를 reject한다. C2a/b에서 `dambi-core` Rust crate에 Decoder·정책 평가 실행부를 추출했으며, 공개 Core 연결·SDK 전용 WASM은 후속 단계다. 과거 `backup/core-sdk-b219617`의 코드·시험 결과를 현재 구현으로 사용하지 않는다.
+- `packages/core` 0.0.1은 C5에서 `createCore/plan/evaluate/refreshPolicies/dispose`를 SDK 전용 WASM과 연결했다. `check`·Fact 자동 조회·cache·hook은 C6에 남아 있다. 과거 `backup/core-sdk-b219617`의 코드·시험 결과를 현재 구현으로 사용하지 않는다.
 - D4-1 완료는 **당시 SDK 초안의 fixture 검증**이다. C1-1에서 현재 `GET /v1/bundle`의 payload 필드·sequence 타입·wrapper에 맞춘 변경의 사용자 실행 검증을 마쳤다. 실제 운영 API 통합 검증은 후속이다. 기존 통과 기록을 수정된 계약의 검증 결과로 재사용하지 않는다.
 - [D4-2 제품 선택안](../../contracts/core-v1/snapshot-selection.proposal.json)은 미확정이다. D4-2·D4-3은 C1/C2 및 고정 fixture를 사용하는 C3~C6 개발의 전체 선행 조건이 아니다. 제품 범위·제품 snapshot 재현성·최종 배포 완료 표시는 확정된 D4-2·D4-3 결과가 있어야 한다.
 
@@ -47,7 +47,7 @@ Core 내부의 snapshot·계획 수명·cache와 호스트의 영구 저장·감
 
 ## 3. Core 계약 권장안
 
-§3.1은 현재 API 구현·OpenAPI·결정문서를 기준으로 SDK 초안을 맞출 작업이다. 초기화·Decoder 구성·계획 소비·감사 메타데이터는 **C1 공개 타입에 반영했으며 실행부는 아직 미구현**이다. 정확한 export·필드와 digest 입력 규칙은 [패키지 README](../../packages/core/README.md) 및 공개 타입을 따른다. B 원문·Fact 의미·기존 정책 severity를 유지하고, API에 이미 정의된 내용을 다시 미정으로 돌리지 않는다.
+§3.1은 현재 API 구현·OpenAPI·결정문서를 기준으로 SDK 초안을 맞춘 계약이다. 초기화·Decoder 구성·계획 소비·감사 메타데이터는 **C1 공개 타입과 C5 실행부에 반영했다**. 정확한 export·필드와 digest 입력 규칙 및 확인된 검증 결과는 [패키지 README](../../packages/core/README.md) 및 공개 타입을 따른다. B 원문·Fact 의미·기존 정책 severity를 유지하고, API에 이미 정의된 내용을 다시 미정으로 돌리지 않는다.
 
 | 항목 | C1 이전 scaffold | C1 작업·결정 |
 | --- | --- | --- |
@@ -84,7 +84,7 @@ Core 내부의 snapshot·계획 수명·cache와 호스트의 영구 저장·감
 
 ### 3.2 생성·포트·수명주기
 
-C1에서 반영한 공개 진입점이다. 아래 타입은 빌드 후 공개 패키지에서 import할 수 있으며, `createCore` 실행은 아직 `NOT_IMPLEMENTED`로 reject한다.
+C1에서 반영한 공개 진입점이다. 아래 타입은 빌드 후 공개 패키지에서 import할 수 있으며, C5 실행부를 연결했다. `check`는 C6 구현 전까지 `NOT_IMPLEMENTED`로 reject한다.
 
 ```ts
 declare function createCore(config: CoreConfig, options?: CallOptions): Promise<DambiCore>;
@@ -108,7 +108,7 @@ interface FactProvider {
 
 `CoreConfig`는 `ports: { policy, fact }`, `decoderSnapshot`, 역할별 로컬 신뢰 키·env/profile을 담는 `trust`, 실행 한도를 담는 `limits`, 선택적 `clock/hooks`, 필수 `enforcement`로 구성한다. `limits`는 §3.1의 `maxBundleAgeSec` 외에 clock skew, 정책/Decoder/요청/FactBatch 크기, 계획 TTL/보관·call 한도, Fact 최대 나이, 정책/Fact 조회 timeout을 명시한다. 정확한 필드와 단위는 `CoreLimits`를 따른다. 나머지 미정 운영값에 임의 기본값을 넣지 않고 fixture에는 명시적인 시험 설정을 쓴다.
 
-- **생성:** WASM 준비 → 고정 Decoder 무결성/구조 검사·설치 → 정책 fetch → B 원문 서명·의미 검증 → 활성 snapshot 생성 순으로 완료한다. 실패하면 자원을 정리하고 `CoreError`로 reject한다. 부분 초기화 인스턴스를 반환하지 않는다.
+- **생성:** WASM 준비와 정책 fetch를 병렬로 수행한 뒤, Native session 생성에서 고정 Decoder 무결성/구조 검사·설치 → B 원문 서명·의미 검증 → 활성 snapshot 생성을 완료한다. 실패하면 자원을 정리하고 `CoreError`로 reject한다. 부분 초기화 인스턴스를 반환하지 않는다.
 - **내장 Decoder:** 신뢰 가능한 로컬 패키지/설정에 고정된 예상 digest와 artifact를 비교한다. artifact와 함께 온 자기 주장 digest만으로 신뢰하지 않는다. C1~C6 초기 경로에는 원격 Decoder 자동 조회·갱신을 넣지 않는다. 외부 Decoder의 별도 역할 서명 검증 능력은 C3에서 준비하되, 공개 로딩 API는 필요가 생길 때 별도 계약으로 추가한다.
 - **정책 갱신:** `refreshPolicies`는 현재 고정 Decoder와 호환되는 새 정책을 전부 검증한 뒤 활성 snapshot만 원자적으로 교체한다. 실패하면 기존 상태를 유지한다. 초기 버전에는 자동 갱신 timer를 두지 않는다.
 - **종료·취소:** `dispose`는 여러 번 호출해도 안전하고 진행 중 I/O 취소, 계획·cache 해제, WASM 자원 정리를 수행한다. 종료 후 신규 호출은 수명주기 오류다. 생성·계획·조회·갱신에 전달한 `AbortSignal`은 외부 포트까지 전파하며, 취소를 무시하고 늦게 도착한 결과도 상태에 반영하지 않는다.
@@ -299,9 +299,9 @@ C3-3의 `validate_policy_bundle`은 서명 확인 객체만 받아 전체 Manife
 | 명령 | 현재 의미·실행 시점 |
 | --- | --- |
 | `npm run core:typecheck` | 현재 공개 TS 타입 검사. C1 타입 변경 시 |
-| `npm run core:build` | 현재 TS/선언 파일 생성. WASM 빌드가 아님 |
+| `npm run core:build` | TS/선언 파일과 SDK 전용 WASM/glue 생성. wasm-pack·wasm32 target 필요 |
 | `npm run core:test:types` | build 후 공개 `.d.ts` 소비자와 wire 타입 검사 |
-| `npm run core:test:scaffold` | build 후 async NOT_IMPLEMENTED·ESM 진입점 검사. 실제 판정 검증 아님 |
+| `npm run core:test:runtime` | Core·session runner 빌드 후 실제 WASM/Native 판정 일치·계획/Fact/갱신 수명 검사 |
 | `npm run core:pack` | 기존 dist의 pack dry-run. 실제 설치 검증이 아니며 build 이후 사용 |
 | `npm run contract:test` | C1-1 구조·Node 참조 서명 사례. 사용자 검증 완료, 관련 변경 시 실행. Core 암호 구현 검증과 구분 |
 | `npm run policy:test` | D3 실제 기존 WASM 정책 검사 |
@@ -313,9 +313,11 @@ C3-3의 `validate_policy_bundle`은 서명 확인 객체만 받아 전체 Manife
 | `cargo test --locked -p dambi-core --test policy_bundle_signature` | C3-2 실제 P-256 서명·키 역할·원문/JCS 결속 검사. 의미 검증·활성화는 후속 |
 | `cargo test --locked -p dambi-core --test policy_bundle_semantics` | C3-3 전체 Manifest/Cedar·ID·scope·시간·sequence 의미 검증 |
 | `cargo test --locked -p dambi-core --test decoder_snapshot --test snapshot_store` | C4 Decoder 무결성·설치 경계와 Store 초기화·갱신·snapshot 수명 검증 |
+| `cargo test --locked -p dambi-core --test session` | C5 계획·Fact 결속, multicall 오류 집계와 수명 검사 |
+| `cargo build --locked -p dambi-core --example session_runner` | 공개 JS/WASM 시험의 Native 비교 실행 파일 생성 |
 | `cargo build --locked -p dambi-core --example fixture_runner` | Node DEC/D3 시험이 부르는 Native 실행 파일 생성 |
 | `cargo test --locked -p policy-engine-wasm --test declarative_v3_route --test declarative_v3_typed_data_install --test declarative_v3_typed_data_strict --test multicall_limits` | 기존 wrapper의 원문·strict 숫자 원문·multicall 회귀. Node에서 표현할 수 없는 숫자 사례도 유지 |
-| `wasm-pack build crates/policy-engine-wasm --target web --release --out-dir pkg --out-name policy_engine_wasm` | 변경된 Rust 실행부와 기존 wrapper의 JS/WASM 쌍 재생성. SDK 전용 WASM 빌드는 C5에서 연결 |
+| `wasm-pack build crates/policy-engine-wasm --target web --release --out-dir pkg --out-name policy_engine_wasm` | 기존 wrapper의 JS/WASM 쌍 재생성. C5 SDK 빌드는 core:build 사용 |
 | `npm run decoder:test:approve-policy` | raw approve → 기존 WASM 정책 연결 |
 | `npm run decoder:test:handoff` | 인계 자료의 Registry 재현 생성·정합성. 내부 builder 실행 포함 |
 | `npm run decoder:test` | 전체 DEC 원문·Action·decoder ID·진단 및 approve 정책 연결 회귀. C2a에서는 위 Native 검사와 새 JS/WASM 빌드 후 실행 |
@@ -330,7 +332,7 @@ C3-3의 `validate_policy_bundle`은 서명 확인 객체만 받아 전체 Manife
 
 **C4 최소 검증:** 기존 SHA-256 의존성의 Core 직접 참조를 `cargo update --workspace --offline`로 반영한 뒤 `cargo test --locked -p dambi-core --test decoder_snapshot --test snapshot_store`를 실행한다. C3의 검증 로직과 기존 Decoder 실행부는 재사용한다.
 
-소비자 타입 검사(`core:test:types`)와 async scaffold 검사(`core:test:scaffold`)는 C1에서, `dambi-core` Native 검사는 C2a에서 연결했다. SDK 전용 WASM 빌드와 `sdk:verify:isolated`는 **해당 단계에서 구현할 명령**이다. 지금 존재하는 것처럼 Task에 등록하지 않는다.
+**C5 최소 검증:** 신규 WASM crate를 `cargo update --workspace --offline`로 반영한 뒤 session 시험 → session runner 빌드 → `core:build` → `core:test:types` → `core:test:runtime` 순서로 실행한다. 실제 명령은 [패키지 개발 안내](../../packages/core/README.md#development-checks)에 모은다. C1 scaffold 시험은 실제 runtime 시험으로 교체했다. `sdk:verify:isolated`는 아직 미구현이며 C6 인계 때 연결한다.
 
 Core 기능 구현 완료와 제품 출시 완료를 구분한다. 최종 SDK는 상위 계획 [§7.1](decoder-core-adapters-plan.md#71-필수-완료-조건-sdk-소스만으로-빌드시험패키징)의 SDK 소스 복사본에서 빌드·시험·패키징해야 한다. 확장/서버/기존 WASM 폴더 없이 재현하고, 실제 tarball의 ESM/CJS·타입·WASM·브라우저 소비를 확인한다. 최종 제품 범위에는 D4-2·D4-3 결과가 필요하다. 크기 목표와 실제 API/발행 검증도 상위 계획을 따른다.
 
@@ -384,7 +386,7 @@ C1 결과는 [계약 README](../../contracts/core-v1/README.md#결과-기록) �
 | C3-2 서명 | 사용자 검증 완료 |
 | C3-3 의미 | 사용자 검증 완료 |
 | C4 snapshot·Store | 구현 및 Store 사용자 검증 완료·Decoder 시험 결과 확인 대기 |
-| C5 plan/evaluate·SDK WASM | 미착수 |
+| C5 plan/evaluate·SDK WASM | 구현 및 타입·JS/WASM 사용자 검증 완료·Native session 시험 결과 확인 대기 |
 | C6 check·Fact·cache·hook | 미착수 |
 | API 정책 publisher 경로 수정 | API 담당 후속 작업. 실제 정책 재발행·A1 연동 전 필요 |
 | D4-2·D4-3 제품 범위·재현 생성 | 후속 의존 항목. C1 착수 조건 아님 |

@@ -1,18 +1,19 @@
 # @dambi/core
 
 Pre-sign policy core for Web3 wallets. Hosts provide signed policies and method
-responses; Core will decode requests, plan Fact calls and return allow/warn/deny.
+responses; Core decodes requests, plans Fact calls and returns allow/warn/deny.
 
-## Status: C1 public contract, runtime pending
+## Status: C5 runtime
 
-The working tree refines the 0.0.1 scaffold; it is not a new published release.
-`createCore()` returns a Promise that always rejects with `CoreError` code
-`NOT_IMPLEMENTED`. No decoding, trust verification or evaluation runs yet.
-C2–C6 implement the behavior described below. Type checks do not prove runtime
-handle integrity, signature validation, expiry or cancellation.
+The working tree implements `createCore`, `plan`, `evaluate`, `refreshPolicies`
+and `dispose` using this package's Rust/WASM runtime. This is not a new published
+release. Confirmed verification is recorded under Development checks below.
+`check()` still rejects with `NOT_IMPLEMENTED`: automatic Fact fetching, cache
+and hooks belong to C6. Use the explicit plan/provider/evaluate flow meanwhile.
 
-ESM only, Node >= 20, no runtime dependencies. `@dambi/core/internal` is reserved
-and empty. Do not integrate this scaffold as a working policy engine.
+ESM only, Node >= 20, no external JS runtime dependencies. The build includes its
+own JS/WASM pair under `dist/runtime/wasm`; serve those assets with the package
+when using browser modules. `@dambi/core/internal` remains reserved and empty.
 
 ## Public contract and migration
 
@@ -39,7 +40,7 @@ and empty. Do not integrate this scaffold as a working policy engine.
   `decision`, `source`, policy severity and reasons. It describes host deployment;
   Core does not submit or block transactions.
 
-This example describes the future runtime and type-checks against C1:
+The explicit C5 flow follows the C1 public contract:
 
 ```ts
 import { createCore } from "@dambi/core";
@@ -58,7 +59,7 @@ export async function evaluateRequest(
       signal,
     });
     return core.evaluate(plan, batch);
-    // For a separate request, check(request, { signal }) coordinates these steps.
+    // C6 will coordinate these steps through check(request, { signal }).
   } finally {
     core.dispose();
   }
@@ -71,7 +72,7 @@ lifecycle/handle errors throw or reject `CoreError`. With a valid handle, Fact o
 trust failures return `deny + fail_closed`. `check` also maps known malformed
 requests, cancellation and timeout to fail-closed; unsupported kinds warn.
 `CoreDiagnostic.code` distinguishes partial decoding, no policy match and errors.
-Hook exceptions do not alter the verdict.
+The `check` error mapping and hook behavior described here are C6 contracts.
 
 `CorePlan.expiresAt` is the plan TTL deadline. Handle validation runs first; if it
 passes, snapshot validity is checked separately. Thus expired handles throw,
@@ -88,7 +89,8 @@ policy-role key is required. Decoder-role keys cannot authorize policies.
 It is not the DEC-07 handoff index or unresolved source manifests. The container's
 `expectedDigest` is `0x` plus lowercase SHA-256 of its exact UTF-8 bytes, pinned
 independently in trusted local config. Existing per-bundle `bundle_sha256` rules
-remain distinct. Container generation and runtime validation are later work.
+remain distinct. Runtime validation is implemented; product container selection
+and reproducible generation remain D4 follow-up work.
 
 `CoreLimits` requires explicit UTF-8 size limits (`maxPolicyBytes` for B,
 `maxDecoderBytes`, `maxRequestBytes` for canonical digest input, `maxFactBytes`
@@ -118,7 +120,9 @@ hex or numeric-string conversions; JCS alone defines key ordering and JSON numbe
 formatting. Unknown top-level transport fields are excluded. Nested data must be
 JSON data: reject cycles, undefined, bigint, functions, symbols, non-finite values,
 unsafe integers, invalid Unicode and non-plain objects instead of silently
-coercing them. Unsupported kinds have unavailable metadata. C5 implements hashing.
+coercing them. Native Core calculates and pins the digest before issuing a plan.
+Unsupported requests reject `plan`; their future `check` verdicts will have
+unavailable metadata.
 
 `policyVersion` is the decimal string of the **pinned snapshot's integer
 sequence**; `engineVersion` identifies the engine used for that verdict. Missing
@@ -128,21 +132,37 @@ change a decision.
 
 ## Development checks
 
-From the repository root, run after changing this contract:
+From the repository root (Rust, the wasm32 target and wasm-pack are required):
 
 ```sh
-npm run core:typecheck
+cargo update --workspace --offline
+cargo test --locked -p dambi-core --test session
+cargo build --locked -p dambi-core --example session_runner
 npm run core:build
 npm run core:test:types
-npm run core:test:scaffold
+npm run core:test:runtime
 ```
 
 Consumer checks import the built package declarations (no source aliases) and
 also compile the policy wire types. Build first to avoid stale declarations.
-The scaffold check only verifies asynchronous failure and ESM entry resolution.
+The runtime checks load actual packaged WASM and compare plan/evaluate output
+against the Native session runner. They fail if artifacts are absent and never
+build them implicitly. No legacy extension WASM package is loaded.
 `npm run core:pack` separately inspects package contents without publishing.
+
+User verification (2026-09-28, C5 changes): consumer type checks completed without
+errors; runtime checks passed 5/5 (0 failures), including actual Native/WASM
+parity. The separate Native session test output has not been shared.
 
 ## Coverage and license
 
-No runtime coverage in this scaffold. Apache-2.0; see [LICENSE](./LICENSE) and
-[NOTICE](./NOTICE).
+C5 routes transactions through the supplied resolved Decoder snapshot, including
+multicall trees, and uses the existing strict ERC-20 Permit typed-data path.
+Other typed contracts, untyped signatures, venue orders and contract creation
+reject `plan` with `UNSUPPORTED_REQUEST`; no permissive typed-data fallback is
+used. Installation of a bundle does not certify every request path it describes.
+Method-specific Fact value validation remains the provider's responsibility;
+Core validates plan binding, provenance shape, age and required projections.
+Product scope and release verification remain separate from these fixed tests.
+
+Apache-2.0; see [LICENSE](./LICENSE) and [NOTICE](./NOTICE).

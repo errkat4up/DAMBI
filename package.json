@@ -10,7 +10,7 @@
     "core:typecheck": "yarn workspace @dambi/core typecheck",
     "core:build": "yarn workspace @dambi/core build",
     "core:test:types": "yarn workspace @dambi/core test:types",
-    "core:test:scaffold": "yarn workspace @dambi/core test:scaffold",
+    "core:test:runtime": "yarn workspace @dambi/core test:runtime",
     "core:test:fixtures": "node scripts/sdk/test-fixtures.mjs",
     "core:pack": "yarn workspace @dambi/core pack:check",
     "policy:test": "node --test fixtures/sdk/policy-bundle.test.mjs fixtures/sdk/day1-policy.test.mjs",

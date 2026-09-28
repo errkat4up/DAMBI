@@ -325,11 +325,8 @@ jobs:
           npx vitest run --root ../registryV2 scripts/__tests__/sign-bundles.test.ts
 
   # @dambi/core — the published SDK package (packages/core, root Yarn workspace).
-  # 0.0.1 is a types-only scaffold; this job is the guard that the publish path
-  # keeps working: typecheck, ESM build, consumer types and built output (the
-  # extensionless-import class of bug is invisible to tsc and only shows up at
-  # `node` resolution time), and a tarball dry-run so `files`/`exports` drift is
-  # caught before `npm publish`.
+  # Build its own WASM and exercise the published ESM entry with fixed local
+  # inputs, including Native/WASM session parity and private-asset packaging.
   core:
     runs-on: ubuntu-latest
     steps:
@@ -345,20 +342,38 @@ jobs:
       - name: Install (immutable)
         run: yarn install --immutable
 
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "core-wasm"
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version "${WASM_PACK_VERSION}" --locked
+
+      - name: Native Core session
+        run: cargo test --locked -p dambi-core --test session
+
+      - name: Build Native session parity runner
+        run: cargo build --locked -p dambi-core --example session_runner
+
       - name: Policy wire contract fixtures
         run: yarn contract:test
 
       - name: Typecheck
         run: yarn core:typecheck
 
-      - name: Build (ESM + .d.ts)
+      - name: Build (ESM + .d.ts + private WASM)
         run: yarn core:build
 
       - name: Consumer type contract (built package declarations)
         run: yarn core:test:types
 
-      - name: Built package scaffold (Node ESM)
-        run: yarn core:test:scaffold
+      - name: Built package runtime (Node + real WASM / Native parity)
+        run: yarn core:test:runtime
 
       - name: Tarball dry-run (files / exports drift)
         working-directory: packages/core

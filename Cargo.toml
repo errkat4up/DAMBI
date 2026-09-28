@@ -10,6 +10,7 @@ resolver = "2"
 exclude = ["crates/policy-server"]
 members = [
     "crates/dambi-core",
+    "crates/dambi-core-wasm",
     "crates/policy-engine",
     "crates/policy-engine-wasm",
     # crates/integration-tests is LOCAL-ONLY (gitignored, no production logic) —

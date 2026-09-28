@@ -18,7 +18,8 @@ export interface DecoderSnapshot {
   /**
    * SDK container JSON: { schema_version: 1, bundles: [resolved V3 bundle, ...] }.
    * Bundles are full resolved install inputs, not source manifests/index entries.
-   * Container production/validation is implemented in later Core stages.
+   * Core validates this container at initialization. Product snapshot generation
+   * is a separate build-time responsibility.
    */
   readonly artifact: string;
   /**

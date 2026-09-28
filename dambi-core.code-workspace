@@ -87,7 +87,7 @@
         "detail": "현재 @dambi/core의 TypeScript 타입을 검사합니다. 출력 파일을 생성하지 않습니다."
       },
       {
-        "label": "Core: TypeScript 빌드",
+        "label": "Core: TypeScript·SDK WASM 빌드",
         "type": "process",
         "command": "node",
         "args": [
@@ -102,7 +102,7 @@
           "base": "$tsc",
           "fileLocation": ["relative", "${workspaceFolder:DAMBI}/packages/core"]
         },
-        "detail": "packages/core/dist를 다시 생성합니다. 현재는 TypeScript 빌드이며 SDK WASM 빌드는 C5에서 연결합니다."
+        "detail": "packages/core/dist의 ESM·선언 파일과 SDK 전용 JS/WASM 자산을 다시 생성합니다. wasm-pack과 wasm32 target이 필요합니다."
       },
       {
         "label": "Core: 공개 패키지 소비자 타입 검사",
@@ -123,19 +123,19 @@
         "detail": "Core 빌드 후 실행합니다. 공개 .d.ts의 소비자 타입과 정책 wire 타입을 검사하며 자동 빌드는 수행하지 않습니다."
       },
       {
-        "label": "Core: 빌드 패키지 scaffold 시험",
+        "label": "Core: 빌드 패키지 runtime 시험",
         "type": "process",
         "command": "node",
         "args": [
           "${workspaceFolder:DAMBI}/.yarn/releases/yarn-4.14.1.cjs",
-          "core:test:scaffold"
+          "core:test:runtime"
         ],
         "options": {
           "cwd": "${workspaceFolder:DAMBI}"
         },
         "group": "test",
         "problemMatcher": [],
-        "detail": "Core 빌드 후 공개 진입점의 비동기 NOT_IMPLEMENTED 오류와 internal 진입점 import를 확인합니다. Core 판정 구현의 검증은 후속 단계입니다."
+        "detail": "SDK와 session runner 빌드 후 실제 WASM·Native 판정 일치, 계획 수명, Fact와 갱신 경계를 검사합니다."
       },
       {
         "label": "Core: 패키지 내용 확인 (dry-run)",
@@ -290,6 +290,26 @@
         "detail": "의존성 lockfile 갱신 후 C4 Decoder 무결성·설치·Store 갱신·snapshot 수명을 검사합니다."
       },
       {
+        "label": "Core Rust: plan·evaluate 시험",
+        "type": "process",
+        "command": "cargo",
+        "args": ["test", "--locked", "-p", "dambi-core", "--test", "session"],
+        "options": { "cwd": "${workspaceFolder:DAMBI}" },
+        "group": "test",
+        "problemMatcher": [],
+        "detail": "C5의 계획·Fact 결속과 multicall 오류 집계·수명을 검사합니다."
+      },
+      {
+        "label": "Core Rust: session parity runner 빌드",
+        "type": "process",
+        "command": "cargo",
+        "args": ["build", "--locked", "-p", "dambi-core", "--example", "session_runner"],
+        "options": { "cwd": "${workspaceFolder:DAMBI}" },
+        "group": "build",
+        "problemMatcher": [],
+        "detail": "공개 JS/WASM runtime 시험이 결과를 비교할 Native 실행 파일을 생성합니다."
+      },
+      {
         "label": "Core Rust: fixture runner 빌드",
         "type": "process",
         "command": "cargo",
@@ -297,7 +317,7 @@
         "options": { "cwd": "${workspaceFolder:DAMBI}" },
         "group": "build",
         "problemMatcher": [],
-        "detail": "공유 DEC/D3 시험이 부를 Native 실행 파일을 생성합니다. SDK WASM 빌드는 C5에서 연결합니다."
+        "detail": "공유 DEC/D3 시험이 부를 Native 실행 파일을 생성합니다."
       },
       {
         "label": "Core: DEC·D3 Native fixture 회귀",

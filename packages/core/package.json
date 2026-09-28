@@ -1,7 +1,7 @@
 {
   "name": "@dambi/core",
   "version": "0.0.1",
-  "description": "Dambi pre-sign policy core — public type contract and entry point (0.0.1 scaffold: createCore rejects with NOT_IMPLEMENTED)",
+  "description": "Dambi pre-sign policy core with a package-owned Rust/WASM runtime",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -42,9 +42,9 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && node ../../scripts/sdk/build-wasm.mjs",
     "test:types": "tsc -p tsconfig.consumer.json",
-    "test:scaffold": "node --test tests/scaffold.test.mjs",
+    "test:runtime": "node --test tests/runtime.test.mjs",
     "pack:check": "npm pack --dry-run"
   },
   "devDependencies": {
