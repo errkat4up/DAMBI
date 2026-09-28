@@ -35,4 +35,4 @@ pub fn debug_lowered_context_v2_json(input_json: String) -> String {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::too_many_lines)]
-pub(crate) mod tests;
+pub(crate) mod test_fixtures;

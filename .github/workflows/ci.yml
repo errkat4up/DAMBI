@@ -78,6 +78,12 @@ jobs:
           DAMBI_V3_HARNESS_REPRESENTATIVE_SOURCE_REFS: '1'
         run: cargo test --locked --workspace --all-features
 
+      - name: Build Native Core fixture runner
+        run: cargo build --locked -p dambi-core --example fixture_runner
+
+      - name: SDK DEC and D3 fixtures (Native Core)
+        run: npm run core:test:fixtures
+
       - name: Docs
         env:
           RUSTDOCFLAGS: -D warnings

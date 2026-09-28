@@ -279,14 +279,10 @@ mod tests {
     use super::*;
     use serde_json::{json, Value};
 
-    // Reuse the swap fixture builder from the evaluate export's tests by
-    // duplicating the minimal swap_sample shape we need: a swap with a chosen
-    // slippage. (Kept local so this test module is self-contained.)
+    // Reuse the legacy diagnosis-only fixture; runtime assertions belong to Core.
     fn swap_input(slippage_bp: u32, probes: Value) -> String {
-        // The action/meta come from action_eval_exports' swap_sample via a tiny
-        // JSON mirror is brittle; instead drive through the public builder.
         let (body, meta) =
-            crate::action_eval_exports::tests::swap_sample_with_slippage(slippage_bp);
+            crate::action_eval_exports::test_fixtures::swap_sample_with_slippage(slippage_bp);
         json!({
             "action": body,
             "meta": meta,
@@ -357,14 +353,15 @@ mod tests {
         // @severity warn) — and feed it to BOTH exports. If the two
         // materialization paths (evaluate inlines its own; diagnosis goes through
         // `materialized_context`) ever diverge, the assertions below disagree.
-        let (body, meta) = crate::action_eval_exports::tests::swap_sample_with_slippage(150);
+        let (body, meta) =
+            crate::action_eval_exports::test_fixtures::swap_sample_with_slippage(150);
         let base = json!({
             "action": body,
             "meta": meta,
             "tx": { "chain_id": "eip155:42161",
                     "from": "0x1111111111111111111111111111111111111111",
                     "to":   "0x2222222222222222222222222222222222222222" },
-            "bundles": [ crate::action_eval_exports::tests::shipped_high_slippage_bundle() ],
+            "bundles": [ crate::action_eval_exports::test_fixtures::shipped_high_slippage_bundle() ],
             "results": {}
         });
 
@@ -423,7 +420,7 @@ mod tests {
 
     #[test]
     fn token_decimals_enrichment_matches_verdict_context() {
-        let (body, meta) = crate::action_eval_exports::tests::swap_sample_with_slippage(50);
+        let (body, meta) = crate::action_eval_exports::test_fixtures::swap_sample_with_slippage(50);
         let usdc = "0xaf88d065e77c8cc2239327c5edb3a432268e5831";
         let mut decimals = serde_json::Map::new();
         decimals.insert(usdc.to_owned(), json!(6));

@@ -42,6 +42,10 @@
 pub mod dto;
 pub mod json;
 
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::too_many_lines)]
+mod tests;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value;

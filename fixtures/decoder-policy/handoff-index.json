@@ -689,6 +689,9 @@
     "registryV2/tsconfig.json",
     "fixtures/decoder-policy/helpers/build-registry.mjs",
     "fixtures/decoder-policy/helpers/handoff.mjs",
-    "fixtures/decoder-policy/helpers/wasm-worker.mjs"
+    "fixtures/decoder-policy/helpers/wasm-worker.mjs",
+    "fixtures/sdk/helpers/native-backend.mjs",
+    "crates/dambi-core/examples/fixture_runner.rs",
+    "scripts/sdk/test-fixtures.mjs"
   ]
 }

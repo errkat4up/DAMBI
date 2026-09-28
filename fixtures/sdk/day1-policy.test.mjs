@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { before, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { assertFixtureBackend, fixtureBackend, runNativeFixture } from "./helpers/native-backend.mjs";
 
 const require = createRequire(import.meta.url);
 const { loadPolicyBundle } = require("../../scripts/sdk/policy-bundle.cjs");
@@ -45,6 +46,7 @@ function inputFor(entry) {
 }
 
 function runInput(input) {
+  if (fixtureBackend === "native") return runNativeFixture("policy", { input, bundles });
   // Both phases consume the same shared manifests. No external Facts or
   // token-decimal/order enrichment are supplied; this is the actual v2 API.
   const plan = JSON.parse(wasm.plan_action_rpc_v2_json(JSON.stringify({
@@ -57,15 +59,11 @@ function runInput(input) {
 }
 
 before(async () => {
-  // This suite never builds WASM or skips missing prerequisites. No decoder
-  // Registry is installed, so no separate worker/global-registry cleanup is needed.
-  for (const name of ["policy_engine_wasm.js", "policy_engine_wasm_bg.wasm"]) {
-    await access(join(repoRoot, "crates/policy-engine-wasm/pkg", name)).catch(() => {
-      throw new Error(`Missing ${name}; build the paired legacy JS/WASM first (see README.md).`);
-    });
-  }
+  // Missing prerequisites fail; this suite never builds or changes backends.
+  await assertFixtureBackend();
   bundles = loadPolicyBundle(repoRoot, fixture.bundle);
   assert.equal(baseline.source.bundle, fixture.bundle);
+  if (fixtureBackend === "native") return;
   wasm = await import("../../crates/policy-engine-wasm/pkg/policy_engine_wasm.js");
   await wasm.default({
     module_or_path: await readFile(new URL("../../crates/policy-engine-wasm/pkg/policy_engine_wasm_bg.wasm", import.meta.url)),

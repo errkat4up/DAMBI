@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { access, readdir, writeFile } from "node:fs/promises";
+import { readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { readJson, repoRoot, resolveIndexBundle } from "./helpers/build-registry.mjs";
 import { buildHandoffRegistry } from "./helpers/handoff.mjs";
+import { assertFixtureBackend } from "../sdk/helpers/native-backend.mjs";
 
 const execFileAsync = promisify(execFile);
 const selection = await readJson(new URL("./registry-selection.json", import.meta.url));
@@ -71,11 +72,7 @@ async function runScenario(name, bundles, requests) {
 
 before(async () => {
   // Missing prerequisites fail. This test builds the Registry, never WASM.
-  for (const name of ["policy_engine_wasm.js", "policy_engine_wasm_bg.wasm"]) {
-    await access(join(repoRoot, "crates/policy-engine-wasm/pkg", name)).catch(() => {
-      throw new Error(`Missing ${name}; prepare the paired legacy JS/WASM first (see README.md).`);
-    });
-  }
+  await assertFixtureBackend();
   assert.equal(fixture.registry_source, selection.permit_manifest.path);
   assert.equal(fixture.cases.length, 44, "Required DEC-04a request case count changed");
   assert.equal(new Set(fixture.cases.map(({ id }) => id)).size, fixture.cases.length);

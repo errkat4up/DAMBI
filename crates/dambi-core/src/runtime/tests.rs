@@ -1,6 +1,7 @@
-use super::*;
-use dambi_core::runtime::dto::{EvaluateActionInput, PlanActionInput};
-use dambi_core::runtime::{evaluate_action, plan_action};
+use super::dto::{BundleInput, TxInput};
+use crate::json::Envelope;
+use crate::runtime::dto::{EvaluateActionInput, PlanActionInput};
+use crate::runtime::{evaluate_action, json as runtime_json, plan_action};
 use policy_engine::policy::{PolicyEngine, Verdict};
 use policy_engine::policy_rpc::{ManifestV2, MAX_POLICY_RPC_V2_MANIFESTS};
 use policy_engine::schema::compose_per_policy;
@@ -18,6 +19,19 @@ use policy_transition::action::amm::{
 };
 use policy_transition::action::hyperliquid_core::{HlUnknownAction, HyperliquidCoreAction};
 use policy_transition::action::{ActionMeta, ActionNature};
+
+// Keep the established envelope assertions while calling the SDK-owned
+// JSON adapters. These helpers are private to this test module.
+fn plan_action_rpc_v2_json(input_json: String) -> String {
+    match runtime_json::plan_action_rpc_v2(&input_json) {
+        Ok(data) => Envelope::ok(data).to_json(),
+        Err(error) => Envelope::<()>::err(error.kind, error.message).to_json(),
+    }
+}
+
+fn evaluate_action_v2_json(input_json: String) -> String {
+    Envelope::ok(runtime_json::evaluate_action_v2(&input_json)).to_json()
+}
 
 const FROM: &str = "0x1111111111111111111111111111111111111111";
 const TO: &str = "0x2222222222222222222222222222222222222222";
@@ -1222,7 +1236,7 @@ fn per_child_example_bundles_compile() {
 /// `browser-extension/public/default-policies/policy-set-v2.json`): an
 /// Inner-scoped (no `trigger.scope` → default Inner) `forbid` on
 /// `Amm::Action::"Swap"` when `slippageBp > 100`.
-pub(crate) fn shipped_high_slippage_bundle() -> Value {
+fn shipped_high_slippage_bundle() -> Value {
     json!({
         "policy": "@id(\"high-slippage-warning\")\n@severity(\"warn\")\nforbid(principal, action == Amm::Action::\"Swap\", resource)\nwhen { context.slippageBp > 100 };\n",
         "manifest": { "id": "high-slippage-warning", "schema_version": 2,
@@ -1232,7 +1246,7 @@ pub(crate) fn shipped_high_slippage_bundle() -> Value {
 
 /// `swap_sample` but with a caller-chosen `slippage_bp` so the shipped
 /// `slippageBp > 100` guard can be made to trip (150) or not (50).
-pub(crate) fn swap_sample_with_slippage(bp: u32) -> (ActionBody, ActionMeta) {
+fn swap_sample_with_slippage(bp: u32) -> (ActionBody, ActionMeta) {
     let (body, meta) = swap_sample();
     let ActionBody::Amm(AmmAction::Swap(mut swap)) = body else {
         unreachable!("swap_sample yields an amm swap")
