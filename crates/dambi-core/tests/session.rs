@@ -109,7 +109,10 @@ fn real_decode_evaluation_and_digest_use_the_pinned_declared_request() {
     assert!(has_reason(&result, "unlimited-approval-deny"));
     assert_eq!(result["metadata"]["requestDigest"], expected);
     assert_eq!(result["metadata"]["policyVersion"], "42");
-    assert!(result["metadata"]["engineVersion"].as_str().unwrap().len() > 0);
+    assert!(!result["metadata"]["engineVersion"]
+        .as_str()
+        .unwrap()
+        .is_empty());
     error_code(
         session.evaluate(plan["planId"].as_str().unwrap(), &empty_facts(&plan), NOW),
         "PLAN_CONSUMED",
