@@ -270,6 +270,16 @@
         "detail": "의존성 lockfile 갱신 후 C3 parser와 실제 서명 검증을 함께 실행합니다. 정책 의미·snapshot 활성화는 후속 단계입니다."
       },
       {
+        "label": "Core Rust: 번들 의미 시험",
+        "type": "process",
+        "command": "cargo",
+        "args": ["test", "--locked", "-p", "dambi-core", "--test", "policy_bundle_semantics"],
+        "options": { "cwd": "${workspaceFolder:DAMBI}" },
+        "group": "test",
+        "problemMatcher": [],
+        "detail": "의존성 lockfile 갱신 후 C3-3 전체 정책·Manifest·Cedar·시간·scope·sequence 검증을 실행합니다."
+      },
+      {
         "label": "Core Rust: fixture runner 빌드",
         "type": "process",
         "command": "cargo",

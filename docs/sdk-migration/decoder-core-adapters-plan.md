@@ -348,7 +348,7 @@ D4-2는 제품 지원 범위를 바꾸는 결정이다. 현재 고정 시험의 
 
 **Core 착수 계획(2026-09-17 수정):** 단계별 실행과 VS Code 환경은 [Core 세부 개발 계획](core-development-plan.md)을 따른다. D3·D4-1 및 DEC-07 자료를 바탕으로 C1-1의 정책 API·fixture 정합화부터 시작한다. D4-2·D4-3의 제품 범위 확정·재현 생성은 C1/C2와 fixture 기반 Core 개발의 전체 선행 조건이 아니며, 제품 snapshot 연결과 최종 배포 완료의 후속 의존 항목으로 유지한다.
 
-**현재 상태:** C1·C2-0a~c·C2a/b/c 완료. 다음 단계는 C3 parser·서명·의미 검증이다. 세부 상태는 [Core 계획](core-development-plan.md)을 따른다.
+**현재 상태:** C1·C2-0a~c·C2a/b/c·C3-1/2/3 완료. 다음 단계는 C4 snapshot·Store다. 세부 상태는 [Core 계획](core-development-plan.md)을 따른다.
 
 실제 API/RPC는 아직 연결하지 않는다. D 단계의 실제 정책·디코더와 서명된 테스트 번들, 기록된 원본 Fact를 반환하는 mock 포트로 실행부를 개발한다. 평가·암호 검증 자체는 mock하지 않는다.
 

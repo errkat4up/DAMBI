@@ -10,6 +10,7 @@ abi-resolver.workspace = true
 alloy-json-abi.workspace = true
 alloy-primitives.workspace = true
 base64.workspace = true
+cedar-policy.workspace = true
 hex.workspace = true
 mappers.workspace = true
 p256.workspace = true

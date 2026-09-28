@@ -760,6 +760,7 @@ dependencies = [
  "alloy-json-abi",
  "alloy-primitives",
  "base64",
+ "cedar-policy",
  "hex",
  "mappers",
  "p256",
