@@ -11,6 +11,7 @@ alloy-json-abi.workspace = true
 alloy-primitives.workspace = true
 hex.workspace = true
 mappers.workspace = true
+policy-engine.workspace = true
 policy-state.workspace = true
 policy-transition.workspace = true
 serde.workspace = true

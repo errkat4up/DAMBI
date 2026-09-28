@@ -1,6 +1,6 @@
 # Dambi Core 세부 개발 계획
 
-작성일: 2026-09-14. 수정일: 2026-09-28. 상위 계획은 [Decoder·정책 → Core → Adapters](decoder-core-adapters-plan.md)이며, 이 문서는 Core의 C1~C6 실행 순서와 VS Code 작업 기준을 구체화한다. **C1·C2-0a~c·C2a 완료. 다음 단계는 C2b 정책 평가 실행부 추출이다.**
+작성일: 2026-09-14. 수정일: 2026-09-28. 상위 계획은 [Decoder·정책 → Core → Adapters](decoder-core-adapters-plan.md)이며, 이 문서는 Core의 C1~C6 실행 순서와 VS Code 작업 기준을 구체화한다. **C1·C2-0a~c·C2a/b 완료. 다음 단계는 C2c SDK 회귀 자료 이관이다.**
 
 문서 상태: **v0.1 작업 초안**. 구현·검증에서 확인한 의존성과 비용에 따라 단계 분할·순서·설계를 수정할 수 있다. 이미 검증한 동작과 명시적으로 합의한 계약, 아직 제안인 API·제품 범위를 구분한다. 계획의 추정을 구현 사실로 취급하거나 계획을 맞추기 위해 불필요한 절차를 추가하지 않는다. 이 문서 버전은 현재 SDK 패키지 버전 `0.0.1`과 별개다.
 
@@ -8,7 +8,7 @@
 
 - 현재 작업 브랜치는 `feat/core`, 기준 커밋은 `3f0ad6b`이며 로컬 `main`도 같은 커밋이다. 2026-09-28 GitHub 비교 API로 원격 `main`도 동일함을 재확인했다. `feat/decoder`는 `4803a2a`다. Core 브랜치 준비는 끝났으며 이 문서의 API 대조 기준도 `3f0ad6b`다.
 - [Decoder 인계](../../fixtures/decoder-policy/README.md#dec-07--decoder-인계), [D3 정책 검증](../../fixtures/sdk/README.md#결과-기록), [D4-1 계약 fixture 검증](../../contracts/core-v1/README.md#결과-기록)은 완료됐다. 기존 통과 수와 로그는 해당 기록을 따르며 여기 복제하지 않는다.
-- `packages/core`는 0.0.1 scaffold다. `createCore()`는 비동기로 `CoreError(NOT_IMPLEMENTED)`를 reject한다. C2a에서 `dambi-core` Rust crate에 Decoder 실행부를 추출했으며, 공개 Core 연결·SDK 전용 WASM은 후속 단계다. 과거 `backup/core-sdk-b219617`의 코드·시험 결과를 현재 구현으로 사용하지 않는다.
+- `packages/core`는 0.0.1 scaffold다. `createCore()`는 비동기로 `CoreError(NOT_IMPLEMENTED)`를 reject한다. C2a/b에서 `dambi-core` Rust crate에 Decoder·정책 평가 실행부를 추출했으며, 공개 Core 연결·SDK 전용 WASM은 후속 단계다. 과거 `backup/core-sdk-b219617`의 코드·시험 결과를 현재 구현으로 사용하지 않는다.
 - D4-1 완료는 **당시 SDK 초안의 fixture 검증**이다. C1-1에서 현재 `GET /v1/bundle`의 payload 필드·sequence 타입·wrapper에 맞춘 변경의 사용자 실행 검증을 마쳤다. 실제 운영 API 통합 검증은 후속이다. 기존 통과 기록을 수정된 계약의 검증 결과로 재사용하지 않는다.
 - [D4-2 제품 선택안](../../contracts/core-v1/snapshot-selection.proposal.json)은 미확정이다. D4-2·D4-3은 C1/C2 및 고정 fixture를 사용하는 C3~C6 개발의 전체 선행 조건이 아니다. 제품 범위·제품 snapshot 재현성·최종 배포 완료 표시는 확정된 D4-2·D4-3 결과가 있어야 한다.
 
@@ -233,6 +233,8 @@ cargo package --locked --offline --allow-dirty -p policy-engine --list | rg -c '
 
 완료 조건: 같은 Action·manifest·Fact에 같은 정책 ID·severity·판정. 누락·잘못된 projection·invalid matching manifest와 정상 정책 공존의 기존 오류 동작 유지. plan handle 도입에 따른 재사용 방식 변경은 C5에서 검증한다.
 
+기존 평가 시험은 `crates/policy-engine-wasm/src/action_eval_exports/tests.rs`에서 wrapper를 통해 추출한 실행부를 검사한다. SDK 직접 회귀 자료 이관은 C2c에서 진행한다. 기존 `policy-engine`을 재사용하며 외부 의존성 버전 변경 없이 lockfile에 Core의 의존 관계를 반영했다. §5의 C2b 최소 검증만 수행한다.
+
 ### C2c — SDK 회귀 자료 이관
 
 `fixtures/decoder-policy`의 필수 case ID와 D3 정책 사례를 SDK runner에 연결한다. `hl_exchange_deny_e2e.rs`, `est_roundtrip.rs`, baseline 등이 읽거나 쓰는 확장/서버 seed를 찾아 SDK fixture 또는 crate 내부 시험 자료로 옮긴다. 소비 경로 전환 후에만 이전 참조를 제거한다.
@@ -293,15 +295,19 @@ D4-1의 fixture helper는 C3 parser가 아니다. `JSON.parse`와 TypeScript 타
 | `npm run core:pack` | 기존 dist의 pack dry-run. 실제 설치 검증이 아니며 build 이후 사용 |
 | `npm run contract:test` | C1-1 구조·Node 참조 서명 사례. 사용자 검증 완료, 관련 변경 시 실행. Core 암호 구현 검증과 구분 |
 | `npm run policy:test` | D3 실제 기존 WASM 정책 검사 |
+| `node --test fixtures/sdk/day1-policy.test.mjs` | C2b에서 새 JS/WASM으로 공유 정책의 전체 Verdict·policy ID·severity를 확인하는 최소 Node 회귀 |
 | `cargo test --locked -p policy-engine --lib` | 기존 정책 엔진 Native library 시험. integration test는 별도 |
 | `cargo test --locked -p dambi-core` | 추출한 Decoder helper·인스턴스 상태 격리의 Native 시험 |
+| `cargo test --locked -p policy-engine-wasm --lib action_eval_exports::tests` | C2b 계획·Fact projection·정책 평가의 기존 wrapper 회귀. Decoder 시험은 실행하지 않음 |
 | `cargo test --locked -p policy-engine-wasm --test declarative_v3_route --test declarative_v3_typed_data_install --test declarative_v3_typed_data_strict --test multicall_limits` | 기존 wrapper의 원문·strict 숫자 원문·multicall 회귀. Node에서 표현할 수 없는 숫자 사례도 유지 |
-| `wasm-pack build crates/policy-engine-wasm --target web --release --out-dir pkg --out-name policy_engine_wasm` | C2a 변경 실행부와 기존 wrapper의 JS/WASM 쌍 재생성. SDK 전용 WASM 빌드는 C5에서 연결 |
+| `wasm-pack build crates/policy-engine-wasm --target web --release --out-dir pkg --out-name policy_engine_wasm` | 변경된 Rust 실행부와 기존 wrapper의 JS/WASM 쌍 재생성. SDK 전용 WASM 빌드는 C5에서 연결 |
 | `npm run decoder:test:approve-policy` | raw approve → 기존 WASM 정책 연결 |
 | `npm run decoder:test:handoff` | 인계 자료의 Registry 재현 생성·정합성. 내부 builder 실행 포함 |
 | `npm run decoder:test` | 전체 DEC 원문·Action·decoder ID·진단 및 approve 정책 연결 회귀. C2a에서는 위 Native 검사와 새 JS/WASM 빌드 후 실행 |
 
-소비자 타입 검사(`core:test:types`)와 async scaffold 검사(`core:test:scaffold`)는 C1에서, `dambi-core` Native 검사는 C2a에서 연결했다. C2a 검증은 Core Native → 기존 wrapper integration → 새 JS/WASM 빌드 → `decoder:test` 순서이며, 개별 Node suite를 중복 실행하지 않는다. SDK 전용 WASM 빌드와 `sdk:verify:isolated`는 **해당 단계에서 구현할 명령**이다. 지금 존재하는 것처럼 Task에 등록하지 않는다.
+**C2b 최소 검증:** `action_eval_exports::tests` Native 회귀 → 위 WASM 빌드 → `day1-policy.test.mjs` 순서다. C2a에서 통과한 Decoder·전체 workspace 검사는 반복하지 않는다. 정책 loader를 바꾸지 않았으므로 `policy:test` 전체 대신 Day-1 파일만 실행한다.
+
+소비자 타입 검사(`core:test:types`)와 async scaffold 검사(`core:test:scaffold`)는 C1에서, `dambi-core` Native 검사는 C2a에서 연결했다. SDK 전용 WASM 빌드와 `sdk:verify:isolated`는 **해당 단계에서 구현할 명령**이다. 지금 존재하는 것처럼 Task에 등록하지 않는다.
 
 Core 기능 구현 완료와 제품 출시 완료를 구분한다. 최종 SDK는 상위 계획 [§7.1](decoder-core-adapters-plan.md#71-필수-완료-조건-sdk-소스만으로-빌드시험패키징)의 SDK 소스 복사본에서 빌드·시험·패키징해야 한다. 확장/서버/기존 WASM 폴더 없이 재현하고, 실제 tarball의 ESM/CJS·타입·WASM·브라우저 소비를 확인한다. 최종 제품 범위에는 D4-2·D4-3 결과가 필요하다. 크기 목표와 실제 API/발행 검증도 상위 계획을 따른다.
 
@@ -320,7 +326,7 @@ CLI를 쓰지 않으면 VS Code의 `File → Open Workspace from File…`에서 
 - 저장소 TypeScript 경로는 `node_modules/typescript/lib`다. TS 파일을 연 뒤 `TypeScript: Select TypeScript Version` → `Use Workspace Version`을 선택한다. Yarn은 저장소에 포함된 4.14.1 실행 파일을 Task에서 직접 호출한다. Node 20 이상·TS 5.7.3·Rust 1.95.0·WASM 도구 핀은 현재 설정을 유지한다.
 - Rust Analyzer는 SDK·서버 두 Cargo manifest를 읽도록 연결했고, Cedar 확장과 함께 추천 목록에 넣는다. Rust Analyzer는 현재 로컬에 없어 사용자가 설치한다. TypeScript/JSON 지원은 VS Code 기본 기능을 사용한다.
 - `checkOnSave`, `cargo.buildScripts.enable`, `procMacro.enable`을 꺼서 자동 Cargo 검사·build.rs 실행을 막는다. 이에 따라 일부 매크로 기반 분석은 제한된다. [Rust Analyzer 설정 근거](https://rust-analyzer.github.io/book/configuration.html)
-- `Tasks: Run Task`에 §5의 **수동 작업 13개**를 연결했다. `Cmd+Shift+B`는 Core 타입 검사이며 TypeScript 오류는 `Problems`에서 해당 소스로 이동한다. 빌드·pack·계약·정책·기존 Rust/Decoder 회귀를 필요할 때 선택한다. 폴더를 열 때 실행되는 Task·설치·빌드·시험은 없다.
+- `Tasks: Run Task`에 §5의 **수동 작업 14개**를 연결했다. `Cmd+Shift+B`는 Core 타입 검사이며 TypeScript 오류는 `Problems`에서 해당 소스로 이동한다. 빌드·pack·계약·정책·기존 Rust/Decoder 회귀를 필요할 때 선택한다. 폴더를 열 때 실행되는 Task·설치·빌드·시험은 없다.
 - **F5 디버깅:** `contracts/core-v1/contract.test.mjs`를 열고 시험 본문에 중단점을 설정한 뒤 `Core 계약: C1-1 참조 시험 디버깅`을 선택한다. Node 시험 runner의 자식 프로세스에도 연결한다. 이는 현재 존재하는 계약 fixture용이며 Rust/WASM 내부나 미구현 Core 실행부의 디버깅은 아니다. 자동 선행 빌드는 없다.
 - 생성물과 dependency 폴더만 검색·감시에서 제외한다. 기존 확장/서버 소스는 추출 작업에 필요하므로 숨기지 않는다. 새 Core crate·WASM runner가 생기는 C2/C5에서 해당 Task/launch를 실제 경로로 추가한다.
 
@@ -349,7 +355,8 @@ C1 결과는 [계약 README](../../contracts/core-v1/README.md#결과-기록) �
 | C2-0b workspace 분리 | 사용자 검증 완료 |
 | C2-0c schema 경계 | 사용자 검증 완료 |
 | C2a Decoder 인스턴스화 | 사용자 검증 완료 |
-| C2b/c 평가·fixture 추출 | 미착수 |
+| C2b 정책 평가 실행부 추출 | 사용자 검증 완료 |
+| C2c SDK 회귀 자료 이관 | 미착수 |
 | C3 parser·서명·의미 | 미착수 |
 | C4 snapshot·Store | 미착수 |
 | C5 plan/evaluate·SDK WASM | 미착수 |

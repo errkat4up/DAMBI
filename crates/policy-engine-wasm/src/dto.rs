@@ -83,22 +83,6 @@ pub struct PolicyEntryDto {
     pub text: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum VerdictDto {
-    Pass,
-    Warn { matched: Vec<MatchedPolicyDto> },
-    Fail { matched: Vec<MatchedPolicyDto> },
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct MatchedPolicyDto {
-    pub policy_id: String,
-    pub reason: Option<String>,
-    pub severity: String,
-    pub origin: String,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct PreviewSchemaInputDto {
     #[serde(default)]
