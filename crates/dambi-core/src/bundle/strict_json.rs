@@ -75,7 +75,7 @@ pub(super) fn string(raw: &RawValue, path: &str) -> Result<String, PolicyParseEr
     serde_json::from_str(raw.get()).map_err(|e| invalid_json(path, e))
 }
 
-pub(super) fn parse(input: &str) -> Result<Value, PolicyParseError> {
+pub(crate) fn parse(input: &str) -> Result<Value, PolicyParseError> {
     let raw = serde_json::from_str::<&RawValue>(input).map_err(|e| invalid_json("$", e))?;
     value(raw, &mut "$".to_owned(), 0)
 }

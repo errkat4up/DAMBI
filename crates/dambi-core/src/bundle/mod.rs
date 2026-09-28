@@ -7,7 +7,7 @@ mod decoder_signature;
 mod policy_content;
 mod semantics;
 mod signature;
-mod strict_json;
+pub(crate) mod strict_json;
 mod structure;
 
 pub use decoder_signature::SignatureVerifiedDecoderBundle;

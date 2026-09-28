@@ -3,6 +3,7 @@
 These are fixed test inputs, included inside the crate; tests never load app seeds.
 
 - `erc20-permit.manifest.json`: unchanged `registryV2/manifests/standard/erc20/permit@1.0.0.json`.
+- `snapshot-approve.json`: standard ERC-20 approve V3 manifest with only its address source manually resolved to one test address, for snapshot installation and routing tests.
 - `typed-permit-numeric-request.json`: `fixtures/decoder-policy/typed-permit-strict.cases.json` request defaults for Rust numeric-token regressions.
 - `policy-bundle/day1.envelope.json`: unchanged `contracts/core-v1/examples/day1.envelope.json`, used for parsing, verification of the existing Node-generated signature, and full policy semantics.
 - `policy-bundle/test-only-keys.json`: unchanged public development keys from `contracts/core-v1/examples/test-only-keys.json`, used only for authenticated bundle regressions and never as production trust anchors.

@@ -1,6 +1,6 @@
 # Dambi Core 세부 개발 계획
 
-작성일: 2026-09-14. 수정일: 2026-09-28. 상위 계획은 [Decoder·정책 → Core → Adapters](decoder-core-adapters-plan.md)이며, 이 문서는 Core의 C1~C6 실행 순서와 VS Code 작업 기준을 구체화한다. **C1·C2-0a~c·C2a/b/c·C3-1/2/3 완료. 다음 단계는 C4 snapshot·Store다.**
+작성일: 2026-09-14. 수정일: 2026-09-28. 상위 계획은 [Decoder·정책 → Core → Adapters](decoder-core-adapters-plan.md)이며, 이 문서는 Core의 C1~C6 실행 순서와 VS Code 작업 기준을 구체화한다. **C1·C2-0a~c·C2a/b/c·C3-1/2/3 완료. C4 구현 및 Store 사용자 검증 완료·Decoder 시험 결과 확인 대기.**
 
 문서 상태: **v0.1 작업 초안**. 구현·검증에서 확인한 의존성과 비용에 따라 단계 분할·순서·설계를 수정할 수 있다. 이미 검증한 동작과 명시적으로 합의한 계약, 아직 제안인 API·제품 범위를 구분한다. 계획의 추정을 구현 사실로 취급하거나 계획을 맞추기 위해 불필요한 절차를 추가하지 않는다. 이 문서 버전은 현재 SDK 패키지 버전 `0.0.1`과 별개다.
 
@@ -266,6 +266,8 @@ C3-3의 `validate_policy_bundle`은 서명 확인 객체만 받아 전체 Manife
 - sequence는 §3.1의 정수 범위에서 수치로 비교한다. 같은 env/profile의 낮은 sequence는 거절하고, 같은 sequence·같은 B 재조회는 변경 없이 종료하며 같은 sequence·다른 B는 거절하는 안을 따른다. 재조회에도 서명·유효 기간을 확인하고 기존 issued_at/만료 시각을 연장하지 않는다.
 - 내장 artifact의 고정 신뢰와 외부 decoder 서명 경로를 구분한다. 인스턴스 분리·동시 갱신·오래된 갱신·해제 사례를 확인한다.
 
+갱신은 가장 나중에 시작한 작업만 유효하며, 활성화 직전에 최신 sequence와 만료를 다시 확인한다. C4의 Native Store를 계획 handle 및 외부 I/O와 연결하는 작업은 C5/C6에서 담당한다.
+
 고정 fixture로 Store 구현·검증은 진행할 수 있다. **제품용 완료 조건**에는 D4-2의 확정 요청 범위와 D4-3 생성물 연결이 추가된다. artifact에 index가 존재하는 것만으로 미검증 요청 경로를 활성화하지 않는다.
 
 ### C5 — Rust/WASM/JS plan·evaluate 연결
@@ -310,6 +312,7 @@ C3-3의 `validate_policy_bundle`은 서명 확인 객체만 받아 전체 Manife
 | `cargo test --locked -p dambi-core --test policy_bundle_parser` | C3-1 원문 보존·엄격한 JSON·wire 외형·서명 인코딩 검사. 암호 검증은 후속 |
 | `cargo test --locked -p dambi-core --test policy_bundle_signature` | C3-2 실제 P-256 서명·키 역할·원문/JCS 결속 검사. 의미 검증·활성화는 후속 |
 | `cargo test --locked -p dambi-core --test policy_bundle_semantics` | C3-3 전체 Manifest/Cedar·ID·scope·시간·sequence 의미 검증 |
+| `cargo test --locked -p dambi-core --test decoder_snapshot --test snapshot_store` | C4 Decoder 무결성·설치 경계와 Store 초기화·갱신·snapshot 수명 검증 |
 | `cargo build --locked -p dambi-core --example fixture_runner` | Node DEC/D3 시험이 부르는 Native 실행 파일 생성 |
 | `cargo test --locked -p policy-engine-wasm --test declarative_v3_route --test declarative_v3_typed_data_install --test declarative_v3_typed_data_strict --test multicall_limits` | 기존 wrapper의 원문·strict 숫자 원문·multicall 회귀. Node에서 표현할 수 없는 숫자 사례도 유지 |
 | `wasm-pack build crates/policy-engine-wasm --target web --release --out-dir pkg --out-name policy_engine_wasm` | 변경된 Rust 실행부와 기존 wrapper의 JS/WASM 쌍 재생성. SDK 전용 WASM 빌드는 C5에서 연결 |
@@ -324,6 +327,8 @@ C3-3의 `validate_policy_bundle`은 서명 확인 객체만 받아 전체 Manife
 **C3-2 최소 검증:** 신규 P-256/JCS 의존 관계를 위해 `cargo update --workspace --offline`을 한 번 실행한 뒤 `cargo test --locked -p dambi-core --test policy_bundle_parser --test policy_bundle_signature`로 검사한다. JCS 의존성이 공유 JSON의 `float_roundtrip` 기능을 켜므로 parser도 함께 확인한다. 기존 Decoder 통합 회귀나 WASM 재빌드는 요구하지 않는다.
 
 **C3-3 최소 검증:** 기존 Cedar 의존성의 Core 직접 참조를 lockfile에 반영하려고 `cargo update --workspace --offline`을 실행한 뒤 `cargo test --locked -p dambi-core --test policy_bundle_semantics`로 검사한다. 기존 parser·서명 구현과 엔진을 수정하지 않으므로 이미 통과한 시험을 반복하지 않는다.
+
+**C4 최소 검증:** 기존 SHA-256 의존성의 Core 직접 참조를 `cargo update --workspace --offline`로 반영한 뒤 `cargo test --locked -p dambi-core --test decoder_snapshot --test snapshot_store`를 실행한다. C3의 검증 로직과 기존 Decoder 실행부는 재사용한다.
 
 소비자 타입 검사(`core:test:types`)와 async scaffold 검사(`core:test:scaffold`)는 C1에서, `dambi-core` Native 검사는 C2a에서 연결했다. SDK 전용 WASM 빌드와 `sdk:verify:isolated`는 **해당 단계에서 구현할 명령**이다. 지금 존재하는 것처럼 Task에 등록하지 않는다.
 
@@ -378,7 +383,7 @@ C1 결과는 [계약 README](../../contracts/core-v1/README.md#결과-기록) �
 | C3-1 parser | 사용자 검증 완료 |
 | C3-2 서명 | 사용자 검증 완료 |
 | C3-3 의미 | 사용자 검증 완료 |
-| C4 snapshot·Store | 미착수 |
+| C4 snapshot·Store | 구현 및 Store 사용자 검증 완료·Decoder 시험 결과 확인 대기 |
 | C5 plan/evaluate·SDK WASM | 미착수 |
 | C6 check·Fact·cache·hook | 미착수 |
 | API 정책 publisher 경로 수정 | API 담당 후속 작업. 실제 정책 재발행·A1 연동 전 필요 |

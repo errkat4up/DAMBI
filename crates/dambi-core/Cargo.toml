@@ -20,6 +20,7 @@ policy-transition.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 serde_json_canonicalizer.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]
 alloy-dyn-abi.workspace = true
