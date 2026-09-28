@@ -7,7 +7,7 @@
  */
 
 /**
- * 주입 가능한 시계. `CoreConfig.ports.clock`이 생략되면 코어는 `Date.now` 기반
+ * 주입 가능한 시계. `CoreConfig.clock`이 생략되면 코어는 `Date.now` 기반
  * 기본 구현을 쓴다.
  */
 export interface Clock {

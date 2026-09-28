@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { access, readdir, writeFile } from "node:fs/promises";
+import { readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { readJson, repoRoot, resolveIndexBundle } from "./helpers/build-registry.mjs";
 import { buildHandoffRegistry } from "./helpers/handoff.mjs";
+import { assertFixtureBackend } from "../sdk/helpers/native-backend.mjs";
 
 const execFileAsync = promisify(execFile);
 const selection = await readJson(new URL("./registry-selection.json", import.meta.url));
@@ -74,11 +75,7 @@ async function runScenario(name, ids, cases) {
 }
 
 before(async () => {
-  for (const name of ["policy_engine_wasm.js", "policy_engine_wasm_bg.wasm"]) {
-    await access(join(repoRoot, "crates/policy-engine-wasm/pkg", name)).catch(() => {
-      throw new Error(`Missing ${name}; see README.md for paired JS/WASM prerequisites.`);
-    });
-  }
+  await assertFixtureBackend();
   assert.equal(fixture.cases.length, 43);
   assert.equal(new Set(fixture.cases.map(({ id }) => id)).size, fixture.cases.length);
   assert.deepEqual(fixture.registry_sources, [

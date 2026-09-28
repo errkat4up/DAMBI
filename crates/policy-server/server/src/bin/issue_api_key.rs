@@ -4,8 +4,8 @@
 //! Reads DATABASE_URL like the server. Does not run migrations.
 //!
 //! ```text
-//! cargo run -p policy-server --bin issue_api_key -- --label browser-extension
-//! cargo run -p policy-server --bin issue_api_key -- --revoke <key-uuid>
+//! cargo run --manifest-path crates/policy-server/Cargo.toml -p policy-server --bin issue_api_key -- --label browser-extension
+//! cargo run --manifest-path crates/policy-server/Cargo.toml -p policy-server --bin issue_api_key -- --revoke <key-uuid>
 //! ```
 
 use std::time::{SystemTime, UNIX_EPOCH};

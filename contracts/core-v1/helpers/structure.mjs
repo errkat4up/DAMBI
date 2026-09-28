@@ -1,10 +1,11 @@
 // Fixture-only evaluator for the keywords used by policy-wire.schema.json.
-// Not a general JSON Schema library or the C3 strict parser/security boundary.
+// Enforces the SDK-supported closed structures, not a general OpenAPI/JSON Schema
+// validator or the C3 strict parser/security boundary.
 import { readFileSync } from "node:fs";
 
 export const schema = JSON.parse(readFileSync(new URL("../policy-wire.schema.json", import.meta.url), "utf8"));
 const keywords = new Set([
-  "$schema", "$id", "$ref", "$defs", "title", "description", "type", "const",
+  "$schema", "$id", "$ref", "$defs", "title", "description", "type", "const", "enum",
   "required", "properties", "additionalProperties", "items", "minItems",
   "minLength", "pattern", "minimum", "maximum",
 ]);
@@ -27,6 +28,10 @@ function inspect(node) {
   if (node.items) inspect(node.items);
   if (node.additionalProperties !== undefined && typeof node.additionalProperties !== "boolean") {
     throw new Error("Schema-valued additionalProperties requires extending the fixture helper");
+  }
+  if (node.enum !== undefined && (!Array.isArray(node.enum) || node.enum.length === 0 ||
+      node.enum.some(value => value !== null && !["string", "number", "boolean"].includes(typeof value)))) {
+    throw new Error("Only non-empty scalar enums are supported by this fixture helper");
   }
 }
 inspect(schema); // Fail on unsupported extensions instead of silently skipping their checks.
@@ -53,6 +58,7 @@ function validate(node, value, path, errors) {
   }
   // This contract uses only scalar const values.
   if (Object.hasOwn(node, "const") && value !== node.const) errors.push(`${path}: const`);
+  if (node.enum !== undefined && !node.enum.some(candidate => candidate === value)) errors.push(`${path}: enum`);
   if (typeof value === "string") {
     if (node.minLength !== undefined && [...value].length < node.minLength) errors.push(`${path}: minLength`);
     if (node.pattern !== undefined && !new RegExp(node.pattern, "u").test(value)) errors.push(`${path}: pattern`);

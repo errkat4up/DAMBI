@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# Run the full test suite — Rust workspace + browser-extension when present.
+# Run the full test suite — SDK/server Rust workspaces + browser-extension when present.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-echo "==> cargo test --workspace"
-cargo test --workspace --all-targets
+for manifest in Cargo.toml crates/policy-server/Cargo.toml; do
+  echo "==> cargo test ($manifest)"
+  cargo test --manifest-path "$manifest" --locked --workspace --all-targets
 
-echo "==> cargo clippy --workspace --all-targets -- -D warnings"
-cargo clippy --workspace --all-targets -- -D warnings
+  echo "==> cargo clippy ($manifest)"
+  cargo clippy --manifest-path "$manifest" --locked --workspace --all-targets -- -D warnings
 
-echo "==> cargo fmt --all -- --check"
-cargo fmt --all -- --check
+  echo "==> cargo fmt ($manifest)"
+  cargo fmt --manifest-path "$manifest" --all -- --check
+done
 
 if [ -d browser-extension ] && [ -f browser-extension/package.json ]; then
   echo "==> yarn typecheck (browser-extension)"

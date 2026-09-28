@@ -1,11 +1,32 @@
-//! Phase 0 de-risk: prove Cedar EST round-trip is lossless + emit the EST
-//! corpus fixtures consumed by the dashboard TS test suite.
+//! Prove Cedar EST round-trip is lossless and validate generated fixture JSON.
+//! Generated files stay in temporary directories; these editor bridge tests do
+//! not overwrite dashboard fixtures during an SDK workspace test run.
 //!
 //! See docs/superpowers/plans/2026-06-02-cedar-block-ir-conversion.md (Task 0).
 
 use cedar_policy::{Policy, PolicySet};
 use policy_engine_wasm::{est_json_to_policy_text, policy_text_to_est_json};
 use std::str::FromStr;
+
+fn assert_fixture_json_roundtrip(name: &str, entries: &[serde_json::Value]) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time is after the epoch")
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("dambi-est-{}-{nonce}-{name}", std::process::id()));
+    std::fs::create_dir(&dir).expect("create temporary EST fixture directory");
+    let path = dir.join(name);
+    std::fs::write(&path, serde_json::to_string_pretty(entries).unwrap())
+        .expect("write temporary EST fixture");
+    let actual: Vec<serde_json::Value> =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).expect("remove temporary EST fixture directory");
+    assert_eq!(
+        actual.as_slice(),
+        entries,
+        "generated fixture JSON changed: {name}"
+    );
+}
 
 /// (name, category, cedar_text) — covers the 12 spec test categories.
 const CORPUS: &[(&str, &str, &str)] = &[
@@ -191,7 +212,7 @@ fn to_cedar_text_is_idempotent() {
 }
 
 #[test]
-fn emit_est_corpus_fixture() {
+fn est_corpus_fixture_json_roundtrip() {
     let mut out = Vec::new();
     for (name, cat, text) in CORPUS {
         let est = Policy::from_str(text)
@@ -200,12 +221,7 @@ fn emit_est_corpus_fixture() {
             .unwrap();
         out.push(serde_json::json!({ "name": name, "category": cat, "text": text, "est": est }));
     }
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../browser-extension/dashboard/src/cedar/blocks/__tests__/fixtures/est-corpus.json"
-    );
-    std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
-    std::fs::write(path, serde_json::to_string_pretty(&out).unwrap()).unwrap();
+    assert_fixture_json_roundtrip("est-corpus.json", &out);
 }
 
 // ── Phase 1: text↔EST WASM exports ──────────────────────────────────────
@@ -247,18 +263,17 @@ fn est_to_text_ok_and_err() {
 // ── Real shipped policies (default_policies_v2) ─────────────────────────
 
 /// Parse every vendored real policy, assert its EST is a faithful fixed point,
-/// and emit `real-policies-est.json` for the dashboard round-trip test. This is
-/// the real-world coverage check: if a shipped policy uses a construct the TS
-/// converter can't structurally map, the dashboard test surfaces a `raw` node.
+/// and verify `real-policies-est.json` serialization in a temporary directory.
+/// The dashboard's checked-in fixture is not rewritten by this test.
 #[test]
-fn real_default_policies_v2_emit_and_fixed_point() {
+fn real_default_policies_v2_fixture_and_fixed_point() {
     let dir = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/default_policies_v2"
     );
     let mut files: Vec<_> = std::fs::read_dir(dir)
         .unwrap_or_else(|e| panic!("read_dir {dir}: {e}"))
-        .filter_map(|e| e.ok().map(|e| e.path()))
+        .map(|entry| entry.expect("read policy fixture directory entry").path())
         .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("cedar"))
         .collect();
     files.sort();
@@ -285,9 +300,5 @@ fn real_default_policies_v2_emit_and_fixed_point() {
         }
     }
 
-    let fpath = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../browser-extension/dashboard/src/cedar/blocks/__tests__/fixtures/real-policies-est.json"
-    );
-    std::fs::write(fpath, serde_json::to_string_pretty(&out).unwrap()).unwrap();
+    assert_fixture_json_roundtrip("real-policies-est.json", &out);
 }

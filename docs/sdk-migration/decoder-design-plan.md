@@ -116,7 +116,7 @@ typed signature:
 | [declarative-route.ts:292](/Users/spu/SDKdambi/DAMBI/browser-extension/backend/service-worker/adapter-loader/declarative-route.ts:292)의 `installCallTree`, `preinstallMulticallChildren` | 하위 decoder 발견·사전 설치는 이미 구현됨. Rust의 설치된 decoder를 통한 재귀 해석과 구분 |
 | [declarative-adapter-loader.ts:469](/Users/spu/SDKdambi/DAMBI/browser-extension/backend/service-worker/adapter-loader/declarative-adapter-loader.ts:469) | API가 조립한 inline bundle을 parse → verify → install. hash와 설치에는 파서가 재구성한 일부 객체가 아닌 원본 bundle 사용 |
 | [registry-api/server.ts:565](/Users/spu/SDKdambi/DAMBI/registry-api/src/server.ts:565)의 `materializeIfRefIndex` | `3-ref`를 실제 bundle로 해소하는 기존 구현. extension loader가 이 조립을 수행한다고 가정하지 않음 |
-| [ActionBody 원본](/Users/spu/SDKdambi/DAMBI/crates/policy-server/asset-model/action/src/lib.rs:153) | 실제 타입 정의는 `policy-action`. `policy_transition::action`은 호환 re-export이므로 타입 검토 시 원본을 확인 |
+| [ActionBody 원본](/Users/spu/SDKdambi/DAMBI/crates/asset-model/action/src/lib.rs:153) | 실제 타입 정의는 `policy-action`. `policy_transition::action`은 호환 re-export이므로 타입 검토 시 원본을 확인 |
 
 `declarative-decode.ts`와 `bundle-schema.ts`는 순수 코드지만 `sig-routing.ts`는 순수 helper 외에 loader/WASM 의존도 가진다. 재사용은 함수의 의존성을 확인해 수행한다. `declarative-v3-cache.ts`의 확장 스토리지나 `v3-bundle-loader.ts`의 확장 asset 부팅 경로를 가져와야 Decoder가 작동하는 구조로 만들지 않는다.
 
@@ -501,7 +501,7 @@ strict 오류는 `error.kind/message`에 필드 `path`를 선택적으로 추가
 
 최소 입력은 위 **04a 축약 예시의 message.deadline만 `"18446744073709551616"` (`2^64`)으로 교체**한 요청이다. [`action_builder.rs`](../../crates/adapters/mappers/src/declarative/action_builder.rs)의 `coerce_decimal_string_to_u64`는 trim한 decimal 문자열의 u64 parse 실패를 `u64::MAX`로 포화시킨다. [`declarative_exports.rs`](../../crates/policy-engine-wasm/src/declarative_exports.rs)의 `message_u64`는 원문 parse 실패를 None으로 반환하고 meta는 `unwrap_or(0)`를 사용한다. 따라서 **코드상 body.deadline=`2^64-1`, meta.deadline=`0`이 예상**된다. 실행으로 재현한 결과가 아니며 04a의 올바른 성공 기대값으로 고정하지 않는다. 공백 있는 decimal 문자열도 두 파서의 trim 차이 때문에 별도 검토 대상이다.
 
-[`Time`](../../crates/policy-server/asset-model/state/src/primitives/time.rs)은 u64이고 JSON number로 직렬화한다. Time 상한 `18446744073709551615`와 JS 안전 정수 상한 `9007199254740991`은 다르다. 예를 들어 `9007199254740993`은 u64 안에 있어도 일반 JS JSON.parse에서 정확히 보존되지 않는다. deadline가 uint256 범위라는 사실이 Action·meta의 시간 표현 가능성을 보장하지 않는다.
+[`Time`](../../crates/asset-model/state/src/primitives/time.rs)은 u64이고 JSON number로 직렬화한다. Time 상한 `18446744073709551615`와 JS 안전 정수 상한 `9007199254740991`은 다르다. 예를 들어 `9007199254740993`은 u64 안에 있어도 일반 JS JSON.parse에서 정확히 보존되지 않는다. deadline가 uint256 범위라는 사실이 Action·meta의 시간 표현 가능성을 보장하지 않는다.
 
 **사용자 결정 A 확정:** raw deadline의 uint256 값을 보존하고 기존 Action/meta의 JSON number 형식을 유지한다. strict deadline은 `0..9007199254740991`만 무손실 투영하고 JS 안전 정수 범위 초과를 명시적 오류로 거절한다. 포화·0 대체·반올림된 성공은 허용하지 않는다. 오류 이름은 구현에서 `typed_deadline_out_of_range`로 정했다. `submitted_at`에도 같은 안전 범위를 적용하고 초과를 `invalid_typed_data`로 분류한다. 이 세부 구현 선택을 사용자가 오류 이름까지 직접 선택한 것으로 기록하지 않는다. 이는 uint256 자체가 malformed라는 뜻이 아니라 **현재 결과 계약의 표현 한계**다. `0`, `2^53-1`, `2^53`, `2^53+1`, `2^64-1`, `2^64`, `2^256-1`, `2^256`을 문자열/number별로 구분한 04b 시험을 작성한다. JS에서 이미 unsafe number로 받은 값도 거절한다.
 

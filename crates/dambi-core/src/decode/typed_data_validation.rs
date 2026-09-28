@@ -19,8 +19,9 @@ const PERMIT_FIELDS: [(&str, &str); 5] = [
     ("deadline", "uint256"),
 ];
 
+/// Strict typed-data validation failure, including the original field path.
 #[derive(Debug)]
-pub(crate) struct TypedDataError {
+pub struct TypedDataError {
     pub kind: String,
     pub message: String,
     pub path: Option<String>,

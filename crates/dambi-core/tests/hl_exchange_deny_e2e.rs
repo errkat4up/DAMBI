@@ -1,22 +1,25 @@
-//! E2E: a Hyperliquid `/exchange` action is evaluated through the **literal
-//! extension entry point** — `evaluate_action_v2_json` — using the thin
-//! `ActionBody::HyperliquidCore` model.
+//! Hyperliquid action evaluation regressions through the native Core runtime.
 //!
-//! This feeds the EXACT JSON envelope the browser extension's service worker
-//! sends — `{ action, meta, tx, bundles, results }` — into
-//! `evaluate_action_v2_json(input_json) -> String` and parses the returned
-//! `{ ok, data: { verdict } }`. The `action` JSON is byte-for-byte the shape the
-//! TS converter (`hl-order-to-action.ts`) emits, so a serde drift on either side
-//! fails loudly here instead of silently fail-closing at runtime.
+//! The frozen Action JSON retains the model shape previously exercised through
+//! the extension's WASM boundary. Native evaluation is wrapped in the same JSON
+//! envelope so all existing verdict and matched-policy assertions are preserved.
+//! Policy inputs are fixed crate-local fixtures, including the two selected
+//! policies from each marketplace/dashboard seed; no live app seed is read.
 //!
-//! Run: `cargo test -p policy-engine-wasm --test hl_exchange_deny_e2e`
+//! Run: `cargo test -p dambi-core --test hl_exchange_deny_e2e`
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::too_many_lines)]
 
 use std::path::PathBuf;
 
 use serde_json::{json, Value};
 
-use policy_engine_wasm::evaluate_action_v2_json;
+use dambi_core::json::Envelope;
+use dambi_core::runtime::json::evaluate_action_v2;
+
+fn evaluate_input(input: &Value) -> Value {
+    serde_json::to_value(Envelope::ok(evaluate_action_v2(&input.to_string())))
+        .expect("native evaluation envelope serializes")
+}
 
 /// The off-chain-sig meta the converter emits.
 fn hl_meta() -> Value {
@@ -141,40 +144,31 @@ fn run(action: Value, bundles: Value) -> Value {
         "bundles": bundles,
         "results": {}
     });
-    serde_json::from_str(&evaluate_action_v2_json(input.to_string()))
-        .expect("entry point returns JSON")
+    evaluate_input(&input)
 }
 
-/// Read a canonical `default_policies_v2` fixture (`policy.cedar` +
-/// `manifest.json`) verbatim. The current baked `day1-safety` extension bundle
-/// is a curated subset, so tests that need the actual marketplace/dashboard
-/// install source read phase1 seed JSON below instead.
+fn fixture_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/policies")
+}
+
+/// Read the crate-local copy of a canonical policy and manifest verbatim.
 fn seed_bundle(id: &str) -> Value {
-    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("policy-engine")
-        .join("tests")
-        .join("fixtures")
-        .join("default_policies_v2")
-        .join(id);
-    let policy = std::fs::read_to_string(dir.join("policy.cedar")).expect("read seed policy.cedar");
-    let manifest: Value =
-        serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap())
-            .expect("seed manifest.json parses");
+    let dir = fixture_root().join("default").join(id);
+    let policy =
+        std::fs::read_to_string(dir.join("policy.cedar")).expect("read fixed policy.cedar");
+    let manifest: Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.join("manifest.json")).expect("read fixed manifest.json"),
+    )
+    .expect("fixed manifest.json parses");
     json!({ "policy": policy, "manifest": manifest })
 }
 
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
-}
-
-/// Read a market/dashboard seed entry (`{ id, cedar, manifest }`) as the
-/// `{ policy, manifest }` bundle shape the extension/WASM entry point consumes.
-fn json_seed_bundle(relative_path: &str, id: &str) -> Value {
-    let path = repo_root().join(relative_path);
+/// Read a selected, frozen seed entry as the runtime's policy/manifest bundle.
+fn json_fixture_bundle(name: &str, id: &str) -> Value {
+    let path = fixture_root().join(name);
     let entries: Vec<Value> =
-        serde_json::from_str(&std::fs::read_to_string(&path).expect("read seed json"))
-            .expect("seed json parses");
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("read fixed seed json"))
+            .expect("fixed seed json parses");
     let entry = entries
         .iter()
         .find(|entry| entry.get("id").and_then(Value::as_str) == Some(id))
@@ -183,22 +177,19 @@ fn json_seed_bundle(relative_path: &str, id: &str) -> Value {
         "policy": entry
             .get("cedar")
             .and_then(Value::as_str)
-            .unwrap_or_else(|| panic!("{id} seed has cedar text")),
+            .unwrap_or_else(|| panic!("{id} fixture has cedar text")),
         "manifest": entry
             .get("manifest")
-            .unwrap_or_else(|| panic!("{id} seed has manifest"))
+            .unwrap_or_else(|| panic!("{id} fixture has manifest"))
     })
 }
 
-fn phase1_market_seed_bundle(id: &str) -> Value {
-    json_seed_bundle("crates/policy-server/server/src/bin/phase1-seed.json", id)
+fn phase1_market_fixture_bundle(id: &str) -> Value {
+    json_fixture_bundle("phase1-market.json", id)
 }
 
-fn dashboard_phase1a_seed_bundle(id: &str) -> Value {
-    json_seed_bundle(
-        "browser-extension/dashboard/src/pages/editor/phase1A-seed.json",
-        id,
-    )
+fn dashboard_phase1a_fixture_bundle(id: &str) -> Value {
+    json_fixture_bundle("dashboard-phase1a.json", id)
 }
 
 /// THE PROOF (entry point): a Hyperliquid SHORT order returns a `fail` verdict.
@@ -246,11 +237,9 @@ fn no_bundle_passes_baseline_through_entry_point() {
     );
 }
 
-/// SHIPPED-SEED PROOF: the actual default bundle that ships in the extension
-/// (`hl-no-short-perp/{policy.cedar,manifest.json}`, copied into
-/// `public/default-policies/policy-set-v2.json`) DENIES a Hyperliquid short
-/// order through `evaluate_action_v2_json`. This pins the SHIPPED policy ↔ the
-/// HyperliquidCore action UID wiring (regression guard for the stale-fixture bug).
+/// FIXED-POLICY PROOF: the canonical `hl-no-short-perp` snapshot denies a
+/// Hyperliquid short order through native evaluation. This preserves the
+/// policy/action UID regression guard without loading an app bundle.
 #[test]
 fn shipped_seed_policy_denies_hyperliquid_short() {
     let parsed = run(
@@ -284,7 +273,7 @@ fn shipped_seed_policy_allows_hyperliquid_long() {
 }
 
 /// DEFAULT-FIXTURE PROOF: the canonical CoreWriter short-deny fixture DENIES a
-/// raw HyperEVM CoreWriter order through the literal extension/WASM entry point.
+/// raw HyperEVM CoreWriter order through the native runtime entry point.
 #[test]
 fn default_fixture_policy_denies_corewriter_short() {
     let parsed = run(
@@ -322,14 +311,13 @@ fn default_fixture_policy_allows_corewriter_long_and_reduce_only_short() {
     }
 }
 
-/// MARKET-SEED PROOF: the policy-server phase1 marketplace seed that users
-/// install from the dashboard denies the CoreWriter short at the literal
-/// extension/WASM entry point.
+/// FROZEN MARKET FIXTURE: the selected phase1 policy denies a CoreWriter short
+/// through the native runtime. This does not inspect the current app seed.
 #[test]
-fn phase1_market_seed_policy_denies_corewriter_short() {
+fn phase1_market_fixture_policy_denies_corewriter_short() {
     let parsed = run(
         corewriter_limit_order_action(false, false),
-        json!([phase1_market_seed_bundle("hl-corewriter-no-short-perp")]),
+        json!([phase1_market_fixture_bundle("hl-corewriter-no-short-perp")]),
     );
     assert_eq!(parsed["ok"], true, "{parsed}");
     assert_eq!(parsed["data"]["verdict"]["kind"], "fail", "{parsed}");
@@ -339,13 +327,15 @@ fn phase1_market_seed_policy_denies_corewriter_short() {
     );
 }
 
-/// DASHBOARD-SEED PROOF: the local dashboard seed carries the same functional
-/// CoreWriter policy as the server seed.
+/// FROZEN DASHBOARD FIXTURE: the selected CoreWriter policy retains its deny
+/// behavior through the native runtime.
 #[test]
-fn dashboard_phase1a_seed_policy_denies_corewriter_short() {
+fn dashboard_phase1a_fixture_policy_denies_corewriter_short() {
     let parsed = run(
         corewriter_limit_order_action(false, false),
-        json!([dashboard_phase1a_seed_bundle("hl-corewriter-no-short-perp")]),
+        json!([dashboard_phase1a_fixture_bundle(
+            "hl-corewriter-no-short-perp"
+        )]),
     );
     assert_eq!(parsed["ok"], true, "{parsed}");
     assert_eq!(parsed["data"]["verdict"]["kind"], "fail", "{parsed}");
@@ -355,13 +345,11 @@ fn dashboard_phase1a_seed_policy_denies_corewriter_short() {
     );
 }
 
-/// MARKET-SEED PROOF: approveAgent is no longer an obsolete
-/// `hl_approve_agent` action. The phase1 seed gates the actual typed-data
-/// decoder output (`Permission::ProtocolAuthorization`) and only warns on a
-/// grant.
+/// FROZEN MARKET FIXTURE: approveAgent gates the typed-data action model
+/// (`Permission::ProtocolAuthorization`) and only warns on a grant.
 #[test]
-fn phase1_market_seed_policy_confirms_approve_agent_grant_only() {
-    let bundle = phase1_market_seed_bundle("hl-confirm-approve-agent");
+fn phase1_market_fixture_policy_confirms_approve_agent_grant_only() {
+    let bundle = phase1_market_fixture_bundle("hl-confirm-approve-agent");
     let grant = run(approve_agent_action(true), json!([bundle.clone()]));
     assert_eq!(grant["ok"], true, "{grant}");
     assert_eq!(grant["data"]["verdict"]["kind"], "warn", "{grant}");
@@ -375,11 +363,10 @@ fn phase1_market_seed_policy_confirms_approve_agent_grant_only() {
     assert_eq!(revoke["data"]["verdict"]["kind"], "pass", "{revoke}");
 }
 
-/// DASHBOARD-SEED PROOF: the dashboard seed matches the server seed for
-/// approveAgent typed-data grants.
+/// FROZEN DASHBOARD FIXTURE: approveAgent retains grant-only warnings.
 #[test]
-fn dashboard_phase1a_seed_policy_confirms_approve_agent_grant_only() {
-    let bundle = dashboard_phase1a_seed_bundle("hl-confirm-approve-agent");
+fn dashboard_phase1a_fixture_policy_confirms_approve_agent_grant_only() {
+    let bundle = dashboard_phase1a_fixture_bundle("hl-confirm-approve-agent");
     let grant = run(approve_agent_action(true), json!([bundle.clone()]));
     assert_eq!(grant["ok"], true, "{grant}");
     assert_eq!(grant["data"]["verdict"]["kind"], "warn", "{grant}");
@@ -700,8 +687,7 @@ fn run_with_leverage(action: Value, bundles: Value, account_leverage: Value) -> 
         "results": {},
         "account_leverage": account_leverage
     });
-    serde_json::from_str(&evaluate_action_v2_json(input.to_string()))
-        .expect("entry point returns JSON")
+    evaluate_input(&input)
 }
 
 /// ORDER-TIME LEVERAGE PROOF: with injected `account_leverage` (the SW

@@ -1,0 +1,26 @@
+[package]
+name = "dambi-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+abi-resolver.workspace = true
+alloy-json-abi.workspace = true
+alloy-primitives.workspace = true
+base64.workspace = true
+cedar-policy.workspace = true
+hex.workspace = true
+mappers.workspace = true
+p256.workspace = true
+policy-engine.workspace = true
+policy-state.workspace = true
+policy-transition.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
+serde_json_canonicalizer.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+alloy-dyn-abi.workspace = true

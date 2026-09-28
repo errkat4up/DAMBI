@@ -21,11 +21,9 @@ mod diagnosis_exports;
 mod dto;
 mod exports;
 pub mod field_catalog;
-mod metamorpho_underlying;
 mod policy_request_exports;
 mod sim_step_exports;
 mod trigger_exports;
-mod typed_data_validation;
 
 use wasm_bindgen::prelude::*;
 

@@ -16,7 +16,7 @@
 //!
 //! Run (Postgres on :5433, schema pre-applied):
 //!   TEST_DATABASE_URL=postgres://dambi:dambi@127.0.0.1:5433/dambi \
-//!     cargo test -p policy-server --test perp_server_state_e2e -- --ignored --nocapture
+//!     cargo test --manifest-path crates/policy-server/Cargo.toml -p policy-server --test perp_server_state_e2e -- --ignored --nocapture
 
 use std::str::FromStr;
 use std::sync::Arc;

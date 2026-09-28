@@ -6,6 +6,9 @@ use crate::dto::{
     PreviewCustomSchemaInputDto, PreviewCustomSchemaOutputDto, PreviewInstalledSchemaOutputDto,
     PreviewSchemaInputDto,
 };
+pub(crate) use dambi_core::json::check_input_size;
+#[cfg(test)]
+pub(crate) use dambi_core::json::MAX_WASM_INPUT_JSON_LEN;
 use policy_engine::policy::PolicyEngine;
 use policy_engine::policy::PolicyEngineBuilder;
 use policy_engine::policy_rpc::manifest_set_hash;
@@ -110,34 +113,6 @@ fn not_installed_error() -> EngineErrorDto {
         "not_installed",
         "install_policies_json must be called first",
     )
-}
-
-/// Maximum accepted JSON input byte length at the WASM boundary (4 MiB).
-///
-/// Round 1 audit (P1) — bound `String` inputs before `serde_json::from_str` so
-/// a hostile caller cannot drive the WASM allocator into an OOM with a giant
-/// payload. 4 MiB easily covers every legitimate request: an
-/// `evaluate_policy_rpc_json` plan with all of the supported manifests, a full
-/// Universal-Router opcode stream, and the largest declarative bundle all sit
-/// under ~50 KiB.
-pub(crate) const MAX_WASM_INPUT_JSON_LEN: usize = 4 * 1024 * 1024;
-
-/// Reject WASM JSON inputs that exceed [`MAX_WASM_INPUT_JSON_LEN`].
-///
-/// Returns an `EngineErrorDto` with `kind = "input_too_large"` so callers can
-/// distinguish a size violation from a malformed-JSON case.
-pub(crate) fn check_input_size(input_json: &str, entry: &str) -> Result<(), EngineErrorDto> {
-    if input_json.len() > MAX_WASM_INPUT_JSON_LEN {
-        return Err(EngineErrorDto::new(
-            "input_too_large",
-            format!(
-                "{entry} input json length {} exceeds {} byte limit",
-                input_json.len(),
-                MAX_WASM_INPUT_JSON_LEN
-            ),
-        ));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

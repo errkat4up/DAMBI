@@ -22,7 +22,7 @@
  * 깨진다 — `{ ...; chainId: string } | { kind: string }`에서 `req.chainId`는
  * `if`/`switch`로도 좁혀지지 않고 `TS2339`가 난다 (B단계 재검증에서 실제 파일로
  * 재현). 대신 {@link UnsupportedRequest}를 별도로 두고, 그걸 받는 것은
- * `createCore(...).check(req: CheckRequest | UnsupportedRequest)`의 파라미터
+ * `(await createCore(...)).check(req: CheckRequest | UnsupportedRequest)`의 파라미터
  * 유니온이다. 미지원 `kind`는 throw가 아니라 warn 판정으로 떨어진다 (R1) —
  * ERC-4337 / EIP-7702 / EIP-5792가 나중에 additive로 들어오고, 지금 그것들을
  * 구현할 필요가 없다.
@@ -58,7 +58,7 @@ export type CheckRequest =
       /** 서명자 주소. `TypedSignaturePayload.address`(types.ts:33)에 대응. */
       from: string;
       /**
-       * EIP-712 payload. 코어는 디코더 포트가 결과를 낼 때까지 opaque하게
+       * EIP-712 payload. 코어는 고정 Decoder가 해석할 때까지 opaque하게
        * 나른다 (`wasm-bridge.ts` 타입드데이터 라우트도 `message: unknown`).
        */
       typedData: unknown;
@@ -95,7 +95,7 @@ export type CheckRequest =
     };
 
 /**
- * 미지원/미래 `kind`. `createCore(...).check()`와 `CoreHooks.onPending`이
+ * 미지원/미래 `kind`. `(await createCore(...)).check()`와 `CoreHooks.onPending`이
  * `CheckRequest | UnsupportedRequest`로 이걸 받으며, 코어는 warn 판정으로
  * 떨어뜨린다 (R1). {@link CheckRequest}의 유니온에 `| { kind: string }`으로
  * 섞으면 판별 narrowing이 깨지므로(위 주석 참조) 별도 타입으로 둔다.

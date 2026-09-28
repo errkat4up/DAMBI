@@ -14,7 +14,7 @@
 //! Run (Postgres on :5433):
 //!   TEST_DATABASE_URL=postgres://dambi:dambi@127.0.0.1:5433/dambi \
 //!   BROWSER_E2E_PORT=8799 \
-//!     cargo test -p policy-server --test serve_seeded_browser_e2e \
+//!     cargo test --manifest-path crates/policy-server/Cargo.toml -p policy-server --test serve_seeded_browser_e2e \
 //!     serve_seeded_for_browser -- --ignored --nocapture
 
 use std::str::FromStr;

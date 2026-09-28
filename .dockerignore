@@ -1,5 +1,6 @@
 .git/
 target/
+crates/policy-server/target/
 # Claude Code agent worktrees (tens of GB of full repo checkouts + their own
 # target/ dirs) — never part of the server image; without this the build
 # context balloons past 40GB.

@@ -4,7 +4,7 @@
 //!
 //! This is the active lowering path for the ActionBody architecture. It targets
 //! the new action model directly and produces a context object that conforms to
-//! the per-action cedarschema types under `schema/policy-schema/actions/`.
+//! the per-action cedarschema types under `crates/policy-engine/schema/policy-schema/actions/`.
 //!
 //! # Layout
 //!

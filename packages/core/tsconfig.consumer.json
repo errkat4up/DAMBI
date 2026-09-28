@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "tests/consumer-types.ts",
+    "../../contracts/core-v1/types.ts"
+  ]
+}

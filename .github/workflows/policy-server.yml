@@ -5,12 +5,16 @@ on:
     paths:
       - .github/workflows/policy-server.yml
       - crates/policy-server/**
+      - crates/asset-model/**
+      - Cargo.toml
       - docs/superpowers/plans/2026-06-02-policy-server-k8s-migration.md
   push:
     branches: [main]
     paths:
       - .github/workflows/policy-server.yml
       - crates/policy-server/**
+      - crates/asset-model/**
+      - Cargo.toml
       - docs/superpowers/plans/2026-06-02-policy-server-k8s-migration.md
   workflow_dispatch: {}
 
@@ -25,7 +29,7 @@ env:
   CHART_PATH: crates/policy-server/server/deploy/helm/policy-server
 
 jobs:
-  # Rust fmt/clippy/test for these packages already run in the workspace `rust`
+  # Rust fmt/clippy/test for these packages already run in the `rust-server`
   # job in ci.yml; `verify` here only covers the Helm chart.
   verify:
     runs-on: ubuntu-latest
@@ -88,19 +92,20 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "ws"
+          shared-key: "server"
+          workspaces: "crates/policy-server -> target"
 
       # Create the schema with the app's real migration binary (reads
       # DATABASE_URL). Same sqlx Migrator + runtime migrations dir the prod
       # pre-install Job uses, so there is no sqlx-cli / version-skew risk.
       - name: Apply schema (migrate binary)
-        run: cargo run -p policy-server --bin migrate
+        run: cargo run --manifest-path crates/policy-server/Cargo.toml --locked -p policy-server --bin migrate
 
       # policy-db direct-Postgres tests (round-trip + concurrent-login
       # idempotency). Env-gated, not #[ignore]: they no-op without
       # TEST_DATABASE_URL, so they only execute here.
       - name: Run policy-db Postgres tests
-        run: cargo test -p policy-db
+        run: cargo test --manifest-path crates/policy-server/Cargo.toml --locked -p policy-db
 
       # The #[ignore]-gated policy-server integration suite against the migrated
       # DB. --test-threads=1: cargo serializes across test binaries, but tests
@@ -109,4 +114,4 @@ jobs:
       # --no-fail-fast: report every failure in one run instead of stopping at
       # the first failing binary.
       - name: Run ignored policy-server integration tests
-        run: cargo test -p policy-server --no-fail-fast -- --ignored --test-threads=1
+        run: cargo test --manifest-path crates/policy-server/Cargo.toml --locked -p policy-server --no-fail-fast -- --ignored --test-threads=1

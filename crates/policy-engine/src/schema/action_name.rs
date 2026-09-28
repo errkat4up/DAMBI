@@ -71,7 +71,7 @@ pub fn namespace_context_type_id(domain: &str, action: &str) -> String {
 
 /// Phase 1 `snake_case` action set (60 entries) — produced by `ActionBody`'s
 /// domain enums. Each maps to a `.cedarschema` file under
-/// `schema/policy-schema/actions/{token,amm,lending,airdrop,launchpad,perp,permission}/`
+/// `crates/policy-engine/schema/policy-schema/actions/{token,amm,lending,airdrop,launchpad,perp,permission}/`
 /// and to a Cedar action id `<Namespace>::<PascalCase>` (via
 /// [`namespace_action_id`]).
 pub const REGISTERED_ACTIONS: &[&str] = &[

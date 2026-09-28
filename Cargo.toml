@@ -6,19 +6,20 @@ codegen-units = 1
 
 [workspace]
 resolver = "2"
+# API services own their manifest, dependency graph and build output.
+exclude = ["crates/policy-server"]
 members = [
+    "crates/dambi-core",
+    "crates/dambi-core-wasm",
     "crates/policy-engine",
     "crates/policy-engine-wasm",
     # crates/integration-tests is LOCAL-ONLY (gitignored, no production logic) —
     # intentionally NOT a member so a fresh clone builds without the dir present.
     "crates/adapters/abi-resolver",
     "crates/adapters/mappers",
-    "crates/policy-server/asset-model/state",
-    "crates/policy-server/asset-model/action",
-    "crates/policy-server/asset-model/transition",
-    "crates/policy-server/db",
-    "crates/policy-server/sync",
-    "crates/policy-server/server",
+    "crates/asset-model/state",
+    "crates/asset-model/action",
+    "crates/asset-model/transition",
 ]
 
 [workspace.package]
@@ -34,6 +35,9 @@ alloy-dyn-abi = "0.8"
 alloy-json-abi = "0.8"
 anyhow = "1"
 cedar-policy = "4"
+base64 = "0.22.1"
+p256 = { version = "=0.13.2", default-features = false, features = ["ecdsa", "pkcs8", "std"] }
+serde_json_canonicalizer = "=0.3.2"
 hex = "0.4"
 # Fixed-point decimal arithmetic used by policy-transition for derived field
 # recompute (HF / LTV / PnL / liq_price).
@@ -44,14 +48,13 @@ sha2 = "0.10"
 thiserror = "2"
 
 # Internal crates referenced by path.
+dambi-core = { path = "crates/dambi-core", version = "0.1.0" }
 policy-engine = { path = "crates/policy-engine", version = "0.1.0" }
 abi-resolver = { path = "crates/adapters/abi-resolver", version = "0.1.0" }
 mappers = { path = "crates/adapters/mappers", version = "0.1.0" }
-policy-state = { path = "crates/policy-server/asset-model/state", version = "0.1.0" }
-policy-action = { path = "crates/policy-server/asset-model/action", version = "0.1.0" }
-policy-transition = { path = "crates/policy-server/asset-model/transition", version = "0.1.0" }
-policy-db = { path = "crates/policy-server/db", version = "0.1.0" }
-policy-sync = { path = "crates/policy-server/sync", version = "0.1.0" }
+policy-state = { path = "crates/asset-model/state", version = "0.1.0" }
+policy-action = { path = "crates/asset-model/action", version = "0.1.0" }
+policy-transition = { path = "crates/asset-model/transition", version = "0.1.0" }
 
 # WASM bridge deps
 wasm-bindgen = "0.2"
@@ -60,10 +63,7 @@ console_error_panic_hook = "0.1"
 wasm-bindgen-test = "0.3"
 getrandom = { version = "0.2", features = ["js"] }
 
-# Sync crate deps (native only)
-tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-toml = "0.8"
+# Shared WalletStore trait (no async runtime dependency).
 async-trait = "0.1"
 
 # TS .d.ts generation — derives `Tsify` on every pub type that crosses the

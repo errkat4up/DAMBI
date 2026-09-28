@@ -210,45 +210,7 @@ fn malformed_outer_json_has_its_own_error_kind() {
     }
 }
 
-#[test]
-fn unsafe_numeric_lexemes_are_rejected_even_without_javascript_rounding() {
-    install(PERMIT_SOURCE);
-    let defaults = parse(STRICT_FIXTURE)["defaults"].clone();
-    // serde_json preserves these u64 JSON lexemes; the strict boundary still
-    // rejects them, including 2^53+1 that JavaScript would already round.
-    for value in [9_007_199_254_740_992_u64, 9_007_199_254_740_993, u64::MAX] {
-        for field in ["value", "nonce", "deadline"] {
-            let mut input = defaults.clone();
-            input["typed_data"]["message"][field] = json!(value);
-            assert_error(
-                &route(&input),
-                "invalid_typed_data",
-                Some(&format!("typed_data.message.{field}")),
-                field,
-            );
-        }
-    }
-}
-
-#[test]
-fn fraction_or_exponent_json_lexemes_cannot_round_into_valid_integer_input() {
-    install(PERMIT_SOURCE);
-    let defaults = parse(STRICT_FIXTURE)["defaults"].clone();
-    for literal in ["1.0", "1e0", "1.0000000000000001", "-0.0"] {
-        for field in ["value", "nonce", "deadline"] {
-            let mut input = defaults.clone();
-            input["typed_data"]["message"][field] = json!("NUMERIC_LEXEME");
-            let raw = input.to_string().replace("\"NUMERIC_LEXEME\"", literal);
-            let actual = parse(&declarative_route_typed_data_v4_json(raw));
-            assert_error(
-                &actual,
-                "invalid_typed_data",
-                Some(&format!("typed_data.message.{field}")),
-                literal,
-            );
-        }
-    }
-}
+// Native numeric-lexeme regressions now live in dambi-core/tests/typed_data_numeric_lexemes.rs.
 
 #[test]
 fn another_actual_installed_permit_is_outside_strict_support_before_owner_validation() {

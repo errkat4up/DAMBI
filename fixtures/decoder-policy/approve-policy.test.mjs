@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { access, readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { readJson, repoRoot, resolveIndexBundle } from "./helpers/build-registry.mjs";
 import { buildHandoffRegistry } from "./helpers/handoff.mjs";
+import { assertFixtureBackend } from "../sdk/helpers/native-backend.mjs";
 
 const execFileAsync = promisify(execFile);
 const selection = await readJson(new URL("./registry-selection.json", import.meta.url));
@@ -56,11 +57,7 @@ function requestForCase({ id, sourceId = id, amount, permit2 }) {
 
 before(async () => {
   // Missing prerequisites fail; this test never builds WASM or skips cases.
-  for (const name of ["policy_engine_wasm.js", "policy_engine_wasm_bg.wasm"]) {
-    await access(join(repoRoot, "crates/policy-engine-wasm/pkg", name)).catch(() => {
-      throw new Error(`Missing ${name}; build the legacy WASM first (see README.md).`);
-    });
-  }
+  await assertFixtureBackend();
   const policy = await readFile(join(policyDirectory, "policy.cedar"), "utf8");
   const manifest = await readJson(join(policyDirectory, "manifest.json"));
   assert.equal(manifest.id, policyId);

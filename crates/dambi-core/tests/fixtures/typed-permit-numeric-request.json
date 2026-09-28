@@ -1,0 +1,29 @@
+{
+  "requested_signer": "0xaaaabbbbccccddddeeeeffff0000111122223333",
+  "submitter": "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+  "submitted_at": 1700000000,
+  "typed_data": {
+    "domain": {
+      "name": "USD Coin",
+      "chainId": "0x1",
+      "verifyingContract": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    },
+    "types": {
+      "Permit": [
+        { "name": "owner", "type": "address" },
+        { "name": "spender", "type": "address" },
+        { "name": "value", "type": "uint256" },
+        { "name": "nonce", "type": "uint256" },
+        { "name": "deadline", "type": "uint256" }
+      ]
+    },
+    "primaryType": "Permit",
+    "message": {
+      "owner": "0xaaaabbbbccccddddeeeeffff0000111122223333",
+      "spender": "0x111122223333444455556666777788889999abcd",
+      "value": "1000000",
+      "nonce": "7",
+      "deadline": "1738002000"
+    }
+  }
+}

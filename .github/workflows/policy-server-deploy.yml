@@ -16,6 +16,10 @@ on:
     branches: [main]
     paths:
       - "crates/policy-server/**"
+      - "crates/asset-model/**"
+      - "Cargo.toml"
+      - ".dockerignore"
+      - "dambi-sync.toml"
       - ".github/workflows/policy-server-deploy.yml"
   workflow_dispatch: {} # lets you trigger it by hand from the Actions tab
 

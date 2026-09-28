@@ -7,6 +7,7 @@ const fs = require("fs");
 const path = require("path");
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
+const SCHEMA_DIR = path.join(REPO_ROOT, "crates", "policy-engine", "schema", "policy-schema");
 const { loadPolicyBundle, serializePolicyBundle } = require("../../scripts/sdk/policy-bundle.cjs");
 const DEST = path.resolve(__dirname, "..", "public", "default-policies");
 
@@ -29,10 +30,10 @@ function listCedarFiles(dir) {
 
 function listSchemaFiles() {
   const files = [];
-  const core = path.join(REPO_ROOT, "schema", "policy-schema", "core.cedarschema");
+  const core = path.join(SCHEMA_DIR, "core.cedarschema");
   if (fs.existsSync(core)) files.push(core);
 
-  const actionsDir = path.join(REPO_ROOT, "schema", "policy-schema", "actions");
+  const actionsDir = path.join(SCHEMA_DIR, "actions");
   if (fs.existsSync(actionsDir)) {
     files.push(...listFilesWithExtension(actionsDir, ".cedarschema"));
   }

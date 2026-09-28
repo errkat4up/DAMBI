@@ -1,4 +1,4 @@
-# SDK 정책 입력 — D3
+# SDK 정책 입력과 Native 회귀
 
 Day-1 정책의 공유 원본은 [`policy-bundles/day1-safety/`](../../policy-bundles/day1-safety/package.json)이다. Cedar 본문과 manifest 10개는 그대로 이동했고 package의 원본 경로만 변경했다. [`policy-bundle.cjs`](../../scripts/sdk/policy-bundle.cjs)가 package 선언 순서대로 `{id, policy, manifest}`를 읽고 직렬화한다. SDK baseline과 기존 확장 asset copier가 같은 함수를 사용하며, DEC-02는 공유 Cedar/manifest를 직접 읽는다. 원본이 없으면 빈 set 또는 합성 manifest로 대체하지 않는다.
 
@@ -20,7 +20,7 @@ Fact 0개는 `policy_rpc` 결과가 필요 없다는 뜻이다. 현재 Swap Acti
 
 [`first-fact-contract.json`](first-fact-contract.json)은 후속 A2의 `portfolio.balance` ERC-20 경로를 선정한 개발용 인계 자료다. params·원본 응답·projection·optional·향후 오류 사례를 기록한다. Day-1에 활성화하지 않으며 직접 RPC adapter와 Core 원본 Fact 검증은 후속 구현이다. 기존 catalog의 optional 선언을 필수로 바꾸지 않는다.
 
-## 사용자 실행
+## D3 사용자 실행
 
 이번 변경은 Rust/WASM 소스를 바꾸지 않는다. 아래 두 검사는 사용자 실행으로 통과했으며 명령은 재현용으로 보존한다. 첫 명령은 정책 29개, 두 번째는 경로를 바꾼 DEC-02 7개를 실행한다. 기록 갱신을 위한 재시험·재빌드는 필요 없다.
 
@@ -36,6 +36,24 @@ npm run policy:test && npm run decoder:test:approve-policy
 ```sh
 wasm-pack build crates/policy-engine-wasm --target web --release --out-dir pkg --out-name policy_engine_wasm
 ```
+
+## C2c Native Core 회귀
+
+`core:test:fixtures`는 DEC 인계 목록의 10개 시험 파일과 D3 두 파일을 Native `dambi-core`에 연결한다. 기존 case ID·기대값·Registry 생성·설치 조합·digest 검사는 그대로 사용한다. 기존 DEC 589개와 D3 29개를 합친 실행이며 새 지원 사례를 추가한 것이 아니다. WASM·확장·서버가 필요 없고, 바이너리나 필수 자료가 없으면 실패한다.
+
+Rust의 정책 평가 30개·HL 26개·JavaScript가 보존하지 못하는 숫자 원문 2개도 Core로 옮겼다. HL 정책과 숫자 원문 입력은 `crates/dambi-core/tests/fixtures/` 안에 고정되어 있으며 앱 seed를 읽지 않는다. baseline은 기존 공유 원본을 그대로 사용한다. EST는 editor bridge 시험으로 기존 crate에 유지하되 생성물을 임시 디렉터리에 쓰고 삭제한다. diagnosis용 기존 fixture helper도 해당 crate 내부에만 남긴다.
+
+사용자가 저장소 root에서 다음을 실행한다. 이관한 시험의 새 실행 경계를 확인하는 것이므로 전체 workspace 재시험이나 WASM 재빌드는 필요 없다.
+
+```sh
+cargo test --locked -p dambi-core
+cargo test --locked -p policy-engine-wasm --lib diagnosis_exports::tests
+cargo test --locked -p policy-engine-wasm --test est_roundtrip
+cargo build --locked -p dambi-core --example fixture_runner
+npm run core:test:fixtures
+```
+
+Registry 의존성은 기존 Decoder 시험과 같다. 없을 때만 `npm ci --prefix registryV2`를 실행한다. 기본 바이너리는 `target/debug/examples/fixture_runner`이며 다른 출력 위치를 쓰면 `DAMBI_CORE_FIXTURE_BIN`으로 지정한다. SDK 명령은 `DAMBI_FIXTURE_BACKEND=native`를 고정하며 자동 빌드·WASM fallback을 하지 않는다. 기존 `decoder:test`와 `policy:test`는 기본적으로 legacy WASM 비교 경로를 유지한다. CI의 Native fixture 검사는 Rust job에서 독립적으로 실행한다.
 
 ## 결과 기록
 

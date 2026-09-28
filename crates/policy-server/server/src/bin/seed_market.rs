@@ -7,7 +7,7 @@
 //! marketplace seed rows without changing install history.
 //!
 //! Run:
-//!   cargo run -p policy-server --bin seed_market
+//!   cargo run --manifest-path crates/policy-server/Cargo.toml -p policy-server --bin seed_market
 //!
 //! Requires the same `DATABASE_URL` as the server itself.
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Load the shared env base + a chosen profile overlay, then
-# `cargo run -p policy-server`.
+# `cargo run --manifest-path crates/policy-server/Cargo.toml -p policy-server`.
 #
 # Usage:
 #   scripts/start-policy-server.sh local   # 5173 dashboard dev
@@ -80,4 +80,4 @@ source "${ENV_FILE}"
 set +a
 
 echo "→ loaded ${ENV_FILE} (DASHBOARD_URL=${DASHBOARD_URL:-<unset>})"
-exec cargo run -p policy-server --bin policy-server "$@"
+exec cargo run --manifest-path crates/policy-server/Cargo.toml --locked -p policy-server --bin policy-server "$@"
