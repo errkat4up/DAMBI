@@ -901,10 +901,10 @@ fn validate_emit(value: &Value, path: &str, part: bool) -> Result<(), SnapshotEr
             }
             validate_dispatch(required(emit, "per_tag", path)?, path, false)?;
         }
-        "multicall_recurse" => {
-            if field(emit, "recurse_rule_id", path)? != "self_array_bytes_last_arg" {
-                return Err(invalid(path, "unsupported multicall recurse rule"));
-            }
+        "multicall_recurse"
+            if field(emit, "recurse_rule_id", path)? != "self_array_bytes_last_arg" =>
+        {
+            return Err(invalid(path, "unsupported multicall recurse rule"));
         }
         "reenter_only" => {
             field(emit, "reenter_callback_arg", path)?;

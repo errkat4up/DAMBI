@@ -433,7 +433,10 @@ fn external_bundle_requires_decoder_role_signature_and_requested_jcs_digest() {
         .unwrap();
         let snapshot = store.current(NOW).unwrap();
         assert_eq!(snapshot.decoder().digest(), expected);
-        assert_eq!(snapshot.decoder().bundle_digests(), &[expected.clone()]);
+        assert_eq!(
+            snapshot.decoder().bundle_digests(),
+            std::slice::from_ref(&expected)
+        );
         assert_eq!(
             snapshot.decoder().trust(),
             &DecoderTrust::SignedBundle {
