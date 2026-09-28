@@ -260,6 +260,16 @@
         "detail": "C3-1 원문 보존·엄격한 JSON·wire 구조·서명 인코딩 회귀만 실행합니다. 암호 검증과 snapshot 활성화는 후속 단계입니다."
       },
       {
+        "label": "Core Rust: 번들 서명 시험",
+        "type": "process",
+        "command": "cargo",
+        "args": ["test", "--locked", "-p", "dambi-core", "--test", "policy_bundle_parser", "--test", "policy_bundle_signature"],
+        "options": { "cwd": "${workspaceFolder:DAMBI}" },
+        "group": "test",
+        "problemMatcher": [],
+        "detail": "의존성 lockfile 갱신 후 C3 parser와 실제 서명 검증을 함께 실행합니다. 정책 의미·snapshot 활성화는 후속 단계입니다."
+      },
+      {
         "label": "Core Rust: fixture runner 빌드",
         "type": "process",
         "command": "cargo",

@@ -1,7 +1,18 @@
-//! Strict policy wire parsing. Parsed bundles remain unverified.
+//! Parsing and signature verification, preserving the original policy B bytes.
+//!
+//! Parsed bundles are UNVERIFIED. Signature-verified bundles still require
+//! complete semantics before a later snapshot boundary can activate them.
 
+mod decoder_signature;
+mod signature;
 mod strict_json;
 mod structure;
+
+pub use decoder_signature::SignatureVerifiedDecoderBundle;
+pub use signature::{
+    KeyRole, SignatureError, SignatureErrorKind, SignatureVerifiedPolicyBundle, TrustedKeys,
+    VerificationKey,
+};
 
 use serde_json::Value;
 

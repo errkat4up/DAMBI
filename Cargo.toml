@@ -34,6 +34,9 @@ alloy-dyn-abi = "0.8"
 alloy-json-abi = "0.8"
 anyhow = "1"
 cedar-policy = "4"
+base64 = "0.22.1"
+p256 = { version = "=0.13.2", default-features = false, features = ["ecdsa", "pkcs8", "std"] }
+serde_json_canonicalizer = "=0.3.2"
 hex = "0.4"
 # Fixed-point decimal arithmetic used by policy-transition for derived field
 # recompute (HF / LTV / PnL / liq_price).
