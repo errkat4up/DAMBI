@@ -1,7 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:dambi:core-v1:policy-wire-draft",
-  "title": "D4-1 policy wire draft (not an agreed server API)",
+  "$id": "urn:dambi:core-v1:policy-wire",
+  "title": "Policy wire v0.1 — SDK supported structure",
+  "description": "Aligned with the current registry-api policy wire. additionalProperties:false deliberately closes the SDK-supported envelope, payload, policy entry and manifest skeleton; this is not a general OpenAPI validator or full Core semantic validation.",
   "$ref": "#/$defs/envelope",
   "$defs": {
     "nonEmptyString": { "type": "string", "minLength": 1 },
@@ -30,37 +31,32 @@
       "additionalProperties": false
     },
     "payload": {
-      "description": "Proposed field names and units. Sign the UTF-8 bytes of the original B string, without reserialization.",
+      "description": "Current API payload fields. Verify the UTF-8 bytes of the original B string without reserialization. Non-null registry_ref and non-default profile are handed to Core semantic validation.",
       "type": "object",
-      "required": ["schema_version", "policies", "sequence", "issued_at", "expires_at", "env", "profile", "registry_ref"],
+      "required": ["policies", "sequence", "issued_at", "expires_at", "env", "profile", "registry_ref"],
       "properties": {
-        "schema_version": { "const": 1 },
         "policies": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/policy" } },
-        "sequence": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$", "description": "Non-negative decimal revision string, compared numerically within the configured env/profile scope." },
-        "issued_at": { "$ref": "#/$defs/timestamp", "description": "Proposed Unix seconds, not milliseconds." },
+        "sequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991, "description": "Positive JSON integer in the JS safe-integer range, compared numerically within the configured env/profile scope." },
+        "issued_at": { "$ref": "#/$defs/timestamp", "description": "Unix seconds, not milliseconds." },
         "expires_at": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 },
-        "env": { "$ref": "#/$defs/nonEmptyString" },
+        "env": { "type": "string", "enum": ["staging", "production"] },
         "profile": { "$ref": "#/$defs/nonEmptyString" },
-        "registry_ref": { "const": null }
+        "registry_ref": { "type": ["string", "null"], "description": "v0.1 accepts null; a string must reach the distinct semantic UNSUPPORTED_REGISTRY_REF error." }
       },
       "additionalProperties": false
     },
     "signature": {
-      "type": "object",
-      "required": ["alg", "key_id", "sig_b64"],
-      "properties": {
-        "alg": { "const": "ECDSA_P256_SHA256" },
-        "key_id": { "$ref": "#/$defs/nonEmptyString" },
-        "sig_b64": { "type": "string", "pattern": "^[A-Za-z0-9+/]{85}[AQgw]==$", "description": "64-byte IEEE P1363 r||s, canonical padded Base64. Encoding validity is not signature validity." }
-      },
-      "additionalProperties": false
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]{85}[AQgw]==$",
+      "description": "64-byte IEEE P1363 r||s, canonical padded Base64. ECDSA P-256/SHA-256 is fixed locally, not negotiated by a response alg field. Encoding validity is not signature validity."
     },
     "envelope": {
       "type": "object",
-      "required": ["payload", "sig"],
+      "required": ["payload", "signature"],
       "properties": {
         "payload": { "$ref": "#/$defs/nonEmptyString", "description": "B: original JSON text. Validate the parsed value separately with $defs.payload; never sign JSON.stringify(parsed)." },
-        "sig": { "$ref": "#/$defs/signature" }
+        "signature": { "$ref": "#/$defs/signature" },
+        "key_id": { "type": "string", "description": "Optional telemetry; empty or unknown IDs do not select trust or invalidate an otherwise valid signature." }
       },
       "additionalProperties": false
     }

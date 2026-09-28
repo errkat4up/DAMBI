@@ -1,52 +1,52 @@
-# Core 정책 wire 계약 — D4-1 SDK 초안
+# Core 정책 wire 계약 — C1-1 API 정합화
 
-이 디렉터리는 Core에 넘길 정책 원문과 오류 사례를 고정한다. [타입](types.ts)·[JSON Schema](policy-wire.schema.json)는 **SDK 제안**이며 실제 서버와 합의된 API 또는 현재 `@dambi/core` 공개 타입이 아니다. 기존 런타임·정책 판정은 변경하지 않는다.
+이 디렉터리는 Core에 넘길 정책 원문과 오류 사례를 고정한다. [타입](types.ts)·[JSON Schema](policy-wire.schema.json)는 `3f0ad6b`의 [Registry API 계약](../../registry-api/openapi.yaml)과 [정책 발행기](../../registryV2/scripts/publish-policy-bundle.ts)에 맞춘 내부 wire 계약이다. **C1 공개 계약·소비자 검증 완료**다. 실제 Core 실행부는 후속 단계다.
 
-## 제안한 구조와 서명 바이트
+## API 구조와 서명 바이트
 
-Envelope는 `{ payload: string, sig: { alg, key_id, sig_b64 } }`다. `payload`는 B 방식 JSON 문자열이며, 서명 입력은 **그 문자열의 원래 UTF-8 바이트**다. 파싱한 객체를 재직렬화하거나 JCS로 정규화한 바이트를 사용하지 않는다. 같은 객체라도 공백·키 순서·이스케이프가 바뀌면 다른 서명 입력이다. 객체 형태의 payload는 구조 오류다.
+HTTP envelope는 `{ payload: string, signature: string, key_id?: string }`다. 발행기는 JCS로 만든 JSON 문자열을 `payload`에 넣고 **그 문자열의 UTF-8 바이트**에 서명한다. 수신 측은 B 원문을 그대로 검증하며 재직렬화하거나 다시 JCS로 정규화하지 않는다. 같은 객체라도 공백·키 순서·이스케이프가 바뀌면 다른 서명 입력이다. 객체 형태의 payload와 과거 `sig` 중첩 wrapper는 현재 구조가 아니다.
 
-| payload 필드 | SDK 초안 |
+| payload 필드 | 현재 API 기준 |
 | --- | --- |
-| `schema_version` | 정수 `1` |
 | `policies` | 비어 있지 않은 `{ id, policy, manifest }[]`. 정상 예시는 D3 공유 원본의 Day-1 정책 5개를 사용 |
-| `sequence` | 음이 아닌 정수의 십진 문자열. `"0"` 또는 선행 0 없는 숫자열, 같은 `env/profile` 범위에서 수치 비교 |
+| `sequence` | JSON 정수 `1..9007199254740991`. 문자열·0·소수·상한 초과를 거절하며 같은 env/profile 범위에서 수치 비교 |
 | `issued_at` | 음이 아닌 Unix 초 정수, JS 안전 정수 범위 |
-| `expires_at` | 같은 단위의 정수 또는 `null`. `null`이어도 향후 Core의 최대 경과 시간 검사는 적용 |
-| `env`, `profile` | 비어 있지 않은 문자열. 허용 값·운영 범위는 API 합의 대상 |
-| `registry_ref` | 필수 `null`. 존재하지 않는 원격 Registry root/ref를 만들지 않음 |
+| `expires_at` | 필수 정수 또는 `null`. 현재 발행기는 null. 숫자일 때 issued_at 이후인지와 실제 만료 여부는 C3에서 검사 |
+| `env` | `staging` 또는 `production`. 로컬 기대 환경과의 일치는 C3 의미 검증 |
+| `profile` | v0.1은 `default`. 구조상 문자열이더라도 지원 범위·기대 profile 검사는 C3가 담당 |
+| `registry_ref` | v0.1은 필수 `null`. 문자열은 구조상 수용하고 C3의 `UNSUPPORTED_REGISTRY_REF`로 분리하여 거절 |
 
-알고리즘 제안은 `ECDSA_P256_SHA256`로 고정한다. `sig_b64`는 IEEE P1363 `r || s` **64바이트**의 패딩 포함 표준 Base64다. 알고리즘·운영 키·교체 정책·시간 허용 오차·최대 경과 시간·sequence 상한은 실제 API와 Core 계약에서 확정해야 한다. fixture의 시각·sequence·시험 키는 운영값이 아니다.
+일곱 필드는 모두 필수다. payload 최상위 `schema_version`은 없으며 **manifest의 `schema_version: 2`는 유지**한다. 타입 이름의 `WireV1`은 지원 계약을 식별하는 내부 이름이며 wire에 version 필드를 추가하지 않는다.
 
-키 역할은 응답에 선언하는 신뢰 근거가 아니라 **호스트가 설정한 로컬 신뢰 목록**의 `policy`/`decoder` 구분이다. `key_id`는 정책용 목록 안에서만 키를 찾는 식별자이며, 미등록 키나 decoder용 키로 정책을 승인하지 않는다. 내장 decoder artifact의 신뢰 경로와 외부 decoder 서명은 별도로 다룬다. 정책 원문 서명, 개별 decoder bundle의 JCS digest, snapshot 전체의 로컬 digest도 각각 구분한다.
+서명은 ECDSA P-256/SHA-256, IEEE P1363 `r || s` **64바이트**, 패딩 포함 표준 Base64다. 알고리즘은 로컬에서 고정하며 응답 `alg`로 선택하지 않는다. `key_id`는 선택적 telemetry다. 누락·빈 값·알 수 없는 값·decoder 키 이름이어도 올바른 policy 키의 서명을 무효화하거나 다른 검증 키를 선택하지 않는다. 반대로 decoder 키로 서명한 뒤 policy 키 ID를 붙여도 정책용 신뢰를 얻지 못한다.
 
-## 기존 코드와의 차이
+정책 최대 나이는 [ADR](../../docs/decisions/0001-cloud-split.md)의 v0.1 시작값 **72시간(259200초)**이다. `expires_at: null`도 이 제한을 우회하지 않는다. 이 디렉터리는 고정 시계의 의미 검증용 입력을 준비하며 실제 만료·재생 방지 판정은 C3/C4에서 구현한다. fixture의 시간·sequence·시험 키는 운영값이 아니다.
 
-아래는 저장소 소스 대조이며 운영 서버 호출 결과가 아니다.
+## 연결 범위
 
-| 확인한 코드 | 현재 동작과 D4 초안의 차이 |
+| 경계 | 현재 상태 |
 | --- | --- |
-| [Core PolicySource](../../packages/core/src/ports/policy.ts) | `payload: unknown`, `signature`, `keyId?`와 JCS 설명을 사용한다. 이번 `payload: string`·중첩 `sig` 제안은 C1/C3에서 별도로 연결해야 함 |
-| [Registry API](../../registry-api/src/server.ts) | decoder index/bundle/context와 detached signature 객체를 제공하는 경로다. 정책 B 문자열 envelope 배포 계약의 근거로 사용하지 않음 |
-| [기존 decoder 서명 검증](../../browser-extension/backend/service-worker/adapter-loader/bundle-verify.ts) | bundle JCS 바이트와 build-time 고정 키를 사용하며 응답 `alg/key_id`는 telemetry다. 정책 B 원문·정책용 로컬 키 목록과 구분 |
-| [현재 정책 CRUD 클라이언트](../../browser-extension/dashboard/src/server-api/policies.ts) | 서버 정책 CRUD가 확장 로컬 저장소로 이동했다고 명시한다. 새 서명 정책 fetch endpoint의 합의 또는 구현 증거가 아님 |
+| [Registry API](../../registry-api/src/server.ts) | `GET /v1/bundle` 구현·OpenAPI·publisher를 wire 근거로 사용. 운영 서버 호출·통합 검증은 이번 범위 밖 |
+| [Core PolicySource](../../packages/core/src/ports/policy.ts) | `payload: string`, `signature`, `keyId?` 공개 계약 반영. A1은 HTTP key_id를 SDK keyId로 매핑할 수 있으나 B 내부는 변경하지 않음. 실행부는 scaffold |
+| 정책 발행기 | 현재 기본 경로가 D3 이전의 확장 폴더를 가리키는 문제는 API 담당 후속 작업. 이번에 발행기를 수정하거나 실행하지 않음 |
+| Decoder | 별도 역할 키·JCS 서명 경로 유지. 이 계약 정합화로 Decoder 지원 범위나 정책 severity를 변경하지 않음 |
 
-따라서 endpoint·인증 헤더·envelope 필드명·알고리즘 표기·운영 키와 제한값은 API 담당과 대조할 항목으로 남긴다. 과거 백업 계약이나 확인되지 않은 “API 담당의 7개 필드”를 확정 요구사항으로 사용하지 않는다.
+운영 키·교체 정책·clock skew·크기 한도는 구현된 wire 형식과 구분한다. 신뢰는 로컬 policy/decoder 역할 설정에만 두고, 이 디렉터리의 공개 시험 키를 SDK 기본값으로 사용하지 않는다.
 
 ## 검증 경계와 사용자 실행
 
-[구조 helper](helpers/structure.mjs)는 이 Schema에 사용한 키워드만 평가하는 fixture 전용 코드이며 지원하지 않는 Schema 확장은 실패시킨다. envelope 검사 후 B 문자열을 파싱해 payload 구조를 별도로 검사한다. manifest는 `id`·`schema_version: 2` 및 선택 필드의 외형만 검사하며 전체 ManifestV2·trigger·Fact 선언·Cedar 의미 검증은 후속 엔진/Core 작업이다.
+[구조 helper](helpers/structure.mjs)는 이 Schema에 사용한 키워드만 평가하는 fixture 전용 코드이며 지원하지 않는 Schema 확장은 실패시킨다. SDK가 지원하는 v0.1 필드 밖의 envelope·payload·policy·manifest 필드는 엄격하게 거절한다. 이는 일반 OpenAPI 검증기가 아니며 API의 추가 필드 전체를 지원한다는 뜻도 아니다. manifest는 `id`·`schema_version: 2` 및 선택 필드의 외형만 검사하고 전체 ManifestV2·trigger·Fact·Cedar 의미는 후속 Core가 검증한다.
 
-[정상 envelope](examples/day1.envelope.json)는 D3 원본을 담은 고정 예시이며 [시험 전용 키](examples/test-only-keys.json)는 공개 개발 자료다. 운영 키나 SDK 기본 신뢰 키로 사용하지 않는다. [사례 생성 코드](fixtures.mjs)는 정상 예시와 오류 입력을 독립적으로 구성한다. 의미·parser 오류 사례는 올바른 정책 키로 서명해 향후 C3가 의도한 오류를 분리해서 검사할 수 있게 한다.
+[정상 envelope](examples/day1.envelope.json)는 D3 원본의 내용·순서를 보존하고 publisher와 같은 JCS 형식으로 작성한 고정 예시다. [시험 전용 키](examples/test-only-keys.json)로 새 B를 서명했다. [사례 생성 코드](fixtures.mjs)는 정상/구조/의미/parser/암호 사례를 구성한다. 의미·parser 오류는 올바르게 재서명해 C3가 의도한 오류에 도달하게 한다. 서명에 사용한 키 역할은 fixture 자체 메타데이터로 추적하며 응답 key_id로 선택하지 않는다.
 
-시험 사례는 필수 필드·빈 manifest·타입/버전·비-null Registry ref 등의 구조 오류, 중복 ID·manifest ID 불일치·시간 관계 등의 의미 오류, 원문 변조·잘못된 키 역할 등의 암호 오류를 구분한다. `expected_core_error`는 후속 C3의 기대 사유이며 현재 Core 오류 코드가 아니다. Node crypto 참조 검증은 fixture 서명과 원문 바이트 대응을 확인하며 **Core 서명 검증 구현의 완료를 뜻하지 않는다**. 구조 helper의 `JSON.parse`가 허용하는 중복 JSON 키·숫자/Unicode 처리와 운영 trust 연결·재생 방지·최종 의미 검증·runtime 적용은 C3에서 엄격히 검증한다.
+시험은 실제 wrapper·필수 필드·sequence 경계·env enum·원문 변조·키 ID와 신뢰 분리를 검사한다. 중복 ID·manifest ID 불일치·시간·scope·rollback·non-null Registry ref는 구조/참조 서명이 통과해야 하는 **C3 의미 검증 인계 사례**다. `expected_core_error`는 후속 기대 사유이며 지금 Core가 그 오류를 검출한다는 뜻이 아니다. fixture helper의 JSON.parse는 중복 키 등을 허용하므로 C3 보안 경계가 아니다. **이 명령의 통과는 Core parser·암호 구현·정책 판정 또는 운영 API 통합 완료를 뜻하지 않는다.**
 
 ```sh
 cd /Users/spu/SDKdambi/DAMBI
 npm run contract:test
 ```
 
-이 명령은 계약 구조와 Node crypto 참조 검증용이며 사용자 실행으로 통과했다. 재현용으로 보존하며 기록 갱신을 위한 재시험·재빌드는 필요 없다.
+위 시험은 사용자 검증을 마쳤다. 관련 fixture 변경이 없으면 반복하지 않는다. Node 내장 모듈만 사용하며 Registry 설치·WASM 빌드·정책 재발행은 필요 없다. wire `types.ts`는 C1-3의 `core:test:types`에 함께 포함했다. 공개 SDK의 빌드·소비자 검증 순서는 [패키지 README](../../packages/core/README.md#development-checks)를 따른다.
 
 ## D4-2 제품 선택안·D4-3 후속 작업
 
@@ -66,6 +66,10 @@ npm run contract:test
 Day-1 정책의 외부 Fact는 0개지만 swap·Permit2 시험은 합성 Action 입력부터 시작한다. [DEC-07 인계](../../fixtures/decoder-policy/handoff-index.json)의 `live_inputs_ref: null`도 live 입력 부재를 보장하지 않는다. NFPM mint는 중첩 `live_inputs`를 선언하고 현재 값은 placeholder다. [정책 입력 한계](../../fixtures/sdk/README.md)와 [Decoder coverage](../../fixtures/decoder-policy/coverage.md)를 따른다. 생성 입력 고정·제품용 생성 진입점·정렬/digest·확장/서버/cache 없는 재현 생성은 D4-3에 남는다.
 
 ## 결과 기록
+
+2026-09-28 C1 완료: `feat/core@3f0ad6b` 이후 정책 wire·fixture, 공개 SDK 타입·async scaffold, 소비자 검사·CI·workspace를 반영했다. 사용자 제공 로그: **계약 43 통과·0 실패, scaffold 2 통과·0 실패**. 실행 검증은 사용자가 수행했으며 정적 검토도 완료했다. 남은 작업은 Core Rust/WASM 실행부(C2~C6), API publisher 경로 수정, D4-2/3 제품 범위·재현 생성이다.
+
+아래는 변경 전 D4-1 초안의 과거 실행 기록이며 현재 C1-1 계약의 통과 기록이 아니다.
 
 2026-09-13, `40a268c` 이후 미커밋 D3 변경에 이어 작성한 `contracts/core-v1/`·루트 `contract:test`·계획서의 D4-1 초안은 **사용자 제공 실행 로그 기준 검증 완료**다. `contract:test` **36/36 통과**, suites·실패·취소·건너뛰기·todo 각 0, `duration_ms=169.940167`을 확인했다. 공통 4개와 fixture 32개(정상 2·구조 오류 20·의미 오류 6·parser 1·암호/키 역할 3)의 구조·참조 서명 검사 결과이며 실제 API 합의나 C3 Core 검증 완료를 뜻하지 않는다. 기존 MJS 구문·코드·Schema 정적 검토 기록을 유지한다. 이번 기록 갱신에서 빌드·시험·설치·커밋·푸시는 실행하지 않았다. 남은 항목은 실제 API 계약 합의, D4-2 제품 범위 결정, D4-3 재현 생성과 C3 Core 검증 구현이다.
 

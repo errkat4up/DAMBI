@@ -1,0 +1,262 @@
+{
+  "folders": [
+    {
+      "name": "DAMBI",
+      "path": "."
+    }
+  ],
+  "settings": {
+    "typescript.tsdk": "node_modules/typescript/lib",
+    "rust-analyzer.checkOnSave": false,
+    "rust-analyzer.cargo.buildScripts.enable": false,
+    "rust-analyzer.procMacro.enable": false,
+    "files.watcherExclude": {
+      "**/target/**": true,
+      "**/node_modules/**": true,
+      "**/node_modules.nosync/**": true,
+      "**/.yarn/cache/**": true,
+      "**/dist/**": true,
+      "**/crates/*-wasm/pkg/**": true,
+      "**/crates/*-wasm/pkg-tsify-test/**": true,
+      "**/registryV2/index/**": true,
+      "**/registryV2/bundles/**": true,
+      "**/registryV2/contexts/**": true,
+      "**/registryV2/signatures/**": true
+    },
+    "search.exclude": {
+      "**/target/**": true,
+      "**/node_modules/**": true,
+      "**/node_modules.nosync/**": true,
+      "**/.yarn/cache/**": true,
+      "**/dist/**": true,
+      "**/crates/*-wasm/pkg/**": true,
+      "**/crates/*-wasm/pkg-tsify-test/**": true,
+      "**/registryV2/index/**": true,
+      "**/registryV2/bundles/**": true,
+      "**/registryV2/contexts/**": true,
+      "**/registryV2/signatures/**": true
+    }
+  },
+  "extensions": {
+    "recommendations": [
+      "rust-lang.rust-analyzer",
+      "cedar-policy.vscode-cedar"
+    ]
+  },
+  "launch": {
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Core 계약: C1-1 참조 시험 디버깅",
+        "type": "node",
+        "request": "launch",
+        "runtimeExecutable": "node",
+        "runtimeArgs": ["--test"],
+        "program": "${workspaceFolder:DAMBI}/contracts/core-v1/contract.test.mjs",
+        "cwd": "${workspaceFolder:DAMBI}",
+        "autoAttachChildProcesses": true,
+        "console": "integratedTerminal",
+        "skipFiles": ["<node_internals>/**"],
+        "stopOnEntry": false
+      }
+    ]
+  },
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "Core: TypeScript 타입 검사",
+        "type": "process",
+        "command": "node",
+        "args": [
+          "${workspaceFolder:DAMBI}/.yarn/releases/yarn-4.14.1.cjs",
+          "core:typecheck"
+        ],
+        "options": {
+          "cwd": "${workspaceFolder:DAMBI}"
+        },
+        "group": {
+          "kind": "build",
+          "isDefault": true
+        },
+        "problemMatcher": {
+          "base": "$tsc",
+          "fileLocation": ["relative", "${workspaceFolder:DAMBI}/packages/core"]
+        },
+        "detail": "현재 @dambi/core의 TypeScript 타입을 검사합니다. 출력 파일을 생성하지 않습니다."
+      },
+      {
+        "label": "Core: TypeScript 빌드",
+        "type": "process",
+        "command": "node",
+        "args": [
+          "${workspaceFolder:DAMBI}/.yarn/releases/yarn-4.14.1.cjs",
+          "core:build"
+        ],
+        "options": {
+          "cwd": "${workspaceFolder:DAMBI}"
+        },
+        "group": "build",
+        "problemMatcher": {
+          "base": "$tsc",
+          "fileLocation": ["relative", "${workspaceFolder:DAMBI}/packages/core"]
+        },
+        "detail": "packages/core/dist를 다시 생성합니다. 현재는 TypeScript 빌드이며 SDK WASM 빌드는 C5에서 연결합니다."
+      },
+      {
+        "label": "Core: 공개 패키지 소비자 타입 검사",
+        "type": "process",
+        "command": "node",
+        "args": [
+          "${workspaceFolder:DAMBI}/.yarn/releases/yarn-4.14.1.cjs",
+          "core:test:types"
+        ],
+        "options": {
+          "cwd": "${workspaceFolder:DAMBI}"
+        },
+        "group": "test",
+        "problemMatcher": {
+          "base": "$tsc",
+          "fileLocation": ["relative", "${workspaceFolder:DAMBI}/packages/core"]
+        },
+        "detail": "Core 빌드 후 실행합니다. 공개 .d.ts의 소비자 타입과 정책 wire 타입을 검사하며 자동 빌드는 수행하지 않습니다."
+      },
+      {
+        "label": "Core: 빌드 패키지 scaffold 시험",
+        "type": "process",
+        "command": "node",
+        "args": [
+          "${workspaceFolder:DAMBI}/.yarn/releases/yarn-4.14.1.cjs",
+          "core:test:scaffold"
+        ],
+        "options": {
+          "cwd": "${workspaceFolder:DAMBI}"
+        },
+        "group": "test",
+        "problemMatcher": [],
+        "detail": "Core 빌드 후 공개 진입점의 비동기 NOT_IMPLEMENTED 오류와 internal 진입점 import를 확인합니다. Core 판정 구현의 검증은 후속 단계입니다."
+      },
+      {
+        "label": "Core: 패키지 내용 확인 (dry-run)",
+        "type": "process",
+        "command": "node",
+        "args": [
+          "${workspaceFolder:DAMBI}/.yarn/releases/yarn-4.14.1.cjs",
+          "core:pack"
+        ],
+        "options": {
+          "cwd": "${workspaceFolder:DAMBI}"
+        },
+        "group": "build",
+        "problemMatcher": [],
+        "detail": "Core 빌드 후 실행합니다. npm pack --dry-run으로 패키지 포함 파일을 확인하며 빌드·배포를 수행하지 않습니다."
+      },
+      {
+        "label": "Core 계약: C1-1 참조 시험",
+        "type": "process",
+        "command": "node",
+        "args": [
+          "${workspaceFolder:DAMBI}/.yarn/releases/yarn-4.14.1.cjs",
+          "contract:test"
+        ],
+        "options": {
+          "cwd": "${workspaceFolder:DAMBI}"
+        },
+        "group": "test",
+        "problemMatcher": [],
+        "detail": "contracts/core-v1의 구조·참조 서명 검사를 실행합니다. 의미 오류 사례는 후속 Core 검증용 인계이며 여기서 검증하지 않습니다."
+      },
+      {
+        "label": "정책: D3 공유 원본 시험",
+        "type": "process",
+        "command": "node",
+        "args": [
+          "${workspaceFolder:DAMBI}/.yarn/releases/yarn-4.14.1.cjs",
+          "policy:test"
+        ],
+        "options": {
+          "cwd": "${workspaceFolder:DAMBI}"
+        },
+        "group": "test",
+        "problemMatcher": [],
+        "detail": "공유 정책 번들·Day-1 정책의 D3 검사를 실행합니다. 기존 policy-engine-wasm/pkg가 준비돼 있어야 합니다."
+      },
+      {
+        "label": "Legacy Rust: 정책 엔진 library 시험",
+        "type": "process",
+        "command": "cargo",
+        "args": ["test", "--locked", "-p", "policy-engine", "--lib"],
+        "options": {
+          "cwd": "${workspaceFolder:DAMBI}"
+        },
+        "group": "test",
+        "problemMatcher": [],
+        "detail": "기존 policy-engine의 native library 시험을 빌드·실행합니다. SDK Core 전체 검증이나 integration test를 대신하지 않습니다."
+      },
+      {
+        "label": "Legacy Rust: Decoder helper 시험",
+        "type": "process",
+        "command": "cargo",
+        "args": [
+          "test",
+          "--locked",
+          "-p",
+          "policy-engine-wasm",
+          "--lib",
+          "declarative_exports::tests"
+        ],
+        "options": {
+          "cwd": "${workspaceFolder:DAMBI}"
+        },
+        "group": "test",
+        "problemMatcher": [],
+        "detail": "기존 policy-engine-wasm의 declarative_exports helper 시험만 native로 빌드·실행합니다. 전체 DEC 회귀나 WASM 산출물 생성은 수행하지 않습니다."
+      },
+      {
+        "label": "Legacy Decoder: approve 정책 회귀",
+        "type": "process",
+        "command": "node",
+        "args": [
+          "${workspaceFolder:DAMBI}/.yarn/releases/yarn-4.14.1.cjs",
+          "decoder:test:approve-policy"
+        ],
+        "options": {
+          "cwd": "${workspaceFolder:DAMBI}"
+        },
+        "group": "test",
+        "problemMatcher": [],
+        "detail": "기존 policy-engine-wasm/pkg를 사용하며 시험 내부에서 실제 Registry를 생성합니다. Registry 의존성과 해당 Rust 소스의 WASM 빌드가 준비돼 있어야 합니다."
+      },
+      {
+        "label": "Legacy Decoder: DEC-07 인계 검사",
+        "type": "process",
+        "command": "node",
+        "args": [
+          "${workspaceFolder:DAMBI}/.yarn/releases/yarn-4.14.1.cjs",
+          "decoder:test:handoff"
+        ],
+        "options": {
+          "cwd": "${workspaceFolder:DAMBI}"
+        },
+        "group": "test",
+        "problemMatcher": [],
+        "detail": "DEC-07 인계 자료를 실제 Registry 생성으로 검사합니다. 제품 스냅샷 활성화나 Core 런타임 검증을 대신하지 않습니다."
+      },
+      {
+        "label": "Legacy Decoder: 통합 회귀",
+        "type": "process",
+        "command": "node",
+        "args": [
+          "${workspaceFolder:DAMBI}/.yarn/releases/yarn-4.14.1.cjs",
+          "decoder:test"
+        ],
+        "options": {
+          "cwd": "${workspaceFolder:DAMBI}"
+        },
+        "group": "test",
+        "problemMatcher": [],
+        "detail": "기존 policy-engine-wasm/pkg를 사용하는 통합 회귀입니다. 시험 내부에서 실제 Registry를 생성하며, Rust 소스 변경 시 사용자가 먼저 WASM을 빌드해야 합니다."
+      }
+    ]
+  }
+}

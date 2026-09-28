@@ -6,6 +6,26 @@ All notable changes to `@dambi/core` are recorded here. The format follows
 break the public interface and will say so under **Changed**/**Removed** with a
 migration note.
 
+## [Unreleased]
+
+### Changed
+- C1 public contract: `await createCore(config, options?)`, policy/Fact I/O ports,
+  fixed Decoder snapshot and local trust/limits configuration. `clock` moves from
+  `ports` to `CoreConfig`. Initialization still rejects with `CoreError` code
+  `NOT_IMPLEMENTED`; no evaluation runtime is included.
+- `plan(request)` issues an opaque `CorePlan`; `evaluate(plan, FactBatch)` replaces
+  caller-supplied request/policy evaluation. Fact batches carry the plan ID and
+  method responses before projection, with required provenance.
+- Policy payload is the original signed string. Response key IDs remain telemetry.
+- Verdicts/hooks expose typed diagnostics and available/unavailable audit metadata.
+
+### Added
+- Cancellation, policy refresh and disposal contracts; stable error code types.
+- Consumer declaration checks and an asynchronous scaffold check in CI.
+
+### Removed
+- Public `DecoderSource`, `PolicySet` and `FactMap`. See README for migration.
+
 ## [0.0.1] - 2026-09-07
 
 Scaffold release. Exercises the publish path; nothing evaluates.

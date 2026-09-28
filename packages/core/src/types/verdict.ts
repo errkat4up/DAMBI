@@ -4,6 +4,30 @@
  */
 
 import type { FactResult } from "../ports/fact.js";
+import type { CoreDiagnostic } from "./errors.js";
+
+/** Complete API audit fields, or an explicit reason they cannot be supplied. */
+export type VerdictMetadata =
+  | {
+      readonly status: "available";
+      /**
+       * SHA-256(UTF-8(JCS({ domain: "dambi.core.request.v1", request }))),
+       * formatted as 0x + 64 lowercase hex digits. See README for input rules.
+       */
+      readonly requestDigest: `0x${string}`;
+      /** Decimal string of the pinned policy snapshot's integer sequence. */
+      readonly policyVersion: string;
+      /** Version of the engine actually used for this verdict. */
+      readonly engineVersion: string;
+    }
+  | {
+      readonly status: "unavailable";
+      readonly reason:
+        | "invalid_request"
+        | "unsupported_request"
+        | "untrusted_snapshot"
+        | "engine_unavailable";
+    };
 
 /**
  * 판정 결과. 3-state.
@@ -54,6 +78,12 @@ export interface Verdict {
    * 버려진다).
    */
   facts: readonly FactResult[];
+
+  /** Preserve partial decode, failure and no-match distinctions for consumers. */
+  diagnostics: readonly CoreDiagnostic[];
+
+  /** Missing audit fields are never replaced with invented digests/versions. */
+  metadata: VerdictMetadata;
 }
 
 /**

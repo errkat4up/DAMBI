@@ -1,5 +1,7 @@
 # Dambi: Decoder·정책 → Core → Adapters 개발 계획
 
+**설계 상태: 작업 초안.** 단계·순서·미확정 설계는 실제 구현·검증 결과에 따라 보완한다. 검증 완료 기록과 명시적인 사용자 합의는 근거로 유지하고, 계획의 추정이나 제안을 구현 사실·확정 API로 취급하지 않는다. 최신 Core 세부 작업은 [Core 개발 계획](core-development-plan.md)을 따른다.
+
 **DEC-06c·DEC-06 현재 상태:** 구현·정적 검토·사용자 검증 완료. [확정 계약](decoder-design-plan.md#dec-06c--확정-계약과-실행-상태)을 유지하며 실행 근거는 [README 검증 기록](../../fixtures/decoder-policy/README.md#dec-06c--사용자-검증-완료-dec-06-완료) 한 곳을 따른다. 아래 06a/06b 상세는 해당 단계의 기존 기록이다. DEC-07은 구현·정적 검토·사용자 검증 및 Decoder 인계 완료다. SDK 소스 이관은 미착수다.
 
 **2026-09-12 DEC-06b 구현 당시 상태:** 실제 Bundler3 Call[] 연결 **구현·정적 검토 완료, 사용자 실행 대기**다. 요청 43개 + 구조 6개 = **49개**, 기존 514개 포함 통합 **563개 정의**이며 통과 수가 아니다. DEC-06a는 self 48/48·통합 514/514 및 분리 커밋 `9923487`까지 확인했다. 06c는 별도 미구현이며 06b 사용자 검증 후 진행한다.
@@ -76,7 +78,7 @@ API 서버 구현·운영은 API 담당 영역이다. 공통 crate를 이동한 
 ## 3. 현재 코드에서 확인한 출발점
 
 1. `main`에는 이미 root workspace와 `core:typecheck`, `core:build`, scaffold CI가 있다. 이를 새로 만드는 단계는 생략한다.
-2. `@dambi/core`는 0.0.1 scaffold이며 `createCore()`는 throw한다. 실제 실행 연결은 Core 단계에서 한다.
+2. `@dambi/core`는 0.0.1 scaffold이며 `createCore()`는 현재 비동기로 NOT_IMPLEMENTED를 reject한다. 실제 실행 연결은 Core 단계에서 한다.
 3. `registryV2/manifests/standard/erc20/approve@1.0.0.json`은 `tokens:erc20`으로 주소를 확장한다. source manifest를 완성된 decoder bundle로 오인하면 안 된다.
 4. `unlimited-approval-deny/policy.cedar`는 실제로 `@severity("warn")`이다. 기존 판정을 먼저 재현하고, 변경할 경우 별도 정책 변경으로 다룬다.
 5. 기존 baseline은 이미 만들어진 Action을 평가한다. 새 D1은 원문 calldata부터 디코딩해 그 앞 구간까지 검증한다.
@@ -315,24 +317,24 @@ Call tuple `(to,data,value,skipRevert,callbackHash)`의 순서·동적 offset/le
 
 **Decoder 부분 상태:** DEC-07 구현·정적 검토·사용자 검증 및 Decoder 인계 완료. [인계 자료·실행 기록](../../fixtures/decoder-policy/README.md#dec-07--decoder-인계)을 따른다. D4 전체 및 C2c·C5 완료를 뜻하지 않는다.
 
-**D4-1 현재 상태:** 정책 wire의 SDK 초안·정상/오류 fixture·구조 및 참조 서명 시험의 구현·정적 검토·사용자 검증 완료. 실제 API와의 합의는 별도이며 [계약과 실행 기록](../../contracts/core-v1/README.md)을 따른다.
+**D4-1 현재 상태:** 당시 SDK 초안의 사용자 검증은 완료됐다. C1-1에서 현재 main의 정책 API에 맞춘 `contracts/core-v1/` 변경도 사용자 실행 검증을 마쳤다. [계약과 실행 기록](../../contracts/core-v1/README.md)에서 두 변경 범위의 결과를 구분하며 이전 초안의 통과를 현재 계약 검증 결과로 재사용하지 않는다. 후속 작업은 [Core 세부 계획](core-development-plan.md)을 따른다.
 
 **2026-09-13 세부 실행 계획:** 아래 세 단위로 진행한다. DEC-07 시험용 선택을 제품 snapshot으로 자동 승격하지 않는다.
 
 | 작업 | 구현 범위·완료 조건 | 상태 |
 | --- | --- | --- |
-| D4-1 정책 wire 계약 | `contracts/core-v1/`에 payload/envelope 타입·JSON Schema·정상/오류 예시와 구조 검증. B 문자열 UTF-8 원문 서명, `registry_ref: null`, 정책/decoder 키 역할 구분. 필드·시간/sequence 단위는 SDK 초안으로 작성한 뒤 실제 API와 대조 | SDK 초안·구조/참조 서명 시험의 사용자 검증 완료. API 합의는 별도 |
+| D4-1 정책 wire 계약 | `contracts/core-v1/`에 payload/envelope 타입·JSON Schema·정상/오류 예시와 구조 검증. B 문자열 UTF-8 원문 서명, `registry_ref: null`, 정책/decoder 키 역할 구분 | 당시 초안 검증 완료. C1-1의 API 정합화 변경도 사용자 검증 완료 |
 | D4-2 제품 snapshot 선택 | chain·token·transaction/typed 경로·정책 적용 범위를 명시한 제품 선택 목록. DEC-07의 검증 범위 및 Permit2 v3·multicall 한계, Day-1 swap 정책에 필요한 decoder의 미검증 범위를 대조 | [제품 선택안](../../contracts/core-v1/snapshot-selection.proposal.json) 작성, 사용자 범위 결정 대기 |
 | D4-3 재현 생성·인계 | 선택 manifest/token/정적 프로토콜 자료와 builder 의존 목록 고정. `scripts/sdk/` 생성 진입점, 정렬된 snapshot·개별 bundle JCS digest·전체 로컬 digest·coverage. 확장/서버/cache 없이 같은 입력으로 재생성 | 미착수 |
 
-D4-1의 정상 예시는 D3 공유 정책을 사용하고 payload 객체는 거절한다. 필수 필드 누락·빈 manifest·잘못된 타입/버전·비-null registry_ref를 구조 오류로 구분한다. 중복 정책 ID·manifest ID 일치·시간 관계·서명 변조·잘못된 역할의 키는 의미/암호 검증용 사례로 구분하고 실제 Core 검증 완료 표시는 C3까지 보류한다. API wrapper의 실제 필드명·알고리즘 표기·인증 헤더·운영 키/제한값은 확인 전 제안으로만 기록한다. 원복된 `backup/core-sdk-b219617`의 계약은 참고 자료이며 서버 합의의 근거로 사용하지 않는다. 과거의 “API 담당이 준 7개 필드”라는 표현은 확인 가능한 원문이 없고 사용자도 해당 계약을 확인하지 못했으므로 확정 요구사항에서 제거한다. 백업의 `policies`, `sequence`, `issued_at`, `expires_at`, `env`, `profile`, `registry_ref`는 SDK 초안 후보일 뿐이다.
+D4-1의 정상 예시는 D3 공유 정책을 사용하고 payload 객체는 거절한다. 당시 fixture는 필수 필드 누락·빈 manifest·잘못된 타입/버전·비-null registry_ref를 구조 오류로 구분했다. 중복 정책 ID·manifest ID 일치·시간 관계·서명 변조·잘못된 역할의 키는 의미/암호 검증용 사례이며 실제 Core 검증 완료 표시는 C3까지 보류한다. 후속 소스 대조에서 `registry-api`의 `GET /v1/bundle`, OpenAPI와 정책 publisher·ADR가 확인됐으므로, 현재 wire는 이 구현을 근거로 C1-1에서 정합화한다. 백업이나 과거 대화만을 계약 근거로 사용하지 않는다. 서명된 B 내부의 필드·수치 형식은 adapter가 변경하지 않고 Core parser와 fixture를 맞추며, wrapper 이름 변환과 미확정 운영 정보는 구분한다. 상세 차이·권장안은 [Core 세부 계획](core-development-plan.md)에 둔다.
 
 D4-2는 제품 지원 범위를 바꾸는 결정이다. 현재 고정 시험의 일부 USDC와 11개 manifest만 포함하거나 전체 Registry를 포함하는 선택 모두 별도 근거가 필요하다. 지원 chain/token과 typed strict 여부를 확인한 뒤 생성 입력을 고정하며, 미검증 경로를 지원 완료 목록에 넣지 않는다. D4-3의 생성·시험 실행은 사용자에게 명령으로 제공하고, 사용자 실행 결과 확인 전 재현 완료로 기록하지 않는다.
 
 2026-09-13 기존 사용자 범위 조정: 모든 번들 작업을 끝내는 것을 전제로 하지 않으며, 당시 범위는 D3 구현 및 D4 계획 정리까지였다. 이후 D3 사용자 검증을 완료하고 후속 요청으로 D4-1 계약 초안을 작성했다. D4-1은 전체 decoder 번들 완성과 분리해서 진행한다. 현재 DEC-07은 11개 manifest·4개 USDC token의 시험 자료이며 Swap Action 경로가 없어 Day-1 스왑 정책의 원문 요청부터 판정까지는 미검증이다. 스왑 decoder 후보의 pool resolver·live 입력과 추가 token/chain 범위는 별도 후속 작업으로 남긴다.
 
-- 신규 `contracts/core-v1/`에 payload/envelope 타입·Schema·정상/오류 fixture를 만든다. 필드 구조는 SDK 초안과 실제 API 합의 여부를 구분한다.
-- B 방식 문자열 payload, `registry_ref: null`, 역할별 키 분리 방향을 반영한다. 실제 API 필드명·인증·운영값의 미확정 항목은 제안과 구분한다.
+- 기존 `contracts/core-v1/`의 payload/envelope 타입·Schema·정상/오류 fixture를 C1-1에서 현재 API에 정합화한다. 당시 SDK 초안의 검증 이력은 보존한다.
+- B 방식 문자열 payload, `registry_ref: null`, 역할별 키 분리를 유지한다. 구현된 API 필드·인코딩과 아직 확인할 운영 키·인증·환경 정보는 구분한다.
 - Registry 빌드의 **개별 bundle digest**와 SDK 고정 스냅샷 전체의 **로컬 digest**를 구분한다. 아직 없는 원격 root digest/ref를 만들어 계약으로 사용하지 않는다.
 - SDK에 포함할 snapshot 범위·생성 입력·정렬·digest·coverage 목록을 기록하고 재현 가능한 빌드 결과를 만든다. 전체 Registry를 무조건 번들링하거나 이전 백업의 세 토큰만 제품 범위로 확정하지 않는다.
 - 정책 payload와 decoder artifact는 신뢰 경로를 각각 기록한다. 내장 artifact 신뢰와 외부 decoder 서명을 혼동하지 않는다. 실제 Core 서명 검증 코드는 C3에서 구현한다.
@@ -344,11 +346,15 @@ D4-2는 제품 지원 범위를 바꾸는 결정이다. 현재 고정 시험의 
 
 ## 5. 2차 작업: feat/core
 
+**Core 착수 계획(2026-09-17 수정):** 단계별 실행과 VS Code 환경은 [Core 세부 개발 계획](core-development-plan.md)을 따른다. D3·D4-1 및 DEC-07 자료를 바탕으로 C1-1의 정책 API·fixture 정합화부터 시작한다. D4-2·D4-3의 제품 범위 확정·재현 생성은 C1/C2와 fixture 기반 Core 개발의 전체 선행 조건이 아니며, 제품 snapshot 연결과 최종 배포 완료의 후속 의존 항목으로 유지한다.
+
+**C1 상태:** 공개 계약·소비자 검증 완료. 결과는 [계약 README](../../contracts/core-v1/README.md#결과-기록)를 따르며 다음은 C2-0a다.
+
 실제 API/RPC는 아직 연결하지 않는다. D 단계의 실제 정책·디코더와 서명된 테스트 번들, 기록된 원본 Fact를 반환하는 mock 포트로 실행부를 개발한다. 평가·암호 검증 자체는 mock하지 않는다.
 
 | 단계 | 변경 단위·주요 파일 | 완료 조건 |
 | --- | --- | --- |
-| C1 | `packages/core/src/{core,ports,types,index}.ts` 계열과 공개 `.d.ts` 검사 | 생성/함수·포트·타입 변경 전후가 명시됨. B bytes, 원본 Fact, 계획 handle, 오류·미지원 규칙을 계약으로 고정 |
+| C1 | C1-1의 기존 `contracts/core-v1/` API 정합화, `packages/core/src/{core,ports,types,index}.ts` 계열과 공개 `.d.ts` 검사 | 실제 wire와 fixture를 맞춘 뒤 공개 타입 고정. B bytes, 원본 Fact, 계획 handle, 오류·미지원 규칙과 감사 metadata/hook 경계 명시 |
 | C2-0a | 공통 `state/action/transition`을 `crates/asset-model/`로 이관 | crate 하나씩 이동·경로 수정·시험. 타입/직렬화/계산 로직 변경을 섞지 않음 |
 | C2-0b | SDK/API Cargo workspace 분리 및 manifest·lockfile 정리 | SDK workspace가 서버 폴더의 manifest를 읽지 않음. 검사 때만 manifest를 고치는 방식은 사용하지 않음 |
 | C2-0c | Cedar schema를 배포 crate 내부로 이동하고 include/목록 시험/생성 경로 수정 | schema 원본이 한 곳이고 Rust 패키지에 포함. 과거 root schema 또는 서버 static 파일로 fallback하지 않음 |
@@ -360,21 +366,23 @@ D4-2는 제품 지원 범위를 바꾸는 결정이다. 현재 고정 시험의 
 | C5 | Rust 계획/평가 + `dambi-core-wasm` + JS `plan/evaluate`, SDK 전용 빌드·시험 경로로 전환 | 요청 digest·해석 결과·정책/decoder·필수 Fact 고정. 타 인스턴스·변조·만료·재사용 거절, 원본 projection 한 번 수행. 기존 WASM/확장 빌드 산출물 참조 제거 |
 | C6 | JS `check`·포트 조율·timeout·Fact Cache·hook | mock 포트로 끝까지 실행. 필수 값·신선도·request/call ID·동시성 검증. 늦은 응답은 상태를 바꾸지 않음 |
 
-C1에서 기존 scaffold의 `PolicySource.payload: unknown`, Fact의 '투영 후 값', selector+chain만 받는 decoder 조회, 기존 plan/evaluate 시그니처와 새 계약의 차이를 명시한다. 초기 공개 표면을 무조건 유지하거나 무단으로 보조 export를 늘리지 않는다. 생성/수명주기 함수와 주요 함수 3종, 포트 2종, 주요 타입 3종 및 보조 타입을 정확히 구분한다.
+C1에서 기존 scaffold의 `PolicySource.payload: unknown`, Fact의 '투영 후 값', selector+chain만 받는 decoder 조회, 기존 plan/evaluate 시그니처와 새 계약의 차이를 명시한다. 먼저 C1-1 안에서 기존 정책 wire fixture를 현재 API에 정합화하며 별도 선행 단계나 새 계약 문서를 추가하지 않는다. 초기 공개 표면을 무조건 유지하거나 무단으로 보조 export를 늘리지 않는다. 생성/수명주기와 check·plan·evaluate, 주요 타입·보조 타입을 구분한다. C1-2에서 policy/fact 두 외부 포트·고정 Decoder 설정·async 생성·계획 소비 규칙을 공개 타입에 반영했다. [Core 계획 §3](core-development-plan.md#3-core-계약-권장안)과 패키지 README를 따르며 실제 실행부는 후속 단계다.
 
-**C2-0b workspace 변경:** 루트 `Cargo.toml`을 SDK와 필요한 순수 공통 crate를 위한 workspace로 관리한다. `policy-db`, `policy-sync`, `policy-server`는 서버 측 별도 workspace/manifest로 분리하고 공통 crate의 새 위치를 의존하게 한다. 이동으로 의존 버전이 자동 갱신되지 않도록 manifest·lockfile을 함께 검토한다. SDK/API CI는 각각 자신의 workspace 명령을 사용한다. 기존 WASM wrapper는 비교 기간에만 사용하며 C5 전환 완료 시 최종 SDK workspace와 소스 입력 목록에서 제외한다.
+**C2-0b workspace 변경:** 루트 `Cargo.toml`을 SDK와 필요한 순수 공통 crate를 위한 workspace로 관리한다. `policy-db`, `policy-sync`, `policy-server`는 서버 측 별도 workspace/manifest로 분리하고 공통 crate의 새 위치를 의존하게 한다. 이동으로 의존 버전이 자동 갱신되지 않도록 manifest·lockfile을 함께 검토한다. SDK/API CI는 각각 자신의 workspace 명령을 사용한다. 서버 Dockerfile의 Cargo 진입점과 바이너리 COPY 원본도 새 workspace의 실제 출력 경로에 맞춘다. 기존 `/app/target/release`가 자동 유지된다고 가정하지 않으며 API 담당과 배포 경계를 확인한다. 기존 WASM wrapper는 비교 기간에만 사용하며 C5 전환 완료 시 최종 SDK workspace와 소스 입력 목록에서 제외한다.
 
 **C2-0c schema 변경:** 현재 중립 원본은 `schema/policy-schema/`다. 이를 `crates/policy-engine/schema/policy-schema/`로 옮기고 `src/schema/mod.rs`의 include 경로, schema 목록 시험, 관련 생성·소비 스크립트를 조정한다. 서버의 `static/policy-schema.json`을 SDK 원본으로 사용하거나 수동 복제하지 않는다.
 
 **C2c 시험 변경:** `fixtures/baseline-verdicts.*`, 기존 WASM의 `hl_exchange_deny_e2e.rs`, `est_roundtrip.rs` 등에서 SDK에 필요한 사례와 정적 입력을 인계한다. fixture 출력은 SDK 경로나 임시 디렉터리에 쓴다. 앱 UI 전용 시험은 SDK 시험과 구분하되, 필수 SDK 회귀 사례를 제외하거나 fixture 미존재 시 skip해서 검증을 통과시키지 않는다. 필수 case ID/실행 수를 기록해 누락을 확인한다.
 
-**C5 빌드 전환:** 기능 연결과 빌드 변경을 별도 소단계로 진행한다. 신규 `scripts/sdk/build-wasm.mjs`와 필요한 asset 생성 명령으로 `dambi-core-wasm`을 소스에서 빌드한다. root/package 스크립트, TS import·types, Node fixture, CI의 WASM 입력을 새 경로로 교체한다. SDK 명령은 `scripts/wasm-build.sh`, 확장 `postinstall/build`, 기존 `policy-engine-wasm/pkg`에 의존하지 않는다. root의 서버 기동 명령은 API 측 도구로 분리하고, SDK CI는 `createCore()` throw를 기대하는 scaffold 시험을 실제 실행 시험으로 교체한다.
+**C5 빌드 전환:** 기능 연결과 빌드 변경을 별도 소단계로 진행한다. 신규 `scripts/sdk/build-wasm.mjs`와 필요한 asset 생성 명령으로 `dambi-core-wasm`을 소스에서 빌드한다. root/package 스크립트, TS import·types, Node fixture, CI의 WASM 입력을 새 경로로 교체한다. SDK 명령은 `scripts/wasm-build.sh`, 확장 `postinstall/build`, 기존 `policy-engine-wasm/pkg`에 의존하지 않는다. root의 서버 기동 명령은 API 측 도구로 분리하고, SDK CI는 `createCore()` NOT_IMPLEMENTED reject를 기대하는 scaffold 시험을 실제 실행 시험으로 교체한다.
 
 SDK CI 전환은 C5부터 실제 실행 경로를 검사하고 C6에서 mock 포트 기반 전체 동작까지 확장한다. 어댑터 작업 후에도 같은 독립 빌드 검증을 유지한다. 기존 경로로 실패를 우회하는 fallback은 남기지 않는다.
 
-C3의 정책 `expires_at: null`은 최대 나이를 무제한으로 만드는 뜻이 아니다. 최대 나이·clock skew·크기 제한은 명시적인 Core 지원 정책으로 기록한다. API와 합의되지 않은 값을 서버 계약으로 표현하지 않는다.
+C3의 정책 `expires_at: null`은 최대 나이를 무제한으로 만드는 뜻이 아니다. 최대 나이는 기존 ADR의 v0.1 시작값인 72시간을 반영하되 서버 payload 필드가 아닌 Core 설정으로 유지한다. clock skew·크기 제한 등 미확정 값과 구분하며 세부 값·근거는 [Core 세부 계획](core-development-plan.md)에 둔다. C4는 실제 wire의 sequence 범위에 맞춰 검증과 활성 상태 갱신을 연결한다.
 
 C5–C6에서는 empty bundle, 매칭 정책 없음, 엔진 오류, 부분 디코딩, 필수 Fact 누락, 알려진 malformed 요청, 미지원 kind 각각의 결과를 명시한다. `warn`은 호스트 확인 필요, `enforcing`은 호스트의 선언이다. 실제 서명 요청과 평가 요청을 동일하게 유지하는 통합 지침도 작성한다.
+
+감사 API가 요구하는 요청 digest·정책 버전·엔진 버전의 생성 주체와 판정 hook 전달 형태는 C1에서 정하고 C5–C6에서 실제 평가에 사용한 값으로 연결한다. 감사 전송·API 키는 호스트/adapter 책임이며 Core 판정을 감사 서버 가용성에 종속시키지 않는다. 세부 필드·검증 범위는 [Core 세부 계획](core-development-plan.md)을 따른다.
 
 **Core 단계 인계물:** 실제 Native/WASM 실행 경로, 고정된 포트·타입, 테스트용 PolicySource/FactProvider, 보안·회귀 시험, 어댑터가 지켜야 할 오류·취소·데이터 계약, SDK 소유 workspace/소스 목록/빌드 명령. 기존 폴더가 없는 복사본에서 C6까지의 시험·빌드가 통과한 결과를 포함한다. 최종 배포 형식 검증은 §7.1에서 수행한다.
 
@@ -390,7 +398,7 @@ C 단계 이후에 브랜치를 만든다. HTTP와 Fact 어댑터는 SDK의 선�
 
 `oracle.usd_value` 같은 기존 이름만 보고 구현된 데이터 소스가 있다고 가정하지 않는다. 정책 서버의 `dambi.evaluate_v3` 최종 평가 결과는 원본 Fact의 대체물이 아니다. 실제 데이터 API가 없으면 해당 method의 연동을 미완료로 남기고 필요한 서버 계약을 구체적으로 전달한다.
 
-API 담당에게 필요한 입력: 실제 B wrapper와 서명 예제, 인증 헤더/키 절차, staging/production URL, 공개 검증 키·kid, 갱신/만료 정책. 이것이 없어도 D·C와 A의 mock HTTP 시험은 진행할 수 있지만 실제 통합 완료로 표기하지 않는다. 감사 전송이 필요하면 별도 transport로 연결하되 기본 평가가 감사 서버 가용성에 종속되지 않게 한다.
+API 연동은 현재 OpenAPI·publisher의 B wrapper와 서명 예제를 기준으로 한다. staging/production URL, 운영 공개 키·인증 절차와 갱신 정책은 API 담당과 확인하며 미확인 항목을 실제 통합 완료로 표기하지 않는다. 정책 publisher의 기본 입력은 D3 이전 확장 경로를 가리키므로 API 담당이 공유 원본 경로로 수정해야 한다. 이 수정은 A1 실제 정책 재발행·연동 전 선행 작업이며 fixture 기반 Core 개발의 전체 차단 조건은 아니다. 감사 전송이 필요하면 별도 transport로 연결하되 기본 평가가 감사 서버 가용성에 종속되지 않게 한다.
 
 ## 7. 마지막 통합·패키징
 
@@ -431,9 +439,9 @@ CI에는 이 명령을 소스부터 실행하는 SDK 전용 job을 둔다. exten
 
 ## 8. 브랜치 인계와 보고 단위
 
-현재는 `feat/decoder`만 작업한다. `feat/core`는 출발점에서 유지하고 `feat/adapters`는 아직 만들지 않는다.
+2026-09-14 확인 기준으로 현재 브랜치는 `feat/core`, HEAD는 `3f0ad6b`이며 `main`도 같은 커밋이다. `feat/decoder`는 `4803a2a`다. Core 브랜치 준비는 끝났으므로 추가 fast-forward 없이 C1을 시작한다. `feat/adapters`는 아직 만들지 않는다.
 
-Decoder 인계 조건을 충족하면 검토된 decoder 이력을 Core에 통합한다. 아직 main에 반영되지 않았다면 변경 없는 `feat/core`를 `feat/decoder`까지 fast-forward해 이어갈 수 있다. Core 단계 이후 `feat/adapters`는 검토된 Core 커밋에서 만든다. 비교 기준을 각각 직전 단계로 잡아 기존 변경이 새 리뷰에 중복되지 않게 한다. 브랜치가 분기되면 force/reset으로 맞추지 않고 실제 이력을 확인한다.
+검토된 Decoder·D3·D4-1 이력은 현재 `main`에 반영돼 있다. Core 단계 이후 `feat/adapters`는 검토된 Core 커밋에서 만든다. 비교 기준을 각각 직전 단계로 잡아 기존 변경이 새 리뷰에 중복되지 않게 한다. 브랜치가 분기되면 force/reset으로 맞추지 않고 실제 이력을 확인한다. 사용자가 직접 실행할 준비 명령은 Core 세부 계획을 따른다.
 
 각 소단계의 보고 형식:
 

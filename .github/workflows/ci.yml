@@ -289,7 +289,7 @@ jobs:
 
   # @dambi/core — the published SDK package (packages/core, root Yarn workspace).
   # 0.0.1 is a types-only scaffold; this job is the guard that the publish path
-  # keeps working: typecheck, ESM build, a real import of the built output (the
+  # keeps working: typecheck, ESM build, consumer types and built output (the
   # extensionless-import class of bug is invisible to tsc and only shows up at
   # `node` resolution time), and a tarball dry-run so `files`/`exports` drift is
   # caught before `npm publish`.
@@ -308,23 +308,20 @@ jobs:
       - name: Install (immutable)
         run: yarn install --immutable
 
+      - name: Policy wire contract fixtures
+        run: yarn contract:test
+
       - name: Typecheck
         run: yarn core:typecheck
 
       - name: Build (ESM + .d.ts)
         run: yarn core:build
 
-      - name: Import built output under Node ESM
-        run: |
-          node --input-type=module -e '
-            const m = await import("./packages/core/dist/index.js");
-            if (typeof m.createCore !== "function") { console.error("createCore missing"); process.exit(1); }
-            let threw = false;
-            try { m.createCore({}); } catch { threw = true; }
-            if (!threw) { console.error("0.0.x scaffold must throw"); process.exit(1); }
-            await import("./packages/core/dist/internal.js");
-            console.log("ok: createCore present, scaffold throws, internal entry resolves");
-          '
+      - name: Consumer type contract (built package declarations)
+        run: yarn core:test:types
+
+      - name: Built package scaffold (Node ESM)
+        run: yarn core:test:scaffold
 
       - name: Tarball dry-run (files / exports drift)
         working-directory: packages/core
