@@ -31,6 +31,97 @@ export default {
 };
 ```
 
+## Connecting to the Dambi API
+
+Core needs three inputs: decoders, signed policies, and Facts. Decoders ship in
+the package; policies come from the Dambi registry API; Facts come from your
+chain RPC.
+
+| Input | Source | Trust |
+| --- | --- | --- |
+| Decoders | `@dambi/core/decoders` (pinned per package version) | SHA-256 digest |
+| Policies | `GET /v1/bundle` | ECDSA P-256 signature, key below |
+| Facts | your `FactProvider` | provenance and age checks |
+
+```ts
+import { createCore } from "@dambi/core";
+import { decoderSnapshot, decoderSnapshotInfo } from "@dambi/core/decoders";
+
+const DAMBI_API = "https://registry-api-v3-428885534408.asia-northeast1.run.app";
+
+const core = await createCore({
+  decoderSnapshot,
+  trust: {
+    env: "staging",
+    profile: "default",
+    keys: [{
+      keyId: "policy-local-416b1764fb8d",
+      role: "policy",
+      publicKeySpkiBase64:
+        "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEbuwI14qQ6EPvaUcFCLBqURMAeBBEkjip+lh313nYz0hkdJIEgwN9bD0sDvDFd0BH/abEGtN0WIsR920rVgiFyQ==",
+    }],
+  },
+  enforcement: "advisory",
+  limits: {
+    maxPolicyBytes: 1_000_000,
+    maxDecoderBytes: decoderSnapshotInfo.bytes,
+    maxRequestBytes: 256_000,
+    maxFactBytes: 1_000_000,
+    maxPlanCalls: 64,
+    maxPendingPlans: 16,
+    allowedClockSkewMs: 60_000,
+    planTtlMs: 60_000,
+    maxFactAgeMs: 60_000,
+    factTimeoutMs: 5_000,
+    policyTimeoutMs: 10_000,
+  },
+  ports: {
+    policy: {
+      async fetch(options) {
+        const res = await fetch(`${DAMBI_API}/v1/bundle?profile=default`, { signal: options?.signal });
+        if (!res.ok) throw new Error(`policy bundle: HTTP ${res.status}`);
+        // The HTTP envelope uses key_id; keep payload byte-for-byte as received.
+        const { payload, signature, key_id } = await res.json();
+        return { payload, signature, keyId: key_id };
+      },
+    },
+    fact: {
+      // The current default policies request no Facts. Replace this with an RPC
+      // provider before enabling policies that do: required Facts that are
+      // missing make the verdict fail closed.
+      async fetch(_calls, { planId }) {
+        return { planId, results: {} };
+      },
+    },
+  },
+});
+
+// Policy bundles are re-signed regularly and are rejected once older than
+// maxBundleAgeSec (72 hours). Refresh well inside that window.
+setInterval(() => core.refreshPolicies().catch(console.error), 60 * 60 * 1000);
+
+const verdict = await core.check({
+  kind: "transaction",
+  chainId: "eip155:1",
+  from: "0x…",
+  to: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+  data: "0x095ea7b3…",
+  value: "0",
+});
+```
+
+- `/v1/bundle` needs no credentials and allows cross-origin requests, so the
+  same code runs in a browser extension or a web page.
+- `trust.env` must match the bundle's `env`. The current API serves
+  `"staging"` bundles signed by a development key; the key above changes when
+  production signing is introduced, and that change ships as a new release.
+- `maxDecoderBytes` must be at least `decoderSnapshotInfo.bytes`
+  (about 2.5 MB). `@dambi/core/decoders` is a separate entry point, so apps that
+  supply their own snapshot do not bundle it.
+- The limits above are a starting point for hosts, not values Core enforces as
+  defaults.
+- `POST /v1/audit` (verdict reporting) requires an API key and is optional.
+
 ## Public contract and migration
 
 - Use `await createCore(config, options?)`. The instance exposes `plan`, `evaluate`,
