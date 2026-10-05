@@ -75,10 +75,10 @@ feat/adapters:                   Policy API / RPC 등 실제 외부 데이터 �
 
 API 서버 구현·운영은 API 담당 영역이다. 공통 crate를 이동한 뒤 API가 이를 의존할 수는 있지만, SDK가 서버의 소스·설정·기동을 요구해서는 안 된다. 기존 애플리케이션 파일의 보관·삭제와 무관하게 SDK 소스 배포물과 필수 빌드 경로에서는 제외한다.
 
-## 3. 현재 코드에서 확인한 출발점
+## 3. 계획 수립 당시 코드에서 확인한 출발점
 
 1. `main`에는 이미 root workspace와 `core:typecheck`, `core:build`, scaffold CI가 있다. 이를 새로 만드는 단계는 생략한다.
-2. `@dambi/core`는 0.0.1 scaffold이며 `createCore()`는 현재 비동기로 NOT_IMPLEMENTED를 reject한다. 실제 실행 연결은 Core 단계에서 한다.
+2. 당시 `@dambi/core`는 0.0.1 scaffold였으며 `createCore()`는 비동기로 NOT_IMPLEMENTED를 reject했다. 이후 실행 연결 상태는 [Core 세부 계획](core-development-plan.md)을 따른다.
 3. `registryV2/manifests/standard/erc20/approve@1.0.0.json`은 `tokens:erc20`으로 주소를 확장한다. source manifest를 완성된 decoder bundle로 오인하면 안 된다.
 4. `unlimited-approval-deny/policy.cedar`는 실제로 `@severity("warn")`이다. 기존 판정을 먼저 재현하고, 변경할 경우 별도 정책 변경으로 다룬다.
 5. 기존 baseline은 이미 만들어진 Action을 평가한다. 새 D1은 원문 calldata부터 디코딩해 그 앞 구간까지 검증한다.
@@ -348,7 +348,7 @@ D4-2는 제품 지원 범위를 바꾸는 결정이다. 현재 고정 시험의 
 
 **Core 착수 계획(2026-09-17 수정):** 단계별 실행과 VS Code 환경은 [Core 세부 개발 계획](core-development-plan.md)을 따른다. D3·D4-1 및 DEC-07 자료를 바탕으로 C1-1의 정책 API·fixture 정합화부터 시작한다. D4-2·D4-3의 제품 범위 확정·재현 생성은 C1/C2와 fixture 기반 Core 개발의 전체 선행 조건이 아니며, 제품 snapshot 연결과 최종 배포 완료의 후속 의존 항목으로 유지한다.
 
-**현재 상태:** C1·C2-0a~c·C2a/b/c·C3-1/2/3 완료. C4 구현 및 Store 사용자 검증 완료·Decoder 시험 결과 확인 대기. C5 구현 및 타입·JS/WASM 사용자 검증 완료·Native session 시험 결과 확인 대기. 세부 상태는 [Core 계획](core-development-plan.md)을 따른다.
+**현재 상태:** Core 0.0.1의 C1~C6 기능 구현 및 사용자 검증 완료. 제품 snapshot·어댑터·최종 배포 검증은 후속 단계다. 세부 상태는 [Core 계획](core-development-plan.md)을 따른다.
 
 실제 API/RPC는 아직 연결하지 않는다. D 단계의 실제 정책·디코더와 서명된 테스트 번들, 기록된 원본 Fact를 반환하는 mock 포트로 실행부를 개발한다. 평가·암호 검증 자체는 mock하지 않는다.
 
@@ -414,12 +414,12 @@ API 연동은 현재 OpenAPI·publisher의 B wrapper와 서명 예제를 기준�
 
 **패키지가 실행되는 것만으로 완료하지 않는다. SDK 소스에서 다시 만드는 과정도 독립적이어야 한다.** 다음 검증은 선택 사항이 아닌 SDK 전환·릴리스 필수 조건이다.
 
-신규 구현할 도구:
+현재 도구와 후속 확장 범위:
 
 - `scripts/sdk/sdk-source-files.json`: SDK 소스·workspace 설정·lockfile·schema·정책/decoder 원본·필수 fixture·라이선스·도구 설정의 포함 목록. 목록 밖 원본 저장소 파일을 참조하면 실패한다.
-- `scripts/sdk/check-boundaries.mjs`: 실제 TS import, Cargo path/include, fixture 경로, 빌드·asset 생성 입력을 점검한다. 문서의 과거 코드 링크나 주석 언급과 실행 의존은 구분한다.
-- `scripts/sdk/check-source-isolation.mjs`: 아래 절차를 임시 디렉터리에서 실행한다. 원본 작업 폴더를 삭제·이동하지 않는다.
-- root의 `sdk:verify:isolated`: 위 검사를 실행하는 신규 명령. **현재 구현돼 있거나 통과한 명령이 아니다.**
+- `scripts/sdk/isolated/{Cargo.toml,package.json}`: 복사본에 그대로 적용하는 SDK 전용 workspace 설정. 원본 저장소 manifest를 검사 도중 변경하지 않는다.
+- `scripts/sdk/verify-isolated.mjs`: 소스 목록 복사·경로 경계 검사·Native/WASM/타입/runtime/check·pack dry-run을 임시 디렉터리에서 실행한다. 원본 작업 폴더를 삭제·이동하지 않는다.
+- root의 `sdk:verify:isolated`: **C6 소스 검증 경로.** 현재 검증 상태는 [Core 계획](core-development-plan.md)을 따른다. 아래 최종 제품 asset 생성·실제 npm/Cargo package 소비자·브라우저 검증은 후속 단계에서 확장한다.
 
 검증 절차:
 

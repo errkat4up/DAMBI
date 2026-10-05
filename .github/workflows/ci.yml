@@ -324,9 +324,8 @@ jobs:
           cd registry-api
           npx vitest run --root ../registryV2 scripts/__tests__/sign-bundles.test.ts
 
-  # @dambi/core — the published SDK package (packages/core, root Yarn workspace).
-  # Build its own WASM and exercise the published ESM entry with fixed local
-  # inputs, including Native/WASM session parity and private-asset packaging.
+  # SDK sources only: no extension/server/legacy WASM output or job dependency.
+  # The source-owned isolated workspace also runs Native/WASM session parity.
   core:
     runs-on: ubuntu-latest
     steps:
@@ -335,12 +334,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-      - name: Enable Yarn 4 (root workspace)
-        run: corepack enable && corepack prepare yarn@4.14.1 --activate
-
-      - name: Install (immutable)
-        run: yarn install --immutable
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -354,27 +347,8 @@ jobs:
       - name: Install wasm-pack
         run: cargo install wasm-pack --version "${WASM_PACK_VERSION}" --locked
 
-      - name: Native Core session
-        run: cargo test --locked -p dambi-core --test session
-
-      - name: Build Native session parity runner
-        run: cargo build --locked -p dambi-core --example session_runner
-
       - name: Policy wire contract fixtures
-        run: yarn contract:test
+        run: npm run contract:test
 
-      - name: Typecheck
-        run: yarn core:typecheck
-
-      - name: Build (ESM + .d.ts + private WASM)
-        run: yarn core:build
-
-      - name: Consumer type contract (built package declarations)
-        run: yarn core:test:types
-
-      - name: Built package runtime (Node + real WASM / Native parity)
-        run: yarn core:test:runtime
-
-      - name: Tarball dry-run (files / exports drift)
-        working-directory: packages/core
-        run: npm pack --dry-run
+      - name: SDK source isolation (Native + WASM + types + runtime/check)
+        run: npm run sdk:verify:isolated
