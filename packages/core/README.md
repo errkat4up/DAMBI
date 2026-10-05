@@ -15,6 +15,22 @@ ESM only, Node >= 20, no external JS runtime dependencies. The build includes it
 own JS/WASM pair under `dist/runtime/wasm`; serve those assets with the package
 when using browser modules. `@dambi/core/internal` remains reserved and empty.
 
+### Bundlers
+
+The loader finds its WASM next to its own module via `import.meta.url`.
+Production bundles emit both files as hashed assets with no extra configuration
+(verified with a Vite 6 build in headless Chromium). The **Vite dev server**,
+however, pre-bundles dependencies into a different directory, so the WASM URL
+resolves to a 404 and `createCore` rejects with `ENGINE_ERROR`. Exclude the
+package from dependency optimization:
+
+```js
+// vite.config.js
+export default {
+  optimizeDeps: { exclude: ["@dambi/core"] },
+};
+```
+
 ## Public contract and migration
 
 - Use `await createCore(config, options?)`. The instance exposes `plan`, `evaluate`,
