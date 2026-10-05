@@ -290,6 +290,18 @@ C3-3의 `validate_policy_bundle`은 서명 확인 객체만 받아 전체 Manife
 
 완료 조건: 승인된 요청 경로에서 원문 → 실제 Core → mock 외부 Fact → 판정이 연결된다. 알려진 malformed, 미지원 요청, 부분 해석, 빈 정책, 매칭 없음, 필수 Fact 누락을 각각 확인한다. **C6 인계 시점에도 그때의 fixture 범위로 확장·서버·기존 WASM 폴더 없는 SDK 소스 복사본에서 Native/WASM 빌드·시험을 통과해야 한다.** 제품 snapshot 확정과 최종 tarball 소비자 검증은 제품 완료 조건으로 남긴다. 실제 HTTP/RPC 연결은 A 단계이며 이 단계의 mock 성공과 구분한다.
 
+### D4-3 후속 — 전체 snapshot 호환성 수정
+
+0.1.0은 Core가 설치할 수 있는 Registry Decoder 전체를 npm 패키지의 고정 snapshot으로 배포한다. `registryV2/scripts/build-decoder-snapshot.ts`(`npm run build:decoder-snapshot`)가 Registry index의 모든 matched entry를 해석해 id 순 JCS artifact와 digest를 만들고, 빌드된 Core에 실제 설치해 거절된 번들을 제외·기록한다. 2026-10-05 첫 생성 결과는 799개 설치·2.51MB이며, 아래 세 항목이 기존 D4-2·D4-3 계획에 명시되지 않은 호환성 문제로 남았다.
+
+| 항목 | 대상 | 수정 위치 | 내용 |
+| --- | --- | --- | --- |
+| D4-3a | `uniswap/universal-router/execute-v2@1.0.0`, `execute-v2-no-deadline@1.0.0` | Core snapshot 검증기 | 실행부(`decode_inputs_for_opcode_entry`)는 `inputs_abi_alternatives`를 이미 사용하나 snapshot 검증기가 `unsupported field`로 거절한다. 검증기에 해당 필드와 대안 ABI 문자열 검증을 추가한다. Registry 필드는 유지한다. 0.1.0 우선 지원 범위다. |
+| D4-3b | `aave/governance/core/redeemCancellationFee@1.0.0`, `updateRepresentativesForChain@1.0.0`, `aave/umbrella/batch/claimRewardsPermit@1.0.0` | Registry 원본 manifest | `array_emit` 본문이 `per_item_body`에 있으나 실행부는 `body`를 사용한다. 원본을 `body`로 정합화한다. `claimRewardsPermit`의 `restake`는 현재 Action 모델에 없으므로 이 의미를 보존하는 Core 보완 여부를 함께 확인한다. |
+| D4-3c | 풀별 Decoder 30,484개(Curve·Balancer·Uniswap source 기반) | D4-3 snapshot 생성기 | Registry의 기존 materialization 규칙을 재사용해 풀 정보가 채워진 완성 번들을 생성기에서 조립하고 digest와 함께 Core에 전달한다. 지원 체인·풀 범위는 D4-2에서 확정한다. |
+
+완료 조건: 각 항목에서 (1) 수정된 번들이 생성기의 Core 설치 단계를 통과해 snapshot에 포함되고 `rejected_by_core`/제외 목록에서 사라진다. (2) 해당 경로의 실제 요청 원문 → Action → 판정이 실제 Core로 연결됨을 시험으로 확인한다. D4-3a는 실제 Universal Router `execute` 요청, D4-3b는 배열 요청과 `restake` 의미 보존을 포함한다. snapshot에 설치된 것만으로 요청 경로 검증을 대신하지 않는다.
+
 ## 5. 시험과 최종 완료 기준
 
 관련 코드가 바뀐 최소 회귀부터 사용자가 실행한다. Core Native 실행부·fixture 변경은 아래 Native 경로로 확인하고, WASM 실행부나 경계를 변경했을 때 해당 WASM 빌드·Node 회귀를 추가한다. JSON/문서/VS Code 설정만 바뀌면 빌드·전체 회귀를 반복하지 않는다. 시험 수를 늘리기 위해 같은 기대값을 반복하지 않는다.
@@ -391,3 +403,7 @@ C1 결과는 [계약 README](../../contracts/core-v1/README.md#결과-기록) �
 | C6 check·Fact·cache·hook | 구현 및 보완 사용자 검증 완료 |
 | API 정책 publisher 경로 수정 | API 담당 후속 작업. 실제 정책 재발행·A1 연동 전 필요 |
 | D4-2·D4-3 제품 범위·재현 생성 | 후속 의존 항목. C1 착수 조건 아님 |
+| D4-3 전체 snapshot 생성기 | 생성·재현·Core 설치 확인(799개). 패키지 포함 전 |
+| D4-3a Universal Router 검증기 보완 | 미착수 |
+| D4-3b Aave 원본 정합화·`restake` | 미착수 |
+| D4-3c 풀별 Decoder 조립 | 미착수. D4-2 범위 확정 필요 |
