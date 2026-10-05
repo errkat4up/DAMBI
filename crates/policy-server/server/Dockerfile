@@ -12,6 +12,10 @@ WORKDIR /app
 COPY --from=builder /app/crates/policy-server/target/release/policy-server /usr/local/bin/policy-server
 COPY --from=builder /app/crates/policy-server/target/release/sync_worker   /usr/local/bin/dambi-sync-worker
 COPY --from=builder /app/crates/policy-server/target/release/migrate       /usr/local/bin/policy-server-migrate
+# Host API-key minting for POST /v1/audit. Ships in the image so an operator can
+# run it as a one-off Cloud Run job with the service's own DATABASE_URL instead
+# of needing direct database access from a laptop.
+COPY --from=builder /app/crates/policy-server/target/release/issue_api_key /usr/local/bin/issue-api-key
 # A4 pair: migrations must live in the runtime image; the compile-time path is absent here.
 COPY crates/policy-server/db/migrations               /app/migrations
 ENV POLICY_DB_MIGRATIONS_DIR=/app/migrations

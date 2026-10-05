@@ -254,3 +254,13 @@ plan's D13**, after Track A's core extraction has stabilized the judgment
 path — the audit's actual subject (plan/evaluate split, port boundaries,
 3-state Verdict, zero network symbols in core) doesn't exist yet at D5.
 Commissioning early would mean re-scoping once it does.
+
+## Addendum (2026-10-05) — `@dambi/core` ships ESM only
+
+Decided with the user: no CommonJS build. This supersedes the 2026-09-03 public
+type contract's "ESM/CJS dual build" verification line and backlog item 13's
+"ESM/CJS 이중 빌드". Reasons: the package now carries its own WASM and the loader
+resolves it with `import.meta.url`, which CommonJS lacks (a CJS build would need
+a separate loader); v0.1 hosts are browser wallets, bundlers and ESM Node >= 20,
+all of which consume ESM. CommonJS callers can still `await import("@dambi/core")`.
+Revisit only if a concrete integrator is blocked on `require`.

@@ -9,6 +9,10 @@ migration note.
 ## [Unreleased]
 
 ### Changed
+- Module format is **ESM only**, by decision (2026-10-05): no CommonJS build will
+  ship. The WASM loader locates its binary via `import.meta.url`, which has no
+  CommonJS equivalent, and v0.1 targets browser wallets and ESM Node (>= 20).
+  `require("@dambi/core")` is unsupported; CommonJS hosts use `await import()`.
 - C1 public contract: `await createCore(config, options?)`, policy/Fact I/O ports,
   fixed Decoder snapshot and local trust/limits configuration. `clock` moves from
   `ports` to `CoreConfig`. Initialization still rejects with `CoreError` code
