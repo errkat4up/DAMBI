@@ -21,6 +21,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./decoders": {
+      "types": "./dist/decoders.d.ts",
+      "import": "./dist/decoders.js"
+    },
     "./internal": {
       "types": "./dist/internal.d.ts",
       "import": "./dist/internal.js"
@@ -42,7 +46,7 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && node ../../scripts/sdk/build-wasm.mjs",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && node ../../scripts/sdk/build-decoders.mjs && node ../../scripts/sdk/build-wasm.mjs",
     "test:types": "tsc -p tsconfig.consumer.json",
     "test:runtime": "node --test tests/runtime.test.mjs tests/check.test.mjs",
     "pack:check": "npm pack --dry-run"
