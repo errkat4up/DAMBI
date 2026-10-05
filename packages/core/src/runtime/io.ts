@@ -63,7 +63,7 @@ export function startOperation<T>(
     timer = setTimeout(() => {
       if (settled) return;
       if (remaining > delay) arm(remaining - delay);
-      else cancel(new CoreError("TIMEOUT", "The policy operation timed out."));
+      else cancel(new CoreError("TIMEOUT", "The Core operation timed out."));
     }, delay);
   };
   if (!settled) arm(timeoutMs);

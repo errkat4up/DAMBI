@@ -16,7 +16,10 @@ export interface Ports {
   readonly fact: FactProvider;
 }
 
-/** Host notifications. Hook failures must not change a verdict or skip validation. */
+/**
+ * Host notifications receive immutable copies. Promises are not awaited;
+ * rejected/thrown hooks report hook_error without changing the verdict.
+ */
 export interface CoreHooks {
   onPending?(req: CheckRequest | UnsupportedRequest): void | Promise<void>;
   /** Receives the same snapshot-bound metadata as the returned verdict. */
@@ -60,7 +63,7 @@ export interface DambiCore {
 
 /**
  * Returns only a fully authenticated and initialized instance. Failures release
- * partial state; plan/evaluate are available while check orchestration awaits C6.
+ * partial state. check coordinates plan, Fact fetch/cache and evaluation.
  */
 export async function createCore(
   config: CoreConfig,

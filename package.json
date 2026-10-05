@@ -12,6 +12,7 @@
     "core:test:types": "yarn workspace @dambi/core test:types",
     "core:test:runtime": "yarn workspace @dambi/core test:runtime",
     "core:test:fixtures": "node scripts/sdk/test-fixtures.mjs",
+    "sdk:verify:isolated": "node scripts/sdk/verify-isolated.mjs",
     "core:pack": "yarn workspace @dambi/core pack:check",
     "policy:test": "node --test fixtures/sdk/policy-bundle.test.mjs fixtures/sdk/day1-policy.test.mjs",
     "contract:test": "node --test contracts/core-v1/contract.test.mjs",

@@ -1,14 +1,14 @@
 # Dambi Core 세부 개발 계획
 
-작성일: 2026-09-14. 수정일: 2026-09-28. 상위 계획은 [Decoder·정책 → Core → Adapters](decoder-core-adapters-plan.md)이며, 이 문서는 Core의 C1~C6 실행 순서와 VS Code 작업 기준을 구체화한다. **C1·C2-0a~c·C2a/b/c·C3-1/2/3 완료. C4 구현 및 Store 사용자 검증 완료·Decoder 시험 결과 확인 대기. C5 구현 및 타입·JS/WASM 사용자 검증 완료·Native session 시험 결과 확인 대기.**
+작성일: 2026-09-14. 수정일: 2026-10-05. 상위 계획은 [Decoder·정책 → Core → Adapters](decoder-core-adapters-plan.md)이며, 이 문서는 Core의 C1~C6 실행 순서와 VS Code 작업 기준을 구체화한다. **Core 0.0.1의 C1~C6 기능 구현 및 사용자 검증 완료. 제품 snapshot·어댑터·최종 배포 검증은 후속 단계다.**
 
 문서 상태: **v0.1 작업 초안**. 구현·검증에서 확인한 의존성과 비용에 따라 단계 분할·순서·설계를 수정할 수 있다. 이미 검증한 동작과 명시적으로 합의한 계약, 아직 제안인 API·제품 범위를 구분한다. 계획의 추정을 구현 사실로 취급하거나 계획을 맞추기 위해 불필요한 절차를 추가하지 않는다. 이 문서 버전은 현재 SDK 패키지 버전 `0.0.1`과 별개다.
 
 ## 1. 출발점과 착수 범위
 
-- 현재 작업 브랜치는 `feat/core`, 기준 커밋은 `3f0ad6b`이며 로컬 `main`도 같은 커밋이다. 2026-09-28 GitHub 비교 API로 원격 `main`도 동일함을 재확인했다. `feat/decoder`는 `4803a2a`다. Core 브랜치 준비는 끝났으며 이 문서의 API 대조 기준도 `3f0ad6b`다.
+- Core 작업 브랜치는 `feat/core`이며 이 문서의 최초 API 대조 기준은 `3f0ad6b`다. C5까지의 `main` 반영 기준은 `b58e643`이며, 이후 C6 구현과 검증 상태는 아래 단계 상태를 따른다.
 - [Decoder 인계](../../fixtures/decoder-policy/README.md#dec-07--decoder-인계), [D3 정책 검증](../../fixtures/sdk/README.md#결과-기록), [D4-1 계약 fixture 검증](../../contracts/core-v1/README.md#결과-기록)은 완료됐다. 기존 통과 수와 로그는 해당 기록을 따르며 여기 복제하지 않는다.
-- `packages/core` 0.0.1은 C5에서 `createCore/plan/evaluate/refreshPolicies/dispose`를 SDK 전용 WASM과 연결했다. `check`·Fact 자동 조회·cache·hook은 C6에 남아 있다. 과거 `backup/core-sdk-b219617`의 코드·시험 결과를 현재 구현으로 사용하지 않는다.
+- `packages/core` 0.0.1은 C5에서 `createCore/plan/evaluate/refreshPolicies/dispose`를 SDK 전용 WASM과 연결했고 C6에서 `check`·Fact 자동 조회·cache·hook을 구현했다. 검증 범위와 보완 변경의 상태는 [패키지 개발 안내](../../packages/core/README.md#development-checks)를 따른다. 과거 `backup/core-sdk-b219617`의 코드·시험 결과를 현재 구현으로 사용하지 않는다.
 - D4-1 완료는 **당시 SDK 초안의 fixture 검증**이다. C1-1에서 현재 `GET /v1/bundle`의 payload 필드·sequence 타입·wrapper에 맞춘 변경의 사용자 실행 검증을 마쳤다. 실제 운영 API 통합 검증은 후속이다. 기존 통과 기록을 수정된 계약의 검증 결과로 재사용하지 않는다.
 - [D4-2 제품 선택안](../../contracts/core-v1/snapshot-selection.proposal.json)은 미확정이다. D4-2·D4-3은 C1/C2 및 고정 fixture를 사용하는 C3~C6 개발의 전체 선행 조건이 아니다. 제품 범위·제품 snapshot 재현성·최종 배포 완료 표시는 확정된 D4-2·D4-3 결과가 있어야 한다.
 
@@ -84,7 +84,7 @@ Core 내부의 snapshot·계획 수명·cache와 호스트의 영구 저장·감
 
 ### 3.2 생성·포트·수명주기
 
-C1에서 반영한 공개 진입점이다. 아래 타입은 빌드 후 공개 패키지에서 import할 수 있으며, C5 실행부를 연결했다. `check`는 C6 구현 전까지 `NOT_IMPLEMENTED`로 reject한다.
+C1에서 반영한 공개 진입점이다. 아래 타입은 빌드 후 공개 패키지에서 import할 수 있으며 C5 실행부와 C6 `check` 조율을 연결했다.
 
 ```ts
 declare function createCore(config: CoreConfig, options?: CallOptions): Promise<DambiCore>;
@@ -302,6 +302,7 @@ C3-3의 `validate_policy_bundle`은 서명 확인 객체만 받아 전체 Manife
 | `npm run core:build` | TS/선언 파일과 SDK 전용 WASM/glue 생성. wasm-pack·wasm32 target 필요 |
 | `npm run core:test:types` | build 후 공개 `.d.ts` 소비자와 wire 타입 검사 |
 | `npm run core:test:runtime` | Core·session runner 빌드 후 실제 WASM/Native 판정 일치·계획/Fact/갱신 수명 검사 |
+| `npm run sdk:verify:isolated` | SDK 소스 복사본에서 Native session·runner·자체 WASM/TS·타입·runtime/check 검증. 확장·서버·기존 WASM 소스와 산출물 제외 |
 | `npm run core:pack` | 기존 dist의 pack dry-run. 실제 설치 검증이 아니며 build 이후 사용 |
 | `npm run contract:test` | C1-1 구조·Node 참조 서명 사례. 사용자 검증 완료, 관련 변경 시 실행. Core 암호 구현 검증과 구분 |
 | `npm run policy:test` | D3 실제 기존 WASM 정책 검사 |
@@ -332,7 +333,7 @@ C3-3의 `validate_policy_bundle`은 서명 확인 객체만 받아 전체 Manife
 
 **C4 최소 검증:** 기존 SHA-256 의존성의 Core 직접 참조를 `cargo update --workspace --offline`로 반영한 뒤 `cargo test --locked -p dambi-core --test decoder_snapshot --test snapshot_store`를 실행한다. C3의 검증 로직과 기존 Decoder 실행부는 재사용한다.
 
-**C5 최소 검증:** 신규 WASM crate를 `cargo update --workspace --offline`로 반영한 뒤 session 시험 → session runner 빌드 → `core:build` → `core:test:types` → `core:test:runtime` 순서로 실행한다. 실제 명령은 [패키지 개발 안내](../../packages/core/README.md#development-checks)에 모은다. C1 scaffold 시험은 실제 runtime 시험으로 교체했다. `sdk:verify:isolated`는 아직 미구현이며 C6 인계 때 연결한다.
+**C5/C6 검증:** session 시험 → session runner 빌드 → `core:build` → `core:test:types` → `core:test:runtime` 순서다. C6 인계의 독립 소스 검증은 `sdk:verify:isolated`로 같은 경로를 실행한다. 실제 명령은 [패키지 개발 안내](../../packages/core/README.md#development-checks)에 모은다. C1 scaffold 시험은 실제 runtime/check 시험으로 교체했다.
 
 Core 기능 구현 완료와 제품 출시 완료를 구분한다. 최종 SDK는 상위 계획 [§7.1](decoder-core-adapters-plan.md#71-필수-완료-조건-sdk-소스만으로-빌드시험패키징)의 SDK 소스 복사본에서 빌드·시험·패키징해야 한다. 확장/서버/기존 WASM 폴더 없이 재현하고, 실제 tarball의 ESM/CJS·타입·WASM·브라우저 소비를 확인한다. 최종 제품 범위에는 D4-2·D4-3 결과가 필요하다. 크기 목표와 실제 API/발행 검증도 상위 계획을 따른다.
 
@@ -385,8 +386,8 @@ C1 결과는 [계약 README](../../contracts/core-v1/README.md#결과-기록) �
 | C3-1 parser | 사용자 검증 완료 |
 | C3-2 서명 | 사용자 검증 완료 |
 | C3-3 의미 | 사용자 검증 완료 |
-| C4 snapshot·Store | 구현 및 Store 사용자 검증 완료·Decoder 시험 결과 확인 대기 |
-| C5 plan/evaluate·SDK WASM | 구현 및 타입·JS/WASM 사용자 검증 완료·Native session 시험 결과 확인 대기 |
-| C6 check·Fact·cache·hook | 미착수 |
+| C4 snapshot·Store | 구현 및 Store·C6 통합 경로 검증 완료 |
+| C5 plan/evaluate·SDK WASM | 구현 및 Native·타입·JS/WASM 사용자 검증 완료 |
+| C6 check·Fact·cache·hook | 구현 및 보완 사용자 검증 완료 |
 | API 정책 publisher 경로 수정 | API 담당 후속 작업. 실제 정책 재발행·A1 연동 전 필요 |
 | D4-2·D4-3 제품 범위·재현 생성 | 후속 의존 항목. C1 착수 조건 아님 |

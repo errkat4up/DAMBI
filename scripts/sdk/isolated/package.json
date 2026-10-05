@@ -1,0 +1,14 @@
+{
+  "name": "dambi",
+  "private": true,
+  "license": "Apache-2.0",
+  "packageManager": "yarn@4.14.1",
+  "workspaces": ["packages/core"],
+  "scripts": {
+    "core:typecheck": "yarn workspace @dambi/core typecheck",
+    "core:build": "yarn workspace @dambi/core build",
+    "core:test:types": "yarn workspace @dambi/core test:types",
+    "core:test:runtime": "yarn workspace @dambi/core test:runtime",
+    "core:pack": "yarn workspace @dambi/core pack:check"
+  }
+}

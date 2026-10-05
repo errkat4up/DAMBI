@@ -1,21 +1,31 @@
 import type { CoreConfig, DambiCore } from "../core.js";
 import type { CoreLimits } from "../types/config.js";
-import { CoreError } from "../types/errors.js";
+import { CoreError, type CoreDiagnostic, type CoreDiagnosticCode } from "../types/errors.js";
 import type { CallOptions } from "../types/options.js";
-import type { CorePlan, FactBatch } from "../types/plan.js";
+import type { CorePlan, FactBatch, PlannedCall } from "../types/plan.js";
 import type { CheckRequest, UnsupportedRequest } from "../types/request.js";
-import type { Verdict } from "../types/verdict.js";
+import type { Verdict, VerdictMetadata } from "../types/verdict.js";
 import type { SignedPolicyBundle } from "../ports/policy.js";
+import type { FactResult } from "../ports/fact.js";
 import { invoke, nativeError, release, type NativeCore, type NativePlan } from "./bridge.js";
 import { checkAbort, signalFrom, startOperation, type PendingOperation } from "./io.js";
 import { copyJson, field, freezeTree, record, requestJson, textBytes } from "./json.js";
 import { loadWasm } from "./wasm-loader.js";
+import { FactCache } from "./fact-cache.js";
+import { captureHooks, type HookDispatcher } from "./hooks.js";
 
 interface OwnedConfig {
   readonly nativeJson: string;
   readonly limits: CoreLimits;
   readonly now: () => number;
   readonly fetchPolicy: (options: CallOptions) => Promise<SignedPolicyBundle>;
+  readonly fetchFacts: (calls: readonly PlannedCall[], options: CallOptions & { planId: string }) => Promise<FactBatch>;
+  readonly hooks: HookDispatcher;
+  readonly enforcement: Verdict["enforcement"];
+}
+
+class FactFetchFailure extends CoreError {
+  constructor() { super("ENGINE_ERROR", "The Fact provider could not return a batch."); }
 }
 
 const limitNames = [
@@ -75,12 +85,14 @@ function ownConfig(input: CoreConfig): OwnedConfig {
     const nativeJson = JSON.stringify(copyJson(nativeConfig, "INVALID_CONFIG", Number.MAX_SAFE_INTEGER));
     const ports = record(field(source, "ports", true, "INVALID_CONFIG"), "INVALID_CONFIG");
     const fetch = method(field(ports, "policy", true, "INVALID_CONFIG"), "fetch");
-    method(field(ports, "fact", true, "INVALID_CONFIG"), "fetch");
+    const fetchFacts = method(field(ports, "fact", true, "INVALID_CONFIG"), "fetch");
     const clock = field(source, "clock", false, "INVALID_CONFIG");
     const getNow = clock === undefined ? Date.now : method(clock, "now");
     return {
       nativeJson,
       limits: Object.freeze(limits),
+      hooks: captureHooks(field(source, "hooks", false, "INVALID_CONFIG")),
+      enforcement: nativeConfig.enforcement as Verdict["enforcement"],
       now: () => {
         let now: unknown;
         try { now = getNow(); } catch { throw new CoreError("INVALID_CONFIG", "The configured clock failed."); }
@@ -92,6 +104,10 @@ function ownConfig(input: CoreConfig): OwnedConfig {
       fetchPolicy: async (options) => {
         try { return await fetch(options) as SignedPolicyBundle; }
         catch { throw new CoreError("POLICY_FETCH_FAILED", "The policy source could not return a bundle."); }
+      },
+      fetchFacts: async (calls, options) => {
+        try { return await fetchFacts(calls, options) as FactBatch; }
+        catch { throw new FactFetchFailure(); }
       },
     };
   } catch (error) {
@@ -122,13 +138,81 @@ function policyJson(input: SignedPolicyBundle, maxBytes: number): string {
 interface HandleState {
   readonly planId: string;
   readonly expiresAt: number;
+  readonly createdAt: number;
+  readonly metadata: NativePlan["metadata"];
   status: "active" | "consumed" | "expired";
+}
+
+function mergeFacts(
+  plan: CorePlan, requested: readonly PlannedCall[], cached: Record<string, FactResult>, received: unknown,
+): unknown {
+  if (typeof received !== "object" || received === null || Array.isArray(received)) return received;
+  const source = received as Record<string, unknown>;
+  if (source.planId !== plan.planId || typeof source.results !== "object"
+      || source.results === null || Array.isArray(source.results)) return received;
+  const returned = source.results as Record<string, unknown>;
+  const requestedIds = new Set(requested.map((call) => call.callId));
+  // A response cannot overwrite a cache hit for a call that was not fetched.
+  for (const call of plan.calls) {
+    if (!requestedIds.has(call.callId) && Object.hasOwn(returned, call.callId)) {
+      throw new CoreError("INVALID_REQUEST", "Fact provider returned a call that was not requested.");
+    }
+  }
+  // Preserve every provider field/unknown call for authoritative Native checks.
+  return { ...source, results: Object.assign(Object.create(null), cached, returned) };
+}
+
+function checkFailure(error: unknown): string {
+  if (error instanceof FactFetchFailure) return "fact_fetch_failed";
+  if (error instanceof CoreError) {
+    switch (error.code) {
+      case "ABORTED": return "aborted";
+      case "TIMEOUT": return "timeout";
+      case "LIMIT_EXCEEDED": return "limit_exceeded";
+      case "INVALID_REQUEST": return "invalid_fact";
+    }
+  }
+  return "engine_error";
+}
+
+function failedVerdict(error: unknown, enforcement: Verdict["enforcement"], metadata?: VerdictMetadata): Verdict {
+  const failure = error instanceof CoreError ? error : nativeError(error);
+  let code: CoreDiagnosticCode = "engine_error";
+  let reason: "invalid_request" | "unsupported_request" | "untrusted_snapshot" | "engine_unavailable" = "engine_unavailable";
+  switch (failure.code) {
+    case "UNSUPPORTED_REQUEST": code = "unsupported_request"; reason = "unsupported_request"; break;
+    case "INVALID_REQUEST": code = "invalid_request"; reason = "invalid_request"; break;
+    case "ABORTED": code = "aborted"; break;
+    case "TIMEOUT": case "PLAN_EXPIRED": code = "timeout"; break;
+    case "LIMIT_EXCEEDED": code = "limit_exceeded"; break;
+    case "POLICY_EXPIRED": case "INVALID_SIGNATURE": case "INVALID_POLICY_BUNDLE":
+      code = "trust_expired"; reason = "untrusted_snapshot"; break;
+  }
+  const unsupported = code === "unsupported_request";
+  const auditMetadata: VerdictMetadata = metadata ?? { status: "unavailable", reason };
+  const diagnostics: CoreDiagnostic[] = [{ code, message: failure.message }];
+  if (auditMetadata.status === "unavailable") {
+    diagnostics.push({
+      code: "audit_metadata_unavailable",
+      message: `Audit metadata is unavailable: ${auditMetadata.reason}.`,
+    });
+  }
+  return {
+    decision: unsupported ? "warn" : "deny", source: unsupported ? "evaluated" : "fail_closed", enforcement,
+    reasons: [{ policyId: `__engine::${code}`, reason: failure.message,
+      severity: unsupported ? "warn" : "deny", origin: "engine_error" }],
+    facts: [], diagnostics,
+    metadata: auditMetadata,
+  };
 }
 
 class CoreRuntime implements DambiCore {
   #disposed = false;
   readonly #handles = new WeakMap<object, HandleState>();
   #refresh: PendingOperation<string> | undefined;
+  readonly #checks = new Set<PendingOperation<unknown>>();
+  readonly #cache: FactCache;
+  #cacheEpoch = 0;
 
   readonly #native: NativeCore;
   readonly #config: OwnedConfig;
@@ -136,6 +220,7 @@ class CoreRuntime implements DambiCore {
   constructor(native: NativeCore, config: OwnedConfig) {
     this.#native = native;
     this.#config = config;
+    this.#cache = new FactCache(config.limits);
   }
 
   #live(): void {
@@ -147,6 +232,10 @@ class CoreRuntime implements DambiCore {
     const signal = signalFrom(options);
     checkAbort(signal);
     const copied = requestJson(request, this.#config.limits.maxRequestBytes);
+    return this.#plan(copied, signal);
+  }
+
+  #plan(copied: string, signal?: AbortSignal): CorePlan {
     const now = this.#config.now();
     // Host input proxies and clocks may reenter the instance.
     this.#live();
@@ -154,11 +243,16 @@ class CoreRuntime implements DambiCore {
     const data = invoke<NativePlan>(() => this.#native.plan(copied, now));
     if (typeof data !== "object" || data === null || typeof data.planId !== "string"
         || !data.planId || !Array.isArray(data.calls)
-        || !Number.isSafeInteger(data.expiresAt) || data.expiresAt <= now) {
+        || !Number.isSafeInteger(data.expiresAt) || data.expiresAt <= now
+        || data.metadata?.status !== "available" || !/^0x[0-9a-f]{64}$/.test(data.metadata.requestDigest)
+        || typeof data.metadata.policyVersion !== "string" || typeof data.metadata.engineVersion !== "string") {
       throw new CoreError("ENGINE_ERROR", "The Core engine returned an invalid plan.");
     }
-    const handle = freezeTree(data) as unknown as CorePlan;
-    this.#handles.set(handle, { planId: data.planId, expiresAt: data.expiresAt, status: "active" });
+    const handle = freezeTree({ planId: data.planId, calls: data.calls, expiresAt: data.expiresAt }) as unknown as CorePlan;
+    // Keep only the engine-issued audit fields after Native evicts an expired
+    // plan. They are private and can only annotate a fail-closed check result.
+    this.#handles.set(handle, { planId: data.planId, expiresAt: data.expiresAt, createdAt: now,
+      metadata: freezeTree(data.metadata), status: "active" });
     return handle;
   }
 
@@ -198,7 +292,7 @@ class CoreRuntime implements DambiCore {
         ...verdict.diagnostics.filter((diagnostic) => diagnostic.code !== code),
       ];
     }
-    return verdict;
+    return this.#publish(verdict);
   }
 
   async refreshPolicies(options?: CallOptions): Promise<void> {
@@ -226,6 +320,8 @@ class CoreRuntime implements DambiCore {
       this.#live();
       checkAbort(signal);
       invoke<unknown>(() => this.#native.commit_refresh(ticket, policy, now));
+      this.#cacheEpoch++;
+      this.#cache.clear();
     } finally {
       if (this.#refresh === operation) this.#refresh = undefined;
       if (!this.#disposed) {
@@ -235,9 +331,102 @@ class CoreRuntime implements DambiCore {
     }
   }
 
-  async check(_request: CheckRequest | UnsupportedRequest, _options?: CallOptions): Promise<Verdict> {
+  async check(request: CheckRequest | UnsupportedRequest, options?: CallOptions): Promise<Verdict> {
     this.#live();
-    throw new CoreError("NOT_IMPLEMENTED", "check() orchestration is introduced in C6; use plan() and evaluate().");
+    let plan: CorePlan | undefined;
+    let batch: unknown;
+    let verdict: Verdict;
+    try {
+      const signal = signalFrom(options);
+      checkAbort(signal);
+      const copied = requestJson(request, this.#config.limits.maxRequestBytes, true);
+      const ownedRequest = JSON.parse(copied) as CheckRequest | UnsupportedRequest;
+      this.#config.hooks.pending(ownedRequest);
+      this.#live();
+      checkAbort(signal);
+      plan = this.#plan(copied, signal);
+      const epoch = this.#cacheEpoch;
+      // Supported native routes always have an explicit chainId. The copied
+      // request, rather than host mutations during fetch, defines cache scope.
+      const chain = (ownedRequest as { chainId: string }).chainId;
+      const results: Record<string, FactResult> = Object.create(null) as Record<string, FactResult>;
+      const missing: PlannedCall[] = [];
+      const now = this.#config.now();
+      this.#live();
+      for (const call of plan.calls) {
+        const cached = this.#cache.get(chain, call, now);
+        if (cached) results[call.callId] = cached;
+        else missing.push(call);
+      }
+      batch = { planId: plan.planId, results };
+      if (missing.length) {
+        const planId = plan.planId;
+        const operation = startOperation(async (internal) => {
+          const received = await this.#config.fetchFacts(freezeTree(missing), { planId, signal: internal });
+          checkAbort(internal);
+          return copyJson(received, "INVALID_REQUEST", this.#config.limits.maxFactBytes);
+        }, Math.min(this.#config.limits.factTimeoutMs, Math.max(1, plan.expiresAt - now)), signal);
+        this.#checks.add(operation);
+        let received: unknown;
+        try { received = await operation.promise; }
+        finally { this.#checks.delete(operation); }
+        this.#live();
+        checkAbort(signal);
+        batch = mergeFacts(plan, missing, results, received);
+      }
+      checkAbort(signal);
+      const evaluatedAt = this.#config.now();
+      this.#live();
+      checkAbort(signal);
+      // Enforce the combined batch limit too, including cache hits.
+      batch = copyJson(batch, "INVALID_REQUEST", this.#config.limits.maxFactBytes);
+      verdict = this.#evaluateCheck(plan, batch, evaluatedAt, "");
+      if (verdict.source === "evaluated" && epoch === this.#cacheEpoch) {
+        this.#cache.put(chain, plan.calls, batch as FactBatch, evaluatedAt);
+      }
+    } catch (error) {
+      this.#live(); // A disposed instance rejects, including in-flight checks.
+      const handle = plan && this.#handles.get(plan);
+      if (plan && handle?.status === "active") {
+        let now = handle.createdAt;
+        try { now = this.#config.now(); } catch { /* Fail closed using pinned audit data. */ }
+        this.#live();
+        try {
+          verdict = this.#evaluateCheck(plan, batch ?? { planId: plan.planId, results: {} }, now, checkFailure(error));
+        } catch (finishError) {
+          this.#live();
+          verdict = failedVerdict(finishError, this.#config.enforcement, handle.metadata);
+        }
+      } else {
+        verdict = failedVerdict(error, this.#config.enforcement, handle?.metadata);
+      }
+    }
+    return this.#publish(verdict);
+  }
+
+  #evaluateCheck(plan: CorePlan, batch: unknown, now: number, failure: string): Verdict {
+    const handle = this.#handles.get(plan);
+    if (!handle || handle.status !== "active") throw new CoreError("INVALID_PLAN", "Check plan is no longer active.");
+    handle.status = "consumed";
+    try {
+      return invoke<Verdict>(() => this.#native.evaluate_check(handle.planId, JSON.stringify(batch), now, failure));
+    } catch (error) {
+      // Native's bounded tombstones may already have aged out as other plans
+      // begin. The private handle still proves this check's original deadline.
+      if (now >= handle.expiresAt && error instanceof CoreError
+          && (error.code === "INVALID_PLAN" || error.code === "PLAN_EXPIRED")) {
+        return failedVerdict(new CoreError("PLAN_EXPIRED", "The check plan TTL has expired."),
+          this.#config.enforcement, handle.metadata);
+      }
+      throw error;
+    }
+  }
+
+  #publish(verdict: Verdict): Verdict {
+    for (const event of verdict.diagnostics) this.#config.hooks.diagnostic(event);
+    this.#config.hooks.verdict(verdict);
+    if (verdict.decision === "warn") this.#config.hooks.awaitingUser();
+    return verdict;
   }
 
   dispose(): void {
@@ -245,6 +434,9 @@ class CoreRuntime implements DambiCore {
     this.#disposed = true;
     this.#refresh?.cancel(new CoreError("DISPOSED", "The Core instance has been disposed."));
     this.#refresh = undefined;
+    for (const operation of this.#checks) operation.cancel(new CoreError("DISPOSED", "The Core instance has been disposed."));
+    this.#checks.clear();
+    this.#cache.clear();
     release(this.#native);
   }
 }

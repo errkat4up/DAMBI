@@ -53,6 +53,19 @@ impl WasmCore {
         )
     }
 
+    pub fn evaluate_check(
+        &mut self,
+        plan_id: &str,
+        facts_json: &str,
+        now_ms: f64,
+        failure: &str,
+    ) -> String {
+        envelope(integer(now_ms, "nowMs").and_then(|now| {
+            self.session
+                .evaluate_check(plan_id, facts_json, now, failure)
+        }))
+    }
+
     pub fn begin_refresh(&mut self) -> String {
         envelope(self.session.begin_refresh().and_then(|ticket| {
             if ticket > MAX_SAFE_INTEGER {

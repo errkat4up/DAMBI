@@ -135,7 +135,17 @@
         },
         "group": "test",
         "problemMatcher": [],
-        "detail": "SDK와 session runner 빌드 후 실제 WASM·Native 판정 일치, 계획 수명, Fact와 갱신 경계를 검사합니다."
+        "detail": "SDK와 session runner 빌드 후 실제 WASM·Native 판정 일치, 계획 수명, Fact와 갱신 경계 및 check 조율을 검사합니다."
+      },
+      {
+        "label": "Core: SDK 소스 독립 검증",
+        "type": "process",
+        "command": "node",
+        "args": ["${workspaceFolder:DAMBI}/scripts/sdk/verify-isolated.mjs"],
+        "options": { "cwd": "${workspaceFolder:DAMBI}" },
+        "group": "test",
+        "problemMatcher": [],
+        "detail": "SDK 소스만 임시 복사하여 의존성 설치, Native session/runner, 자체 WASM·TS 빌드와 타입·runtime/check 회귀를 실행합니다. Rust 1.95.0·wasm32 target·wasm-pack 0.14.0·Node 20 이상이 필요합니다. 최종 tarball·브라우저 소비자 검증은 별도입니다."
       },
       {
         "label": "Core: 패키지 내용 확인 (dry-run)",
