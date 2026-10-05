@@ -16,7 +16,8 @@
     "gen-signing-key": "tsx scripts/gen-signing-key.ts",
     "typecheck": "tsc --noEmit",
     "serve": "python3 -m http.server 8000",
-    "publish:policy-bundle": "tsx scripts/publish-policy-bundle.ts"
+    "publish:policy-bundle": "tsx scripts/publish-policy-bundle.ts",
+    "build:decoder-snapshot": "tsx scripts/build-decoder-snapshot.ts"
   },
   "devDependencies": {
     "@google-cloud/kms": "^5.5.1",
