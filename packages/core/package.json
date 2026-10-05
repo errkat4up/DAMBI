@@ -1,6 +1,6 @@
 {
   "name": "@dambi/core",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Dambi pre-sign policy core with a package-owned Rust/WASM runtime",
   "license": "Apache-2.0",
   "repository": {

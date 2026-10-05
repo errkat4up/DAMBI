@@ -6,7 +6,7 @@ All notable changes to `@dambi/core` are recorded here. The format follows
 break the public interface and will say so under **Changed**/**Removed** with a
 migration note.
 
-## [Unreleased]
+## [0.1.0] - 2026-10-05
 
 ### Changed
 - Module format is **ESM only**, by decision (2026-10-05): no CommonJS build will
