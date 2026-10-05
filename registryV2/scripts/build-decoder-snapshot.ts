@@ -7,8 +7,12 @@
  *         entry, inline (`bundle`) or 3-ref (`bundle_ref` → bundles/<sha>.json).
  *         Each resolved bundle is re-checked against its index `bundle_sha256`
  *         (JCS), the same rule as fixtures/decoder-policy/helpers/build-registry.mjs.
- * Output: decoder-snapshots/<name>/snapshot.json — the artifact, exact bytes
- *         decoder-snapshots/<name>/snapshot.meta.json — digest, counts, exclusions
+ * Output: packages/core/decoder-snapshots/<name>/snapshot.json — the artifact, exact bytes
+ *         packages/core/decoder-snapshots/<name>/snapshot.meta.json — digest, counts, exclusions
+ *         The output lives in the SDK package, not here: the SDK source isolation
+ *         check (scripts/sdk/verify-isolated.mjs) forbids reading registryV2/, and
+ *         scripts/sdk/build-decoders.mjs embeds this committed copy as
+ *         `@dambi/core/decoders`.
  *
  * The artifact is RFC 8785 JCS text of `{schema_version: 1, bundles}` with bundles
  * sorted by id, so the same Registry input always yields the same bytes and the
@@ -77,7 +81,7 @@ export interface BuildOptions {
   name?: string;
   /** Registry root holding index/ and bundles/ — defaults to registryV2/ */
   registryRoot?: string;
-  /** directory holding <name>/ — defaults to registryV2/decoder-snapshots */
+  /** directory holding <name>/ — defaults to packages/core/decoder-snapshots */
   outRoot?: string;
   dryRun?: boolean;
   /** load the result into @dambi/core and drop bundles it rejects (default true) */
@@ -308,7 +312,7 @@ export async function buildDecoderSnapshot(opts: BuildOptions = {}): Promise<Bui
 
   const written: string[] = [];
   if (!opts.dryRun) {
-    const dir = join(opts.outRoot ?? join(REGISTRY_ROOT, "decoder-snapshots"), name);
+    const dir = join(opts.outRoot ?? join(REPO_ROOT, "packages", "core", "decoder-snapshots"), name);
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "snapshot.json"), artifact, "utf8");
     writeFileSync(join(dir, "snapshot.meta.json"), `${JSON.stringify(meta, null, 2)}\n`, "utf8");
