@@ -1,5 +1,5 @@
 import { CoreError, type CoreErrorCode } from "../types/errors.js";
-import type { CheckRequest } from "../types/request.js";
+import type { CheckRequest, UnsupportedRequest } from "../types/request.js";
 
 type DataRecord = Record<string, unknown>;
 
@@ -148,7 +148,7 @@ export function copyJson(value: unknown, code: CoreErrorCode, maxBytes: number):
   }
 }
 
-export function requestJson(input: CheckRequest, maxBytes: number): string {
+export function requestJson(input: CheckRequest | UnsupportedRequest, maxBytes: number, allowUnknown = false): string {
   try {
     const source = record(input, "INVALID_REQUEST");
     const kind = field(source, "kind", true, "INVALID_REQUEST");
@@ -160,7 +160,9 @@ export function requestJson(input: CheckRequest, maxBytes: number): string {
       case "typed_signature": required = ["chainId", "from", "typedData"]; optional = []; break;
       case "untyped_signature": required = ["message"]; optional = ["from"]; break;
       case "venue_order": required = ["from", "order"]; optional = ["chainId"]; break;
-      default: throw new CoreError("UNSUPPORTED_REQUEST", "This request kind is not supported.");
+      default:
+        if (!allowUnknown) throw new CoreError("UNSUPPORTED_REQUEST", "This request kind is not supported.");
+        required = []; optional = []; break;
     }
     const selected: DataRecord = Object.create(null) as DataRecord;
     selected.kind = kind;

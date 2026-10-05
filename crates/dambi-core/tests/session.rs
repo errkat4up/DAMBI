@@ -483,6 +483,47 @@ fn pending_plan_limit_releases_expired_plans_and_input_limits_fail_closed() {
 }
 
 #[test]
+fn check_failures_consume_plans_and_keep_pinned_metadata_and_policy_reasons() {
+    let mut session = session();
+    for failure in ["aborted", "timeout", "fact_fetch_failed"] {
+        let plan = session
+            .plan(&request(&"f".repeat(64)).to_string(), NOW)
+            .unwrap();
+        let id = plan["planId"].as_str().unwrap();
+        let result = session
+            .evaluate_check(id, &empty_facts(&plan), NOW, failure)
+            .unwrap();
+        assert_eq!(result["decision"], "deny");
+        assert_eq!(result["source"], "fail_closed");
+        assert_eq!(result["metadata"]["status"], "available");
+        assert_eq!(result["metadata"]["policyVersion"], "42");
+        assert!(has_reason(&result, "unlimited-approval-deny"));
+        assert!(diagnostic(&result, failure));
+        error_code(
+            session.evaluate(id, &empty_facts(&plan), NOW),
+            "PLAN_CONSUMED",
+        );
+    }
+    let plan = session.plan(&request("7").to_string(), NOW).unwrap();
+    let id = plan["planId"].as_str().unwrap();
+    error_code(
+        session.evaluate_check(id, &empty_facts(&plan), NOW, "allow"),
+        "ENGINE_ERROR",
+    );
+    let result = session
+        .evaluate_check(id, &empty_facts(&plan), NOW + 10000, "")
+        .unwrap();
+    assert_eq!(result["decision"], "deny");
+    assert_eq!(result["source"], "fail_closed");
+    assert_eq!(result["metadata"]["status"], "available");
+    assert!(diagnostic(&result, "timeout"));
+    error_code(
+        session.evaluate(id, &empty_facts(&plan), NOW + 10000),
+        "PLAN_EXPIRED",
+    );
+}
+
+#[test]
 fn strict_permit_routes_and_malformed_known_requests_never_become_success() {
     let permit: Value =
         serde_json::from_str(include_str!("fixtures/erc20-permit.manifest.json")).unwrap();

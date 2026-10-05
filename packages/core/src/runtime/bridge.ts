@@ -1,10 +1,12 @@
 import { CoreError, type CoreErrorCode } from "../types/errors.js";
 import type { PlannedCall } from "../types/plan.js";
+import type { VerdictMetadata } from "../types/verdict.js";
 
 /** Internal generated-WASM boundary; never exposed as a host injection option. */
 export interface NativeCore {
   plan(requestJson: string, nowMs: number): string;
   evaluate(planId: string, factsJson: string, nowMs: number): string;
+  evaluate_check(planId: string, factsJson: string, nowMs: number, failure: string): string;
   begin_refresh(): string;
   commit_refresh(ticket: number, policyJson: string, nowMs: number): string;
   cancel_refresh(ticket: number): string;
@@ -20,6 +22,7 @@ export interface NativePlan {
   planId: string;
   calls: readonly PlannedCall[];
   expiresAt: number;
+  metadata: Extract<VerdictMetadata, { status: "available" }>;
 }
 
 const codes = new Set<CoreErrorCode>([

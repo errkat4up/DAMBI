@@ -3,13 +3,13 @@
 Pre-sign policy core for Web3 wallets. Hosts provide signed policies and method
 responses; Core decodes requests, plans Fact calls and returns allow/warn/deny.
 
-## Status: C5 runtime
+## Status: 0.0.1 Core implementation and C6 source checks verified
 
-The working tree implements `createCore`, `plan`, `evaluate`, `refreshPolicies`
+This source implements `createCore`, `check`, `plan`, `evaluate`, `refreshPolicies`
 and `dispose` using this package's Rust/WASM runtime. This is not a new published
 release. Confirmed verification is recorded under Development checks below.
-`check()` still rejects with `NOT_IMPLEMENTED`: automatic Fact fetching, cache
-and hooks belong to C6. Use the explicit plan/provider/evaluate flow meanwhile.
+`check()` coordinates planning, Fact fetching, bounded in-memory cache and
+evaluation. Product and release verification remain separate.
 
 ESM only, Node >= 20, no external JS runtime dependencies. The build includes its
 own JS/WASM pair under `dist/runtime/wasm`; serve those assets with the package
@@ -40,7 +40,7 @@ when using browser modules. `@dambi/core/internal` remains reserved and empty.
   `decision`, `source`, policy severity and reasons. It describes host deployment;
   Core does not submit or block transactions.
 
-The explicit C5 flow follows the C1 public contract:
+The explicit flow follows the C1 public contract:
 
 ```ts
 import { createCore } from "@dambi/core";
@@ -59,7 +59,7 @@ export async function evaluateRequest(
       signal,
     });
     return core.evaluate(plan, batch);
-    // C6 will coordinate these steps through check(request, { signal }).
+    // Or use await core.check(request, { signal }) to coordinate these steps.
   } finally {
     core.dispose();
   }
@@ -72,7 +72,24 @@ lifecycle/handle errors throw or reject `CoreError`. With a valid handle, Fact o
 trust failures return `deny + fail_closed`. `check` also maps known malformed
 requests, cancellation and timeout to fail-closed; unsupported kinds warn.
 `CoreDiagnostic.code` distinguishes partial decoding, no policy match and errors.
-The `check` error mapping and hook behavior described here are C6 contracts.
+Cancelled or failed checks consume their plans and retain pinned audit metadata
+when a plan was issued. A disposed instance rejects ongoing and new checks.
+
+`check` caches raw responses by chain, method and recursively sorted parameters,
+including any block selector in those parameters. Cache hits keep the original
+`observedAt` and are revalidated by Native Core. Entry count is bounded by
+`maxPlanCalls`; keys and values together are bounded by `maxFactBytes`. Successful
+policy refresh clears the cache; older in-flight checks cannot repopulate it.
+Only non-optional calls with projection outputs seed the cache: an evaluated
+verdict does not prove that optional projections succeeded. Optional calls can
+reuse a previously validated required response for the same key; otherwise they
+are fetched again instead of caching a potentially incomplete response.
+
+Hooks receive immutable copies. `onPending` runs for safely copied check requests;
+`onVerdict` runs once for each returned check/evaluate verdict, and
+`onAwaitingUser` runs for warnings. Hooks are notifications, not approval gates:
+their promises are not awaited. Throws and rejections emit `hook_error` through
+`onDiagnostic`; a failing diagnostic hook is contained without recursion.
 
 `CorePlan.expiresAt` is the plan TTL deadline. Handle validation runs first; if it
 passes, snapshot validity is checked separately. Thus expired handles throw,
@@ -121,7 +138,7 @@ formatting. Unknown top-level transport fields are excluded. Nested data must be
 JSON data: reject cycles, undefined, bigint, functions, symbols, non-finite values,
 unsafe integers, invalid Unicode and non-plain objects instead of silently
 coercing them. Native Core calculates and pins the digest before issuing a plan.
-Unsupported requests reject `plan`; their future `check` verdicts will have
+Unsupported requests reject `plan`; their `check` verdicts have
 unavailable metadata.
 
 `policyVersion` is the decimal string of the **pinned snapshot's integer
@@ -135,7 +152,6 @@ change a decision.
 From the repository root (Rust, the wasm32 target and wasm-pack are required):
 
 ```sh
-cargo update --workspace --offline
 cargo test --locked -p dambi-core --test session
 cargo build --locked -p dambi-core --example session_runner
 npm run core:build
@@ -150,17 +166,33 @@ against the Native session runner. They fail if artifacts are absent and never
 build them implicitly. No legacy extension WASM package is loaded.
 `npm run core:pack` separately inspects package contents without publishing.
 
-User verification (2026-09-28, C5 changes): consumer type checks completed without
-errors; runtime checks passed 5/5 (0 failures), including actual Native/WASM
-parity. The separate Native session test output has not been shared.
+`npm run sdk:verify:isolated` performs these C6 checks in a temporary copy of the
+listed SDK sources, without extension/server/legacy WASM sources or existing
+build output. It installs dependencies and builds the Native runner and SDK
+WASM there. Product snapshot generation and final tarball/browser release
+verification remain separate.
+
+User verification (2026-09-28, local C6 before the review corrections):
+`sdk:verify:isolated` reached its final success marker, including Native session,
+WASM/types/runtime/check, package dry-run and source isolation. No failures or
+skips; individual test totals were not supplied. Separate C4 Decoder unit-test
+output remains unshared; C4 Store and the integrated snapshot path are verified.
+
+Review corrections (2026-10-05): unavailable audit metadata now emits its
+diagnostic; cache insertion requires evidence of successful required projection.
+User verification after rebuilding: `check.test.mjs` passed 8/8, with zero
+failures, cancellations, skips or todo cases. No remaining issue in this change
+scope was reported. The isolated check builds its own copy; rebuild local `dist`
+with `core:build` when using a checkout with changed sources.
 
 ## Coverage and license
 
-C5 routes transactions through the supplied resolved Decoder snapshot, including
+Core routes transactions through the supplied resolved Decoder snapshot, including
 multicall trees, and uses the existing strict ERC-20 Permit typed-data path.
 Other typed contracts, untyped signatures, venue orders and contract creation
 reject `plan` with `UNSUPPORTED_REQUEST`; no permissive typed-data fallback is
-used. Installation of a bundle does not certify every request path it describes.
+used. `check` maps unsupported requests to an explicit warning with unavailable
+audit metadata. Installation of a bundle does not certify every request path it describes.
 Method-specific Fact value validation remains the provider's responsibility;
 Core validates plan binding, provenance shape, age and required projections.
 Product scope and release verification remain separate from these fixed tests.

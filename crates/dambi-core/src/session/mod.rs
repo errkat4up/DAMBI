@@ -189,6 +189,7 @@ impl CoreSession {
                 return Err(error.clone());
             }
         }
+        let metadata = plan_metadata(&request.digest, &snapshot);
         self.plans.insert(
             plan_id.clone(),
             PendingPlan {
@@ -201,7 +202,9 @@ impl CoreSession {
             },
         );
         self.next_plan = number;
-        Ok(json!({ "planId": plan_id, "calls": calls, "expiresAt": expires_at }))
+        Ok(
+            json!({ "planId": plan_id, "calls": calls, "expiresAt": expires_at, "metadata": metadata }),
+        )
     }
 
     pub fn evaluate(
@@ -209,6 +212,42 @@ impl CoreSession {
         plan_id: &str,
         facts_json: &str,
         now_ms: u64,
+    ) -> Result<Value, SessionError> {
+        self.evaluate_inner(plan_id, facts_json, now_ms, None)
+    }
+
+    /// SDK check orchestration can report a failed external operation, but it
+    /// cannot weaken evaluation or replace the plan's pinned audit metadata.
+    pub fn evaluate_check(
+        &mut self,
+        plan_id: &str,
+        facts_json: &str,
+        now_ms: u64,
+        failure: &str,
+    ) -> Result<Value, SessionError> {
+        if !matches!(
+            failure,
+            "" | "aborted"
+                | "timeout"
+                | "fact_fetch_failed"
+                | "invalid_fact"
+                | "limit_exceeded"
+                | "engine_error"
+        ) {
+            return Err(SessionError::new(
+                "ENGINE_ERROR",
+                "invalid check failure category",
+            ));
+        }
+        self.evaluate_inner(plan_id, facts_json, now_ms, Some(failure))
+    }
+
+    fn evaluate_inner(
+        &mut self,
+        plan_id: &str,
+        facts_json: &str,
+        now_ms: u64,
+        check_failure: Option<&str>,
     ) -> Result<Value, SessionError> {
         self.live()?;
         clock(now_ms)?;
@@ -226,11 +265,32 @@ impl CoreSession {
         };
         if now_ms >= plan.expires_at {
             self.retire(plan_id.to_owned(), "PLAN_EXPIRED");
+            if check_failure.is_some() {
+                let mut report = Report::default();
+                report.fail("timeout", "plan expired before check completed", None, None);
+                if let Some(code) =
+                    check_failure.filter(|code| !code.is_empty() && *code != "timeout")
+                {
+                    report.fail(code, "check could not complete", None, None);
+                }
+                return Ok(report.finish(&self.enforcement, &plan));
+            }
             return Err(SessionError::new("PLAN_EXPIRED", "plan TTL has expired"));
         }
         // Consume before inspecting any caller Fact or pinned trust state.
         self.retire(plan_id.to_owned(), "PLAN_CONSUMED");
         let mut report = Report::default();
+        if let Some(code) = check_failure.filter(|code| !code.is_empty()) {
+            let message = match code {
+                "aborted" => "check was cancelled",
+                "timeout" => "Fact fetch timed out",
+                "fact_fetch_failed" => "Fact provider failed",
+                "invalid_fact" => "Fact response could not be copied safely",
+                "limit_exceeded" => "Fact response exceeds the configured limit",
+                _ => "check could not complete",
+            };
+            report.fail(code, message, None, None);
+        }
         if let Err(error) = plan.snapshot.ensure_usable(now_ms) {
             report.fail("trust_expired", error.message, None, None);
             return Ok(report.finish(&self.enforcement, &plan));
@@ -628,11 +688,15 @@ impl Report {
             "decision": match self.rank { 0 => "allow", 1 => "warn", _ => "deny" },
             "source": if self.failed { "fail_closed" } else { "evaluated" },
             "enforcement": enforcement, "reasons": self.reasons, "facts": self.facts, "diagnostics": self.diagnostics,
-            "metadata": { "status": "available", "requestDigest": plan.digest,
-                "policyVersion": plan.snapshot.policy().sequence().to_string(),
-                "engineVersion": concat!("policy-engine/", env!("CARGO_PKG_VERSION")) }
+            "metadata": plan_metadata(&plan.digest, &plan.snapshot)
         })
     }
+}
+
+fn plan_metadata(digest: &str, snapshot: &Snapshot) -> Value {
+    json!({ "status": "available", "requestDigest": digest,
+        "policyVersion": snapshot.policy().sequence().to_string(),
+        "engineVersion": concat!("policy-engine/", env!("CARGO_PKG_VERSION")) })
 }
 
 fn parse_json(input: &str, code: &str) -> Result<Value, SessionError> {

@@ -44,7 +44,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "build": "rm -rf dist && tsc -p tsconfig.build.json && node ../../scripts/sdk/build-wasm.mjs",
     "test:types": "tsc -p tsconfig.consumer.json",
-    "test:runtime": "node --test tests/runtime.test.mjs",
+    "test:runtime": "node --test tests/runtime.test.mjs tests/check.test.mjs",
     "pack:check": "npm pack --dry-run"
   },
   "devDependencies": {
