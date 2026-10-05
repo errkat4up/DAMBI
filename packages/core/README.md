@@ -3,13 +3,15 @@
 Pre-sign policy core for Web3 wallets. Hosts provide signed policies and method
 responses; Core decodes requests, plans Fact calls and returns allow/warn/deny.
 
-## Status: 0.0.1 Core implementation and C6 source checks verified
+## Status: 0.1.0
 
-This source implements `createCore`, `check`, `plan`, `evaluate`, `refreshPolicies`
-and `dispose` using this package's Rust/WASM runtime. This is not a new published
-release. Confirmed verification is recorded under Development checks below.
+First runtime release. `createCore`, `check`, `plan`, `evaluate`,
+`refreshPolicies` and `dispose` run on this package's Rust/WASM runtime.
 `check()` coordinates planning, Fact fetching, bounded in-memory cache and
-evaluation. Product and release verification remain separate.
+evaluation. A Registry decoder snapshot ships as `@dambi/core/decoders`, and
+policies are served signed by the Dambi API (see
+[Connecting to the Dambi API](#connecting-to-the-dambi-api)). Verification
+records are under Development checks below.
 
 ESM only, Node >= 20, no external JS runtime dependencies. The build includes its
 own JS/WASM pair under `dist/runtime/wasm`; serve those assets with the package
@@ -213,8 +215,11 @@ policy-role key is required. Decoder-role keys cannot authorize policies.
 It is not the DEC-07 handoff index or unresolved source manifests. The container's
 `expectedDigest` is `0x` plus lowercase SHA-256 of its exact UTF-8 bytes, pinned
 independently in trusted local config. Existing per-bundle `bundle_sha256` rules
-remain distinct. Runtime validation is implemented; product container selection
-and reproducible generation remain D4 follow-up work.
+remain distinct. The packaged `@dambi/core/decoders` snapshot is generated
+reproducibly from the Registry (`npm run build:decoder-snapshot` in
+`registryV2/`) and contains only bundles Core installs. Source-based pool
+decoders and five bundles Core currently rejects are excluded; they are D4-3
+follow-up work, not part of 0.1.0.
 
 `CoreLimits` requires explicit UTF-8 size limits (`maxPolicyBytes` for B,
 `maxDecoderBytes`, `maxRequestBytes` for canonical digest input, `maxFactBytes`
@@ -276,8 +281,9 @@ build them implicitly. No legacy extension WASM package is loaded.
 `npm run sdk:verify:isolated` performs these C6 checks in a temporary copy of the
 listed SDK sources, without extension/server/legacy WASM sources or existing
 build output. It installs dependencies and builds the Native runner and SDK
-WASM there. Product snapshot generation and final tarball/browser release
-verification remain separate.
+WASM there. The packaged decoder snapshot is copied from its committed
+Registry source and is checked by `runtime.test.mjs`. Final tarball/browser
+consumer checks are part of each release.
 
 User verification (2026-09-28, local C6 before the review corrections):
 `sdk:verify:isolated` reached its final success marker, including Native session,
@@ -302,6 +308,8 @@ used. `check` maps unsupported requests to an explicit warning with unavailable
 audit metadata. Installation of a bundle does not certify every request path it describes.
 Method-specific Fact value validation remains the provider's responsibility;
 Core validates plan binding, provenance shape, age and required projections.
-Product scope and release verification remain separate from these fixed tests.
+The packaged snapshot covers the Registry decoders Core installs today; a
+request outside it gets `UNSUPPORTED_REQUEST` from `plan` and a warning from
+`check`.
 
 Apache-2.0; see [LICENSE](./LICENSE) and [NOTICE](./NOTICE).

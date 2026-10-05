@@ -347,7 +347,7 @@ C3-3의 `validate_policy_bundle`은 서명 확인 객체만 받아 전체 Manife
 
 **C5/C6 검증:** session 시험 → session runner 빌드 → `core:build` → `core:test:types` → `core:test:runtime` 순서다. C6 인계의 독립 소스 검증은 `sdk:verify:isolated`로 같은 경로를 실행한다. 실제 명령은 [패키지 개발 안내](../../packages/core/README.md#development-checks)에 모은다. C1 scaffold 시험은 실제 runtime/check 시험으로 교체했다.
 
-Core 기능 구현 완료와 제품 출시 완료를 구분한다. 최종 SDK는 상위 계획 [§7.1](decoder-core-adapters-plan.md#71-필수-완료-조건-sdk-소스만으로-빌드시험패키징)의 SDK 소스 복사본에서 빌드·시험·패키징해야 한다. 확장/서버/기존 WASM 폴더 없이 재현하고, 실제 tarball의 ESM/CJS·타입·WASM·브라우저 소비를 확인한다. 최종 제품 범위에는 D4-2·D4-3 결과가 필요하다. 크기 목표와 실제 API/발행 검증도 상위 계획을 따른다.
+Core 기능 구현 완료와 제품 출시 완료를 구분한다. 최종 SDK는 상위 계획 [§7.1](decoder-core-adapters-plan.md#71-필수-완료-조건-sdk-소스만으로-빌드시험패키징)의 SDK 소스 복사본에서 빌드·시험·패키징해야 한다. 확장/서버/기존 WASM 폴더 없이 재현하고, 실제 tarball의 ESM·타입·WASM·브라우저 소비를 확인한다(CJS는 2026-10-05 결정으로 배포하지 않는다). 최종 제품 범위에는 D4-2·D4-3 결과가 필요하다. 크기 목표와 실제 API/발행 검증도 상위 계획을 따른다.
 
 ## 6. VS Code에서 시작하기
 

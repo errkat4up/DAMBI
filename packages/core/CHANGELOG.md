@@ -15,8 +15,7 @@ migration note.
   `require("@dambi/core")` is unsupported; CommonJS hosts use `await import()`.
 - C1 public contract: `await createCore(config, options?)`, policy/Fact I/O ports,
   fixed Decoder snapshot and local trust/limits configuration. `clock` moves from
-  `ports` to `CoreConfig`. Initialization still rejects with `CoreError` code
-  `NOT_IMPLEMENTED`; no evaluation runtime is included.
+  `ports` to `CoreConfig`. `createCore` no longer rejects with `NOT_IMPLEMENTED`.
 - `plan(request)` issues an opaque `CorePlan`; `evaluate(plan, FactBatch)` replaces
   caller-supplied request/policy evaluation. Fact batches carry the plan ID and
   method responses before projection, with required provenance.
@@ -24,8 +23,19 @@ migration note.
 - Verdicts/hooks expose typed diagnostics and available/unavailable audit metadata.
 
 ### Added
+- Rust/WASM runtime: `createCore`, `plan`, `evaluate`, `check`, `refreshPolicies`
+  and `dispose` execute. The WASM ships in `dist/runtime/wasm` and is located via
+  `import.meta.url`.
+- `check()` Fact coordination with a bounded in-memory cache, and notification
+  hooks (`onPending`, `onVerdict`, `onAwaitingUser`, `onDiagnostic`).
+- Signed policy bundle verification (ECDSA P-256/SHA-256 over the original
+  payload), sequence ordering and a 72-hour default `maxBundleAgeSec`.
+- `@dambi/core/decoders`: a Registry decoder snapshot (799 bundles, ~2.5 MB)
+  with its pinned digest and size, as a separate entry point.
+- Audit metadata (`requestDigest`, `policyVersion`, `engineVersion`) on verdicts.
 - Cancellation, policy refresh and disposal contracts; stable error code types.
-- Consumer declaration checks and an asynchronous scaffold check in CI.
+- README guide for connecting to the Dambi API and for Vite dev-server use.
+- Consumer declaration checks and Native/WASM runtime regression tests in CI.
 
 ### Removed
 - Public `DecoderSource`, `PolicySet` and `FactMap`. See README for migration.

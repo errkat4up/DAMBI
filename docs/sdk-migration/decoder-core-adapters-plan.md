@@ -406,8 +406,8 @@ API 연동은 현재 OpenAPI·publisher의 B wrapper와 서명 예제를 기준�
 
 - Core 실행 연결 시부터 실제 WASM 크기를 측정한다. 최종 목표는 raw < 6 MiB, runtime gzip 합계 ≤ 1,500,000 B이며 미달성 값을 통과로 바꾸지 않는다.
 - 런타임과 관계없는 의존성 제거, Cargo 내부 스키마 포함, crate 이름/발행 순서는 각각 확인 후 별도 변경한다. 기존 백업의 광범위한 import 교체를 자동 적용하지 않는다.
-- ESM/CJS·`.d.ts`·WASM/glue·필요 decoder asset을 실제 tarball로 묶는다. 기존 scaffold의 `npm pack --dry-run`만으로 설치 성공을 주장하지 않는다.
-- 저장소 밖 Node ESM/CJS 소비자, 실제 브라우저, Native Cargo 패키지의 독립 실행을 확인한다.
+- ESM·`.d.ts`·WASM/glue·필요 decoder asset을 실제 tarball로 묶는다. 기존 scaffold의 `npm pack --dry-run`만으로 설치 성공을 주장하지 않는다.
+- 저장소 밖 Node ESM 소비자, 실제 브라우저, Native Cargo 패키지의 독립 실행을 확인한다.
 - npm/Cargo 발행, 실제 API 운영 검증, GitHub 전체 CI의 통과 여부를 로컬 시험과 구분해 릴리스 체크리스트에 기록한다.
 
 ### 7.1 필수 완료 조건: SDK 소스만으로 빌드·시험·패키징
@@ -427,9 +427,9 @@ API 연동은 현재 OpenAPI·publisher의 B wrapper와 서명 예제를 기준�
 2. `browser-extension/`, `crates/policy-server/`, 기존 `crates/policy-engine-wasm/`은 포함하지 않는다. 기존 `dist`, WASM `pkg`, `target`, `node_modules`, 생성된 Registry index/bundle 출력도 가져오지 않는다. 필요한 원본·고정 입력은 목록에 명시한다.
 3. 원본 저장소로 이어지는 절대 경로·symlink·외부 path dependency가 없는지 확인한다. 패키지 관리자가 격리 디렉터리 내부에 만드는 정상 연결은 허용한다. SDK가 사용하는 로컬 소스·데이터 경로는 모두 복사본 안에서 해소돼야 한다.
 4. 고정한 toolchain/lockfile에 따라 의존성을 설치한다. 일반 의존성 다운로드는 허용하되, 과거 빌드 artifact·compiler 산출물·로컬 전용 테스트 harness를 빌드 대체물로 사용하지 않는다. `SKIP_WASM_BUILD`로 소스 빌드를 건너뛰지 않는다.
-5. 정적 입력에서 decoder/policy asset을 생성하고, 새 Native/WASM 출력 디렉터리에서 Rust → WASM/glue → TS/ESM/CJS/타입을 빌드한다. 원본이 부족하거나 live RPC/cache가 있어야만 생성되면 실패로 남긴다.
+5. 정적 입력에서 decoder/policy asset을 생성하고, 새 Native/WASM 출력 디렉터리에서 Rust → WASM/glue → TS/ESM/타입을 빌드한다. 원본이 부족하거나 live RPC/cache가 있어야만 생성되면 실패로 남긴다.
 6. Native 및 Node + 실제 WASM의 필수 SDK 사례를 실행한다. 필수 fixture 누락, 필수 사례 0개/skip은 통과가 아니다. mock 외부 포트를 쓰더라도 실제 해석·서명 검증·평가는 실행한다.
-7. 실제 npm tarball을 만든 뒤 저장소 밖 새 소비자 프로젝트에 설치한다. ESM/CJS import, `.d.ts`, WASM/asset 로딩, 실제 `check` 호출 및 필요한 브라우저 소비 시험을 확인한다. workspace link나 SDK의 기존 dist를 직접 읽지 않는다.
+7. 실제 npm tarball을 만든 뒤 저장소 밖 새 소비자 프로젝트에 설치한다. ESM import(CJS `require`는 거절됨), `.d.ts`, WASM/asset 로딩, 실제 `check` 호출 및 필요한 브라우저 소비 시험을 확인한다. workspace link나 SDK의 기존 dist를 직접 읽지 않는다.
 8. 배포할 Rust crate의 package 파일 목록과 unpack한 소스의 경로를 확인한다. schema·fixture·필요 자산이 포함되고 외부 workspace 파일을 읽지 않아야 한다. 아직 발행되지 않은 자체 의존 crate는 로컬 임시 registry 또는 unpack한 패키지들로 검증 환경을 구성하며 원본 source tree로 연결하지 않는다. 공개 registry 의존성 해소 검증과 로컬 사전 검증의 상태는 구분한다.
 9. 빌드·시험이 끝난 후에도 과거 디렉터리가 없고 원본 저장소를 참조하지 않는지 재검사한다. 과거 경로에 fixture나 WASM을 다시 생성하면 실패다.
 
