@@ -146,6 +146,25 @@ test("built Core loads its own WASM and agrees with Native on a decoded approve"
   }
 });
 
+test("packaged decoder snapshot installs and routes Registry tokens", async (t) => {
+  const { decoderSnapshot, decoderSnapshotInfo } = await import("@dambi/core/decoders");
+  const setup = harness();
+  setup.config.decoderSnapshot = decoderSnapshot;
+  setup.config.limits.maxDecoderBytes = decoderSnapshotInfo.bytes - 1;
+  await assert.rejects(createCore(setup.config), code("LIMIT_EXCEEDED"));
+  setup.config.limits.maxDecoderBytes = decoderSnapshotInfo.bytes;
+  const core = await createCore(setup.config);
+  t.after(() => core.dispose());
+  assert.equal(Buffer.byteLength(decoderSnapshot.artifact, "utf8"), decoderSnapshotInfo.bytes);
+  assert.equal(JSON.parse(decoderSnapshot.artifact).bundles.length, decoderSnapshotInfo.bundleCount);
+
+  // Mainnet USDC is routed only by the packaged snapshot, not the test fixture.
+  const usdc = { ...request(), to: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" };
+  const plan = await core.plan(usdc);
+  assert.equal(core.evaluate(plan, emptyFacts(plan)).source, "evaluated");
+  await assert.rejects(core.plan(request()), code("UNSUPPORTED_REQUEST"));
+});
+
 test("handles bind immutable requests to one instance and are consumed once", async (t) => {
   const setup = harness();
   const core = await createCore(setup.config);

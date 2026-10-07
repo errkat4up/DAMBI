@@ -3,7 +3,11 @@
  * `GET /v1/bundle` (registry-api). Contract: docs/decisions/0001-cloud-split.md
  * and registry-api/openapi.yaml (`BundlePayload`, `SignedPolicyBundle`).
  *
- * Input:  browser-extension/default-bundles/<set>/policies/<id>/{policy.cedar,manifest.json}
+ * Input:  <repo>/policy-bundles/<set>/ — the D3 shared policy source. Read through
+ *         scripts/sdk/policy-bundle.cjs, the same loader the SDK fixtures and the
+ *         extension asset copier use, so all three agree on policy order, ID,
+ *         severity annotation and manifest identity. Not to be confused with the
+ *         OUTPUT directory below, which lives under registryV2/.
  * Output: policy-bundles/<profile>/<sequence>.json  (immutable — never rewritten)
  *         policy-bundles/<profile>/latest.json      (same bytes; mutable pointer)
  *         policy-bundles/<profile>/sequence         (counter, bumped by 1)
@@ -28,13 +32,8 @@
  *   npm run publish:policy-bundle -- --set day1-safety --profile default --dry-run
  */
 import { createHash } from "node:crypto";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { p256 } from "@noble/curves/nist.js";
@@ -43,7 +42,13 @@ import { derToP1363 } from "./sign-bundles.js";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REGISTRY_ROOT = resolve(HERE, "..");
 const REPO_ROOT = resolve(REGISTRY_ROOT, "..");
-const DEFAULT_POLICY_SETS = resolve(REPO_ROOT, "browser-extension", "default-bundles");
+
+interface PolicyBundleLoader {
+  loadPolicyBundle(repoRoot: string, bundleName?: string): PolicyEntry[];
+}
+const { loadPolicyBundle } = createRequire(import.meta.url)(
+  resolve(REPO_ROOT, "scripts", "sdk", "policy-bundle.cjs"),
+) as PolicyBundleLoader;
 
 export const MAX_SEQUENCE = Number.MAX_SAFE_INTEGER;
 const PROFILE_RE = /^[a-z0-9-]+$/;
@@ -73,8 +78,10 @@ export interface SignedPolicyBundle {
 }
 
 export interface PublishOptions {
-  /** directory holding <id>/{policy.cedar,manifest.json} */
-  policiesDir: string;
+  /** policy set under <repoRoot>/policy-bundles/ — defaults to "day1-safety" */
+  set?: string;
+  /** repository root holding policy-bundles/ and scripts/sdk/ — defaults to this checkout */
+  repoRoot?: string;
   /** directory holding <profile>/ — defaults to registryV2/policy-bundles */
   outRoot?: string;
   profile?: string;
@@ -101,40 +108,27 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** Read every <id>/{policy.cedar,manifest.json} pair; enforce the BundlePayload
- *  invariants the SDK will check (non-empty, unique ids, id === manifest.id,
- *  non-empty manifest) here so a bad bundle never gets signed. */
-export function loadPolicies(policiesDir: string): PolicyEntry[] {
-  if (!existsSync(policiesDir)) {
-    throw new Error(`policies dir not found: ${policiesDir}`);
+/** Load one policy set through the shared SDK loader, then re-check the
+ *  BundlePayload invariants the Core parser enforces (non-empty, unique ids,
+ *  id === manifest.id, non-empty Cedar and manifest) so a bad bundle is never
+ *  signed even if the loader's rules drift. The loader preserves the package's
+ *  declared policy order; that order is part of the signed bytes. */
+export function loadPolicies(repoRoot: string, set: string): PolicyEntry[] {
+  const entries = loadPolicyBundle(repoRoot, set);
+  if (!Array.isArray(entries) || entries.length === 0) {
+    throw new Error(`policy set ${set}: no policies`);
   }
-  const entries: PolicyEntry[] = [];
   const seen = new Set<string>();
-  const dirs = readdirSync(policiesDir, { withFileTypes: true })
-    .filter((d) => d.isDirectory())
-    .map((d) => d.name)
-    .sort();
-  for (const id of dirs) {
-    const dir = join(policiesDir, id);
-    const cedarPath = join(dir, "policy.cedar");
-    const manifestPath = join(dir, "manifest.json");
-    if (!existsSync(cedarPath) || !existsSync(manifestPath)) {
-      throw new Error(`policy ${id}: missing policy.cedar or manifest.json`);
-    }
-    const policy = readFileSync(cedarPath, "utf8");
-    if (policy.trim().length === 0) throw new Error(`policy ${id}: empty policy.cedar`);
-    const manifest: unknown = JSON.parse(readFileSync(manifestPath, "utf8"));
-    if (!isRecord(manifest) || Object.keys(manifest).length === 0) {
-      throw new Error(`policy ${id}: manifest must be a non-empty object`);
-    }
-    if (manifest.id !== id) {
-      throw new Error(`policy ${id}: manifest.id (${String(manifest.id)}) !== directory name`);
-    }
+  for (const { id, policy, manifest } of entries) {
     if (seen.has(id)) throw new Error(`policy ${id}: duplicate id`);
     seen.add(id);
-    entries.push({ id, policy, manifest });
+    if (typeof policy !== "string" || policy.trim().length === 0) {
+      throw new Error(`policy ${id}: empty policy.cedar`);
+    }
+    if (!isRecord(manifest) || Object.keys(manifest).length === 0 || manifest.id !== id) {
+      throw new Error(`policy ${id}: manifest must be a non-empty object with id === "${id}"`);
+    }
   }
-  if (entries.length === 0) throw new Error(`no policies under ${policiesDir}`);
   return entries;
 }
 
@@ -236,7 +230,8 @@ export async function publishPolicyBundle(opts: PublishOptions): Promise<Publish
   const profileDir = join(outRoot, profile);
   const counterPath = join(profileDir, "sequence");
 
-  const policies = loadPolicies(opts.policiesDir);
+  const set = opts.set ?? "day1-safety";
+  const policies = loadPolicies(opts.repoRoot ?? REPO_ROOT, set);
   const previous = readSequence(counterPath);
   const sequence = previous + 1;
   if (sequence > MAX_SEQUENCE) throw new Error("sequence would exceed safe-integer range");
@@ -266,7 +261,7 @@ export async function publishPolicyBundle(opts: PublishOptions): Promise<Publish
     written.push(versionPath, join(profileDir, "latest.json"), counterPath);
   }
   log(
-    `[publish-policy-bundle] profile=${profile} env=${env} sequence=${sequence} policies=${policies.length} key_id=${signed.key_id}${opts.dryRun ? " (dry-run, nothing written)" : ""}`,
+    `[publish-policy-bundle] set=${set} profile=${profile} env=${env} sequence=${sequence} policies=${policies.length} key_id=${signed.key_id}${opts.dryRun ? " (dry-run, nothing written)" : ""}`,
   );
   return { sequence, payload, signed, written };
 }
@@ -290,7 +285,7 @@ const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(imp
 if (isMain) {
   const args = parseArgs(process.argv.slice(2));
   publishPolicyBundle({
-    policiesDir: join(DEFAULT_POLICY_SETS, args.set, "policies"),
+    set: args.set,
     profile: args.profile,
     env: args.env,
     dryRun: args.dryRun,

@@ -1,0 +1,33 @@
+{
+  "name": "full",
+  "schema_version": 1,
+  "digest": "0x660f146be7695e89925c78acc8c0cc3f279385cb313a854b5ec329f9cd9ff65a",
+  "bytes": 2512187,
+  "bundle_count": 799,
+  "excluded_count": 30484,
+  "excluded": {
+    "index entry requires source context materialization": 30484
+  },
+  "rejected_by_core": [
+    {
+      "id": "aave/governance/core/redeemCancellationFee@1.0.0",
+      "error": "emit: missing body"
+    },
+    {
+      "id": "aave/governance/core/updateRepresentativesForChain@1.0.0",
+      "error": "emit: missing body"
+    },
+    {
+      "id": "aave/umbrella/batch/claimRewardsPermit@1.0.0",
+      "error": "emit: missing body"
+    },
+    {
+      "id": "uniswap/universal-router/execute-v2-no-deadline@1.0.0",
+      "error": "emit: unsupported field \"inputs_abi_alternatives\""
+    },
+    {
+      "id": "uniswap/universal-router/execute-v2@1.0.0",
+      "error": "emit: unsupported field \"inputs_abi_alternatives\""
+    }
+  ]
+}

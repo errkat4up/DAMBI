@@ -1,0 +1,123 @@
+# Publish @dambi/core to npm when a `core-v<version>` tag is pushed.
+#
+#   git tag core-v0.1.0 && git push origin core-v0.1.0
+#
+# Auth is npm Trusted Publishing (GitHub OIDC): no NPM_TOKEN secret exists. The
+# package's Trusted Publisher on npmjs.com must name this repository and this
+# workflow file (core-release.yml), otherwise `npm publish` is rejected.
+#
+# Gates, in order: the tag matches packages/core/package.json, the version is not
+# already on npm, the SDK source-isolation check passes (same as CI's `core`
+# job), and the in-repo build passes types + runtime tests. The tarball that is
+# published is built in this run from the tagged commit — never a local dist.
+name: core-release
+
+on:
+  push:
+    tags: ["core-v*"]
+
+permissions:
+  contents: read
+
+env:
+  WASM_PACK_VERSION: "0.14.0"
+
+concurrency:
+  group: core-release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Tag matches package version and is unpublished
+        id: version
+        run: |
+          version="$(node -p 'require("./packages/core/package.json").version')"
+          if [[ "${GITHUB_REF_NAME}" != "core-v${version}" ]]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match packages/core version ${version}"
+            exit 1
+          fi
+          if npm view "@dambi/core@${version}" version >/dev/null 2>&1; then
+            echo "::error::@dambi/core@${version} is already published"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "core-wasm"
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version "${WASM_PACK_VERSION}" --locked
+
+      - name: SDK source isolation (Native + WASM + types + runtime/check)
+        run: npm run sdk:verify:isolated
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # npm Trusted Publishing (OIDC)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      # Trusted Publishing needs npm >= 11.5.1; Node 22 bundles npm 10.
+      - name: Upgrade npm
+        run: npm install -g npm@^11.5.1
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "core-wasm"
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version "${WASM_PACK_VERSION}" --locked
+
+      - name: Enable corepack + Yarn 4
+        run: |
+          corepack enable
+          corepack prepare yarn@4.14.1 --activate
+
+      - name: Install workspace dependencies
+        run: yarn install --immutable
+
+      - name: Build @dambi/core
+        run: yarn workspace @dambi/core build
+
+      - name: Native session runner (runtime test reference)
+        run: cargo build --locked -p dambi-core --example session_runner
+
+      - name: Types + runtime tests on the build being published
+        run: |
+          yarn workspace @dambi/core test:types
+          yarn workspace @dambi/core test:runtime
+
+      - name: Publish
+        working-directory: packages/core
+        run: |
+          npm pack --dry-run
+          npm publish --access public

@@ -11,6 +11,8 @@
     { "from": "LICENSE" },
     { "from": "NOTICE" },
     { "from": "scripts/sdk/build-wasm.mjs" },
+    { "from": "scripts/sdk/build-decoders.mjs" },
+    { "from": "packages/core/decoder-snapshots" },
     { "from": "contracts/core-v1/types.ts" },
     { "from": "packages/core/package.json" },
     { "from": "packages/core/tsconfig.json" },

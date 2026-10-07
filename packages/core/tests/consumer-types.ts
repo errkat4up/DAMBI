@@ -13,6 +13,7 @@ import {
   type CoreHooks,
   type CorePlan,
   type DambiCore,
+  type DecoderSnapshot,
   type FactBatch,
   type FactProvider,
   type FactResult,
@@ -24,6 +25,11 @@ import {
   type Verdict,
 } from "@dambi/core";
 import "@dambi/core/internal";
+import { decoderSnapshot, decoderSnapshotInfo } from "@dambi/core/decoders";
+
+const packagedSnapshot: DecoderSnapshot = decoderSnapshot;
+const packagedBytes: number = decoderSnapshotInfo.bytes;
+void [packagedSnapshot, packagedBytes];
 
 // @ts-expect-error Decoder lookup is not a public I/O port.
 import type { DecoderSource } from "@dambi/core";

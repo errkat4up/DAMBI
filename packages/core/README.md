@@ -3,17 +3,126 @@
 Pre-sign policy core for Web3 wallets. Hosts provide signed policies and method
 responses; Core decodes requests, plans Fact calls and returns allow/warn/deny.
 
-## Status: 0.0.1 Core implementation and C6 source checks verified
+## Status: 0.1.0
 
-This source implements `createCore`, `check`, `plan`, `evaluate`, `refreshPolicies`
-and `dispose` using this package's Rust/WASM runtime. This is not a new published
-release. Confirmed verification is recorded under Development checks below.
+First runtime release. `createCore`, `check`, `plan`, `evaluate`,
+`refreshPolicies` and `dispose` run on this package's Rust/WASM runtime.
 `check()` coordinates planning, Fact fetching, bounded in-memory cache and
-evaluation. Product and release verification remain separate.
+evaluation. A Registry decoder snapshot ships as `@dambi/core/decoders`, and
+policies are served signed by the Dambi API (see
+[Connecting to the Dambi API](#connecting-to-the-dambi-api)). Verification
+records are under Development checks below.
 
 ESM only, Node >= 20, no external JS runtime dependencies. The build includes its
 own JS/WASM pair under `dist/runtime/wasm`; serve those assets with the package
 when using browser modules. `@dambi/core/internal` remains reserved and empty.
+
+### Bundlers
+
+The loader finds its WASM next to its own module via `import.meta.url`.
+Production bundles emit both files as hashed assets with no extra configuration
+(verified with a Vite 6 build in headless Chromium). The **Vite dev server**,
+however, pre-bundles dependencies into a different directory, so the WASM URL
+resolves to a 404 and `createCore` rejects with `ENGINE_ERROR`. Exclude the
+package from dependency optimization:
+
+```js
+// vite.config.js
+export default {
+  optimizeDeps: { exclude: ["@dambi/core"] },
+};
+```
+
+## Connecting to the Dambi API
+
+Core needs three inputs: decoders, signed policies, and Facts. Decoders ship in
+the package; policies come from the Dambi registry API; Facts come from your
+chain RPC.
+
+| Input | Source | Trust |
+| --- | --- | --- |
+| Decoders | `@dambi/core/decoders` (pinned per package version) | SHA-256 digest |
+| Policies | `GET /v1/bundle` | ECDSA P-256 signature, key below |
+| Facts | your `FactProvider` | provenance and age checks |
+
+```ts
+import { createCore } from "@dambi/core";
+import { decoderSnapshot, decoderSnapshotInfo } from "@dambi/core/decoders";
+
+const DAMBI_API = "https://registry-api-v3-428885534408.asia-northeast1.run.app";
+
+const core = await createCore({
+  decoderSnapshot,
+  trust: {
+    env: "staging",
+    profile: "default",
+    keys: [{
+      keyId: "policy-local-416b1764fb8d",
+      role: "policy",
+      publicKeySpkiBase64:
+        "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEbuwI14qQ6EPvaUcFCLBqURMAeBBEkjip+lh313nYz0hkdJIEgwN9bD0sDvDFd0BH/abEGtN0WIsR920rVgiFyQ==",
+    }],
+  },
+  enforcement: "advisory",
+  limits: {
+    maxPolicyBytes: 1_000_000,
+    maxDecoderBytes: decoderSnapshotInfo.bytes,
+    maxRequestBytes: 256_000,
+    maxFactBytes: 1_000_000,
+    maxPlanCalls: 64,
+    maxPendingPlans: 16,
+    allowedClockSkewMs: 60_000,
+    planTtlMs: 60_000,
+    maxFactAgeMs: 60_000,
+    factTimeoutMs: 5_000,
+    policyTimeoutMs: 10_000,
+  },
+  ports: {
+    policy: {
+      async fetch(options) {
+        const res = await fetch(`${DAMBI_API}/v1/bundle?profile=default`, { signal: options?.signal });
+        if (!res.ok) throw new Error(`policy bundle: HTTP ${res.status}`);
+        // The HTTP envelope uses key_id; keep payload byte-for-byte as received.
+        const { payload, signature, key_id } = await res.json();
+        return { payload, signature, keyId: key_id };
+      },
+    },
+    fact: {
+      // The current default policies request no Facts. Replace this with an RPC
+      // provider before enabling policies that do: required Facts that are
+      // missing make the verdict fail closed.
+      async fetch(_calls, { planId }) {
+        return { planId, results: {} };
+      },
+    },
+  },
+});
+
+// Policy bundles are re-signed regularly and are rejected once older than
+// maxBundleAgeSec (72 hours). Refresh well inside that window.
+setInterval(() => core.refreshPolicies().catch(console.error), 60 * 60 * 1000);
+
+const verdict = await core.check({
+  kind: "transaction",
+  chainId: "eip155:1",
+  from: "0x…",
+  to: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+  data: "0x095ea7b3…",
+  value: "0",
+});
+```
+
+- `/v1/bundle` needs no credentials and allows cross-origin requests, so the
+  same code runs in a browser extension or a web page.
+- `trust.env` must match the bundle's `env`. The current API serves
+  `"staging"` bundles signed by a development key; the key above changes when
+  production signing is introduced, and that change ships as a new release.
+- `maxDecoderBytes` must be at least `decoderSnapshotInfo.bytes`
+  (about 2.5 MB). `@dambi/core/decoders` is a separate entry point, so apps that
+  supply their own snapshot do not bundle it.
+- The limits above are a starting point for hosts, not values Core enforces as
+  defaults.
+- `POST /v1/audit` (verdict reporting) requires an API key and is optional.
 
 ## Public contract and migration
 
@@ -106,8 +215,11 @@ policy-role key is required. Decoder-role keys cannot authorize policies.
 It is not the DEC-07 handoff index or unresolved source manifests. The container's
 `expectedDigest` is `0x` plus lowercase SHA-256 of its exact UTF-8 bytes, pinned
 independently in trusted local config. Existing per-bundle `bundle_sha256` rules
-remain distinct. Runtime validation is implemented; product container selection
-and reproducible generation remain D4 follow-up work.
+remain distinct. The packaged `@dambi/core/decoders` snapshot is generated
+reproducibly from the Registry (`npm run build:decoder-snapshot` in
+`registryV2/`) and contains only bundles Core installs. Source-based pool
+decoders and five bundles Core currently rejects are excluded; they are D4-3
+follow-up work, not part of 0.1.0.
 
 `CoreLimits` requires explicit UTF-8 size limits (`maxPolicyBytes` for B,
 `maxDecoderBytes`, `maxRequestBytes` for canonical digest input, `maxFactBytes`
@@ -169,8 +281,9 @@ build them implicitly. No legacy extension WASM package is loaded.
 `npm run sdk:verify:isolated` performs these C6 checks in a temporary copy of the
 listed SDK sources, without extension/server/legacy WASM sources or existing
 build output. It installs dependencies and builds the Native runner and SDK
-WASM there. Product snapshot generation and final tarball/browser release
-verification remain separate.
+WASM there. The packaged decoder snapshot is copied from its committed
+Registry source and is checked by `runtime.test.mjs`. Final tarball/browser
+consumer checks are part of each release.
 
 User verification (2026-09-28, local C6 before the review corrections):
 `sdk:verify:isolated` reached its final success marker, including Native session,
@@ -195,6 +308,8 @@ used. `check` maps unsupported requests to an explicit warning with unavailable
 audit metadata. Installation of a bundle does not certify every request path it describes.
 Method-specific Fact value validation remains the provider's responsibility;
 Core validates plan binding, provenance shape, age and required projections.
-Product scope and release verification remain separate from these fixed tests.
+The packaged snapshot covers the Registry decoders Core installs today; a
+request outside it gets `UNSUPPORTED_REQUEST` from `plan` and a warning from
+`check`.
 
 Apache-2.0; see [LICENSE](./LICENSE) and [NOTICE](./NOTICE).
