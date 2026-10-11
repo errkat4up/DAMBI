@@ -43,7 +43,7 @@
   "emit": {
     "strategy": "array_emit",
     "array_source": "$args.representatives",
-    "per_item_body": {
+    "body": {
       "domain": "governance",
       "governance": {
         "action": "update_representative",

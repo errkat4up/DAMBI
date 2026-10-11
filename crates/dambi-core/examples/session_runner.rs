@@ -1,5 +1,6 @@
 //! Native counterpart for the SDK's real WASM parity regression.
 //! Reads one local JSON scenario from stdin; performs no external I/O.
+//! `--canonicalize` instead emits its JSON input using Core's pinned JCS library.
 
 use std::io::{self, Read};
 
@@ -45,14 +46,25 @@ fn run(input: Value) -> Result<Value, String> {
 
 fn main() {
     let result = (|| {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        let canonicalize = match args.as_slice() {
+            [] => false,
+            [mode] if mode == "--canonicalize" => true,
+            _ => return Err("usage: session_runner [--canonicalize]".to_string()),
+        };
         let mut input = String::new();
         io::stdin()
             .read_to_string(&mut input)
             .map_err(|e| e.to_string())?;
-        run(serde_json::from_str(&input).map_err(|e| e.to_string())?)
+        let value = serde_json::from_str(&input).map_err(|e| e.to_string())?;
+        if canonicalize {
+            serde_json_canonicalizer::to_string(&value).map_err(|e| e.to_string())
+        } else {
+            run(value).map(|output| format!("{output}\n"))
+        }
     })();
     match result {
-        Ok(output) => println!("{output}"),
+        Ok(output) => print!("{output}"),
         Err(error) => {
             eprintln!("native session: {error}");
             std::process::exit(1);

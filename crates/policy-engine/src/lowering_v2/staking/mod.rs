@@ -81,6 +81,10 @@ pub(crate) fn lower_stake_venue(venue: &StakeVenue) -> Value {
             m.insert("chain".into(), Value::String(chain.to_string()));
             m.insert("stakeToken".into(), Value::String(addr(stake_token)));
         }
+        StakeVenue::AaveUmbrellaBatchHelper { chain, helper } => {
+            m.insert("chain".into(), Value::String(chain.to_string()));
+            m.insert("helper".into(), Value::String(addr(helper)));
+        }
         StakeVenue::AaveSavingsGho { chain, vault }
         | StakeVenue::EthenaStakedUsde { chain, vault } => {
             m.insert("chain".into(), Value::String(chain.to_string()));

@@ -1,8 +1,8 @@
 # Dambi Core 세부 개발 계획
 
-작성일: 2026-09-14. 수정일: 2026-10-05. 상위 계획은 [Decoder·정책 → Core → Adapters](decoder-core-adapters-plan.md)이며, 이 문서는 Core의 C1~C6 실행 순서와 VS Code 작업 기준을 구체화한다. **Core 0.0.1의 C1~C6 기능 구현 및 사용자 검증 완료. 제품 snapshot·어댑터·최종 배포 검증은 후속 단계다.**
+작성일: 2026-09-14. 수정일: 2026-10-12. 상위 계획은 [Decoder·정책 → Core → Adapters](decoder-core-adapters-plan.md)이며, 이 문서는 Core의 C1~C6 실행 순서와 VS Code 작업 기준을 구체화한다. **Core 0.0.1 당시의 C1~C6 기능 구현 및 사용자 검증 완료. 현재 패키지 0.1.0에는 snapshot 패키징이 추가됐으며, 번들 확장·어댑터·최종 배포 검증은 후속 단계다.**
 
-문서 상태: **v0.1 작업 초안**. 구현·검증에서 확인한 의존성과 비용에 따라 단계 분할·순서·설계를 수정할 수 있다. 이미 검증한 동작과 명시적으로 합의한 계약, 아직 제안인 API·제품 범위를 구분한다. 계획의 추정을 구현 사실로 취급하거나 계획을 맞추기 위해 불필요한 절차를 추가하지 않는다. 이 문서 버전은 현재 SDK 패키지 버전 `0.0.1`과 별개다.
+문서 상태: **v0.1 작업 초안**. 구현·검증에서 확인한 의존성과 비용에 따라 단계 분할·순서·설계를 수정할 수 있다. 이미 검증한 동작과 명시적으로 합의한 계약, 아직 제안인 API·제품 범위를 구분한다. 계획의 추정을 구현 사실로 취급하거나 계획을 맞추기 위해 불필요한 절차를 추가하지 않는다. 문서 버전과 SDK 패키지 버전은 별개다.
 
 ## 1. 출발점과 착수 범위
 
@@ -10,7 +10,7 @@
 - [Decoder 인계](../../fixtures/decoder-policy/README.md#dec-07--decoder-인계), [D3 정책 검증](../../fixtures/sdk/README.md#결과-기록), [D4-1 계약 fixture 검증](../../contracts/core-v1/README.md#결과-기록)은 완료됐다. 기존 통과 수와 로그는 해당 기록을 따르며 여기 복제하지 않는다.
 - `packages/core` 0.0.1은 C5에서 `createCore/plan/evaluate/refreshPolicies/dispose`를 SDK 전용 WASM과 연결했고 C6에서 `check`·Fact 자동 조회·cache·hook을 구현했다. 검증 범위와 보완 변경의 상태는 [패키지 개발 안내](../../packages/core/README.md#development-checks)를 따른다. 과거 `backup/core-sdk-b219617`의 코드·시험 결과를 현재 구현으로 사용하지 않는다.
 - D4-1 완료는 **당시 SDK 초안의 fixture 검증**이다. C1-1에서 현재 `GET /v1/bundle`의 payload 필드·sequence 타입·wrapper에 맞춘 변경의 사용자 실행 검증을 마쳤다. 실제 운영 API 통합 검증은 후속이다. 기존 통과 기록을 수정된 계약의 검증 결과로 재사용하지 않는다.
-- [D4-2 제품 선택안](../../contracts/core-v1/snapshot-selection.proposal.json)은 미확정이다. D4-2·D4-3은 C1/C2 및 고정 fixture를 사용하는 C3~C6 개발의 전체 선행 조건이 아니다. 제품 범위·제품 snapshot 재현성·최종 배포 완료 표시는 확정된 D4-2·D4-3 결과가 있어야 한다.
+- [D4-2 제품·요청 범위](../../contracts/core-v1/snapshot-selection.proposal.json)와 선택 범위의 D4-3/B4 인계는 완료했다. D4-2·D4-3은 당시 C1/C2 및 고정 fixture를 사용하는 C3~C6 개발의 전체 선행 조건이 아니었다. 현재 완료 범위는 [번들 계획](bundle-development-plan.md)을 따르며 실제 어댑터 연동·최종 배포는 후속이다.
 
 이번부터의 흐름은 **C1-1 정책 API·fixture 정합화 → C1-2/3 공개 타입·소비자 검증 → C2 소스·실행부 추출 → C3 신뢰 검증 → C4 snapshot → C5 plan/evaluate → C6 check**다. 별도 준비 단계를 늘리지 않고 C1 안에서 계약을 맞춘다. C3는 정합화한 계약과 최소 `dambi-core` 경계가 준비되면 fixture 기반으로 병행할 수 있다. D4의 제품 결정은 별도 항목으로 유지한다.
 
@@ -80,7 +80,7 @@ Core 내부의 snapshot·계획 수명·cache와 호스트의 영구 저장·감
 
 정책·Decoder 키의 역할 분리는 유지한다. ADR의 후속 결정대로 v0.1 개발은 별도 로컬 개발 키를 사용하며 신규 KMS 구축이나 향후 온체인 전환을 C1~C6 선행 조건으로 넣지 않는다. 로컬 개발 키를 운영 신뢰 설정에 자동 추가하지 않는다.
 
-**API 담당 수정 항목:** 현재 발행기의 기본 입력은 사라진 `browser-extension/default-bundles`를 가리킨다. D3 공유 원본 `policy-bundles/`와 그 패키지 선언을 읽도록 수정하고, [공유 loader](../../scripts/sdk/policy-bundle.cjs)의 정책 ID·severity·manifest 일치 기준을 재사용한다. 실제 정책 재발행과 A1 연동 전에 해결할 항목이며 Core의 고정 fixture 개발은 계속할 수 있다. C1-1에서는 SDK fixture만 갱신했으며 실제 발행기는 미수정이다.
+**API publisher 현황(2026-10-12):** `main 7387536`의 발행기는 D3 공유 원본 `policy-bundles/`와 [공유 loader](../../scripts/sdk/policy-bundle.cjs)를 사용한다. 이전 확장 경로 수정은 구현됐으며, 실제 환경·서명 payload·A1 통합 검증은 별도로 확인한다.
 
 ### 3.2 생성·포트·수명주기
 
@@ -401,9 +401,9 @@ C1 결과는 [계약 README](../../contracts/core-v1/README.md#결과-기록) �
 | C4 snapshot·Store | 구현 및 Store·C6 통합 경로 검증 완료 |
 | C5 plan/evaluate·SDK WASM | 구현 및 Native·타입·JS/WASM 사용자 검증 완료 |
 | C6 check·Fact·cache·hook | 구현 및 보완 사용자 검증 완료 |
-| API 정책 publisher 경로 수정 | API 담당 후속 작업. 실제 정책 재발행·A1 연동 전 필요 |
-| D4-2·D4-3 제품 범위·재현 생성 | 후속 의존 항목. C1 착수 조건 아님 |
-| D4-3 전체 snapshot 생성기 | 생성·재현·Core 설치 확인(799개). 패키지 포함 전 |
-| D4-3a Universal Router 검증기 보완 | 미착수 |
-| D4-3b Aave 원본 정합화·`restake` | 미착수 |
+| API 정책 publisher 경로 수정 | 공유 원본·loader 전환 구현됨. 실제 A1 통합은 후속 |
+| D4-2·D4-3 제품 범위·재현 생성 | [번들 세부 계획](bundle-development-plan.md) 작성. 범위 확정·구현은 후속이며 완료 후 어댑터 계획으로 연결 |
+| D4-3 전체 snapshot 생성기 | 고정 snapshot·패키징 구현됨. 원본부터 독립 재현은 번들 B2~B3 |
+| D4-3a Universal Router 검증기 보완 | 번들 B1-1 대표 경로 검증·편입 완료. 범위·시장 데이터 제한은 [번들 계획](bundle-development-plan.md) 참조 |
+| D4-3b Aave 원본 정합화·`restake` | 번들 B1-2 선택 경로 Native/WASM 사용자 검증·snapshot 편입 완료 |
 | D4-3c 풀별 Decoder 조립 | 미착수. D4-2 범위 확정 필요 |

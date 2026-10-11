@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "status": "development_handoff_not_runtime_verified",
-  "purpose": "D3에서 선정한 첫 외부 Fact를 C1·C5·C6·A2로 인계한다. 운영 Policy API 합의나 SDK 구현 완료를 뜻하지 않는다.",
+  "status": "core_contract_implemented_a2_rpc_pending",
+  "purpose": "D3에서 선정한 첫 외부 Fact를 현재 C1·C5·C6 공개 계약에 맞춰 A2로 인계한다. Core의 mock 포트 검증과 실제 RPC adapter 구현·통합 검증을 구분한다.",
   "method": "portfolio.balance",
   "scope": {
     "selected_path": "ERC-20 balanceOf(owner) via eth_call",
@@ -29,8 +29,8 @@
     "failure_semantics": "원본 optional:true·required:false를 유지한다. 현재 materialize_v2는 결과 누락과 projection/type 실패를 call.optional로 처리하며 output.required로 분기하지 않는다. 이 catalog 정책은 balance가 없으면 해당 정책의 warn이 발생하지 않는다. 전체 판정은 다른 정책에 따라 달라진다."
   },
   "planned_call_example": {
-    "manifest_id": "transfer-full-balance-sweep",
-    "call_id": "transfer-full-balance-sweep::owner-balance",
+    "manifestId": "transfer-full-balance-sweep",
+    "callId": "<plan-issued-callId>",
     "method": "portfolio.balance",
     "params": {
       "chain_id": "eip155:1",
@@ -56,7 +56,8 @@
       "owner는 계획에 고정된 요청자의 주소다. 응답의 owner나 별도 호스트 입력으로 교체하지 않는다.",
       "현재 planner는 selector를 대입하며 위 method별 주소·chain 검사를 수행하는 검증기가 아니다. 현재 서버 portfolio_balance도 owner를 직접 검사하지 않는다."
     ],
-    "validation_status": "SDK adapter의 입력 검증은 A2, 계획과 요청 결속 검증은 C5 이후 구현·시험 대상이다."
+    "validation_status": "Core의 요청·계획·FactBatch 결속은 C5/C6에 구현됐다. method별 chain·주소·ABI 검증과 실제 RPC 연결은 A2 대상이다.",
+    "public_ids": "공개 PlannedCall은 manifestId·callId를 사용한다. callId는 multicall 자식까지 계획 전체에서 유일한 opaque 값이므로 manifest/spec ID로 조합하지 않는다. FactProvider는 options.planId와 전달받은 call.callId를 그대로 FactBatch에 돌려준다. 예시의 꺾쇠 ID는 자리표시자다."
   },
   "response_layers_example": {
     "status": "synthetic_example_not_captured_rpc_response",
@@ -78,15 +79,24 @@
       "result": "0x0000000000000000000000000000000000000000000000000000000000000064"
     },
     "unwrapped_method_response": { "balance": "0x64" },
-    "existing_engine_results": {
-      "transfer-full-balance-sweep::owner-balance": { "balance": "0x64" }
+    "sdk_fact_batch": {
+      "planId": "<options.planId>",
+      "results": {
+        "<plan-issued-callId>": {
+          "value": { "balance": "0x64" },
+          "source": "onchain:eip155:1:eth_call",
+          "observedAt": 1800000000000,
+          "blockNumber": "20000000"
+        }
+      }
     },
     "projected_context_fragment": { "custom": { "balance": "0x64" } },
     "boundary_rules": [
       "Adapter가 JSON-RPC envelope를 검사하고 ABI word를 U256으로 해석해 portfolio.balance의 의미 응답 {balance}를 만든다.",
       "Core에 전달할 원본 Fact는 projection 전 메서드 의미 응답 {balance}다. transport JSON-RPC envelope나 result의 ABI hex 문자열 자체가 아니다.",
-      "$.result.balance의 result는 engine selector의 루트 이름이다. 기존 results[call_id]에 {result:{balance}}로 중첩하지 않는다.",
-      "Core가 manifest에 따라 한 번 projection한다. Adapter가 balance 문자열만 추출해 Fact value로 전달하지 않는다."
+      "$.result.balance의 result는 engine selector의 루트 이름이다. FactBatch.results[callId].value는 {balance}이며 {result:{balance}}로 중첩하지 않는다.",
+      "Core가 manifest에 따라 한 번 projection한다. Adapter가 balance 문자열만 추출해 Fact value로 전달하지 않는다.",
+      "개별 조회 불가 call은 results에서 생략하고 Core가 pinned manifest의 optional 의미를 적용하게 한다. 전체 fetch 실패는 reject한다. 실패를 0x0이나 error 객체를 담은 성공 Fact로 바꾸지 않는다. 전달된 AbortSignal을 실제 RPC 요청까지 전파한다."
     ]
   },
   "balance_representation": {
@@ -100,9 +110,9 @@
     "failure_rule": "RPC error·revert·잘못된 응답·누락을 0x0으로 대체하지 않는다. 실제 관측된 zero와 조회 실패를 구분한다."
   },
   "provenance_handoff": {
-    "status": "C1 contract alignment and C5/C6/A2 implementation pending",
-    "current_scaffold": "packages/core/src/ports/fact.ts에는 source·observedAt·blockNumber가 이미 선언되어 있으나 value 주석은 투영 후 값이다. C1에서 projection 전 의미 응답과 맞추고 공개 계약 차이를 설명해야 한다.",
-    "future_fact_example": {
+    "status": "core_mock_boundary_verified_live_rpc_pending",
+    "current_contract": "FactResult.value는 projection 전 의미 응답이다. Core는 planId·callId, source, observedAt의 단위·신선도, blockNumber의 decimal 문자열 형식과 projection을 검증한다. method별 U256·ABI 형식과 실제 block 관측은 A2 adapter 책임이다.",
+    "fact_example": {
       "value": { "balance": "0x64" },
       "source": "onchain:eip155:1:eth_call",
       "observedAt": 1800000000000,
@@ -113,12 +123,14 @@
       "예시 source 이름·관측시각·블록은 합성 데이터이며 운영 provider 응답이 아니다.",
       "관측시각은 조회한 Fact의 시각을 보존하며 cache 재사용 때 현재 시각으로 덮어쓰지 않는다.",
       "eth_call 응답에는 blockNumber가 없으므로 정확히 사용한 블록을 별도로 확보해 기록한다. latest 요청에 근거 없는 고정 블록 번호를 붙이지 않는다.",
-      "source 문자열은 출처 표시이며 인증 증명이 아니다. 응답/요청·계획 일치와 신선도 검증은 별도 구현 대상이다."
-    ]
+      "source 문자열은 출처 표시이며 인증 증명이 아니다. Core의 계획 결속·신선도 검사가 실제 RPC 응답의 진위나 block 일치를 증명하지 않는다."
+    ],
+    "cache": "check()는 chain·method·정렬된 resolved params 전체(명시된 block selector 포함)로 cache를 구분하고 최초 observedAt·blockNumber를 보존한다. 성공한 필수 call(optional:false) 중 projection outputs가 있는 응답만 cache에 넣는다. optional call은 같은 키의 검증된 필수 응답을 재사용할 수 있으나 단독으로 cache를 채우지 않는다. 정책 refresh 성공 시 cache를 비우며 이전 요청은 다시 채우지 못한다. A2에서 새 block selector를 지원하면 params에 명시하고 provider 내부 설정만으로 같은 키의 의미를 바꾸지 않는다."
   },
-  "future_cases": {
-    "status": "planned_not_executed",
-    "required_fact_context": "필수 Fact 검사는 후속 SDK 시험 전용 manifest의 optional:false로 구성한다. 기존 catalog manifest의 optional:true·required:false를 변경하거나 Day-1 활성화 목록에 넣지 않는다. 정확한 SDK 오류 API는 C1에서 정한다.",
+  "verification_handoff": {
+    "status": "core_mock_cases_implemented_a2_transport_cases_pending",
+    "core_test_scope": "runtime.test.mjs와 check.test.mjs는 의미 응답의 projection·U256 정밀도, 필수 누락, optional 유지, provenance·계획 결속, 취소·timeout·cache를 mock 포트와 실제 Core로 검증한다. 아래 목록 전체나 실제 RPC 사례가 이미 실행됐다는 뜻은 아니다.",
+    "required_fact_context": "필수 Fact 검사는 SDK 시험 전용 manifest의 optional:false로 구성한다. 기존 catalog manifest의 optional:true·required:false와 Day-1 활성화 목록은 유지한다. 유효 handle의 필수 누락·projection 실패는 deny + fail_closed와 required_fact_missing·projection_failed 진단을 반환한다. v2는 output.required가 아닌 call.optional로 누락·projection 실패를 분기한다. 잘못된 provenance·planId·미지 callId는 optional 여부와 별도로 Core 검증 실패다.",
     "cases": [
       { "id": "canonical-u256", "values": ["0x0", "0x64", "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"], "expected": "정상 의미 응답을 받아 balance 문자열을 한 번 투영하며 정밀도를 보존한다." },
       { "id": "noncanonical-u256", "values": ["100", "0x00", "0x064", "0X64", "0xAB", "0x", "0x10000000000000000000000000000000000000000000000000000000000000000"], "expected": "portfolio.balance provider 결과로 거절한다. 현재 engine String projection만으로 검출된다고 간주하지 않는다." },
@@ -131,7 +143,7 @@
       { "id": "invalid-owner-or-token-address", "values": ["0x1234", "0xgg11111111111111111111111111111111111111"], "expected": "A2 adapter가 RPC 전송 전에 잘못된 주소를 거절한다." },
       { "id": "chain-mismatch", "params": { "chain_id": "eip155:1", "asset_chain": "eip155:10" }, "expected": "A2 adapter가 다른 chain으로 조회하지 않고 불일치를 거절한다." },
       { "id": "rpc-error-or-malformed-word", "expected": "JSON-RPC id 불일치·error·잘린 ABI word를 성공 Fact로 반환하지 않는다. zero로 대체하지 않는다." },
-      { "id": "provenance-and-freshness", "expected": "C5/C6/A2에서 실제 사용 블록·observedAt 단위·cache 시각 보존·계획 결속을 검증한다. 현재 fixture의 예시만으로 통과 처리하지 않는다." }
+      { "id": "provenance-and-freshness", "expected": "Core의 provenance 형식·신선도·cache 시각 보존·계획 결속은 mock 시험 범위다. A2는 실제 조회 block과 응답의 연결을 검증하며 이 합성 예시만으로 live RPC 통과 처리하지 않는다." }
     ]
   },
   "source_references": [
@@ -143,7 +155,10 @@
     { "path": "crates/policy-server/server/src/methods.rs", "symbol": "portfolio_balance", "note": "기존 WalletState 기반 {balance} 응답. owner 직접 검증은 없음." },
     { "path": "crates/policy-server/server/src/handler.rs", "symbol": "portfolio.balance dispatch", "note": "현재 서버 결과 map 삽입 경로. SDK 구현 완료 근거는 아님." },
     { "path": "crates/policy-server/sync/src/sources/fetchers/decoder.rs", "symbol": "function_selector; encode_address; decode_u256_as_string", "note": "balanceOf 인코딩 및 기존 decimal String decoder." },
-    { "path": "packages/core/src/ports/fact.ts", "symbol": "FactResult", "note": "provenance 필드와 C1에서 정리할 value 의미." },
+    { "path": "packages/core/src/ports/fact.ts", "symbol": "FactResult; FactProvider", "note": "projection 전 의미 응답, provenance, 부분 누락과 전체 fetch 실패 경계." },
+    { "path": "packages/core/src/types/plan.ts", "symbol": "PlannedCall; CorePlan; FactBatch", "note": "공개 camelCase 필드와 그대로 반환할 opaque ID." },
+    { "path": "packages/core/tests/runtime.test.mjs", "symbol": "required Fact projection, provenance and failure behavior cross the WASM boundary", "note": "mock Fact의 실제 Native/WASM projection·필수 누락·신선도·미지 call 검증." },
+    { "path": "packages/core/tests/check.test.mjs", "symbol": "raw transfer retains U256 precision and catalog optional semantics while required Facts fail closed; cache tests", "note": "mock provider의 optional/required·plan 결속·cache 및 명시 block params 분리 검증. 실제 RPC adapter 시험은 아님." },
     { "path": "crates/policy-engine/tests/fixtures/policy_catalog_v2/_methods/portfolio.balance.md", "symbol": "method design", "note": "설계 참고이며 코드가 우선한다. 과거 dispatcher 부재·numeric chain 설명을 현재 사실로 사용하지 않는다." }
   ]
 }

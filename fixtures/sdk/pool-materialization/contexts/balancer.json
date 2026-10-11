@@ -1,0 +1,17 @@
+{
+  "schema_version": "3-source-context",
+  "source": "balancer_v3:pool_tokens",
+  "chain_id": 1,
+  "address": "0xae563e3f8219521950555f5962419c8919758ea2",
+  "context": {
+    "pool_tokens": {
+      "0xda66e8ddf9959e4db759bfd06256730d8a8b2d13": [
+        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+      ]
+    },
+    "address": "0xae563e3f8219521950555f5962419c8919758ea2",
+    "chainId": 1,
+    "id_suffix": "v2-mainnet"
+  }
+}

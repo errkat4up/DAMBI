@@ -17,7 +17,8 @@
     "typecheck": "tsc --noEmit",
     "serve": "python3 -m http.server 8000",
     "publish:policy-bundle": "tsx scripts/publish-policy-bundle.ts",
-    "build:decoder-snapshot": "tsx scripts/build-decoder-snapshot.ts"
+    "build:decoder-snapshot": "tsx scripts/build-decoder-snapshot.ts",
+    "test:decoder-materialization": "tsx --test ../fixtures/sdk/pool-materialization/materialize.test.mjs scripts/__tests__/decoder-snapshot-selected.test.ts"
   },
   "devDependencies": {
     "@google-cloud/kms": "^5.5.1",

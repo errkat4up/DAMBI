@@ -98,12 +98,16 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import canonicalize from "canonicalize";
+import {
+  buildMaterializedFromSource,
+  buildSourceContext,
+  sanitizeIdSuffix,
+} from "../../scripts/sdk/materialize-decoder.mjs";
 
 import {
   PROTOCOL_SOURCE_RESOLVERS,
   rpcClient,
 } from "./resolvers/index.ts";
-import type { ProtocolResolvedAddress } from "./resolvers/index.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -849,93 +853,6 @@ function resolveTokenBundle(
   return buildResolvedFromEffective(bundle, sourced, effective);
 }
 
-function lookupSourcePath(context: Record<string, unknown>, path: string): unknown {
-  let current: unknown = context;
-  for (const segment of path.split(".")) {
-    if (Array.isArray(current)) {
-      const idx = Number(segment);
-      if (!Number.isInteger(idx)) return undefined;
-      current = current[idx];
-    } else if (current && typeof current === "object") {
-      current = (current as Record<string, unknown>)[segment];
-    } else {
-      return undefined;
-    }
-  }
-  return current;
-}
-
-function substituteSourcePlaceholders(value: unknown, context: Record<string, unknown>): unknown {
-  if (typeof value === "string") {
-    if (!value.startsWith("$source.")) return value;
-    const resolved = lookupSourcePath(context, value.slice("$source.".length));
-    if (resolved === undefined) {
-      throw new Error(`unknown source placeholder ${JSON.stringify(value)}`);
-    }
-    return resolved;
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => substituteSourcePlaceholders(item, context));
-  }
-  if (value && typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [key, nested] of Object.entries(value)) {
-      out[key] = substituteSourcePlaceholders(nested, context);
-    }
-    return out;
-  }
-  return value;
-}
-
-function sanitizeIdSuffix(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9._/-]+/g, "-")
-    .replace(/\/+/g, "/")
-    .replace(/^-+|-+$/g, "");
-}
-
-function appendIdSuffix(id: string, suffix: string): string {
-  const clean = sanitizeIdSuffix(suffix);
-  if (!clean) throw new Error(`source_materialize produced empty id suffix for ${id}`);
-  const at = id.lastIndexOf("@");
-  if (at === -1) return `${id}/${clean}`;
-  return `${id.slice(0, at)}/${clean}${id.slice(at)}`;
-}
-
-function buildSourceContext(
-  chainId: number,
-  entry: ProtocolResolvedAddress,
-): Record<string, unknown> {
-  const context: Record<string, unknown> = { ...(entry.context ?? {}) };
-  context.address = entry.address;
-  context.chainId = chainId;
-  context.id_suffix = entry.id_suffix ?? `${chainId}-${entry.address}`;
-  return context;
-}
-
-function buildMaterializedFromSource(
-  bundle: AdapterBundle,
-  sourced: BundleMatchSourced,
-  chainId: number,
-  entry: ProtocolResolvedAddress,
-): ResolvedBundle {
-  const context = buildSourceContext(chainId, entry);
-  const substituted = substituteSourcePlaceholders(bundle, context) as AdapterBundle;
-  const { match: _match, source_materialize: _sourceMaterialize, ...rest } = substituted;
-  const id = appendIdSuffix(String(rest.id), String(context.id_suffix));
-  return {
-    ...rest,
-    id,
-    match: {
-      selector: sourced.selector,
-      chain_to_addresses: {
-        [String(chainId)]: [entry.address],
-      },
-    },
-  } as ResolvedBundle;
-}
-
 async function resolveProtocolBundle(
   bundle: AdapterBundle,
   sourced: BundleMatchSourced,
@@ -979,7 +896,7 @@ async function resolveProtocolBundle(
         const context = buildSourceContext(chainId, entry);
         materialized.push({
           kind: "source_ref",
-          materialized: buildMaterializedFromSource(bundle, sourced, chainId, entry),
+          materialized: buildMaterializedFromSource(bundle, sourced, chainId, entry) as ResolvedBundle,
           template: bundle,
           source: sourceSpec,
           chainId,

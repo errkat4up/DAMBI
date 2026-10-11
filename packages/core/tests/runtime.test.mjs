@@ -5,7 +5,16 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import { CoreError, createCore } from "@dambi/core";
+import { universalRouterCases, universalRouterRoutes } from "./fixtures/universal-router.mjs";
+import {
+  aaveRoutes, aaveSender, aaveHelper, aaveGovernanceCases, aaveUmbrellaCases, aaveEmptyCases,
+} from "./fixtures/aave.mjs";
+import {
+  poolSender, poolOther, poolAmount, poolTokens, poolRoutes, balancerPool,
+  curvePoolRequest, curvePoolCases, balancerPoolRequest, uniswapPoolRequest, uniswapPoolCases,
+} from "./fixtures/pools.mjs";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const fixtures = new URL("../../../crates/dambi-core/tests/fixtures/", import.meta.url);
@@ -163,6 +172,379 @@ test("packaged decoder snapshot installs and routes Registry tokens", async (t) 
   const plan = await core.plan(usdc);
   assert.equal(core.evaluate(plan, emptyFacts(plan)).source, "evaluated");
   await assert.rejects(core.plan(request()), code("UNSUPPORTED_REQUEST"));
+});
+
+test("packaged Universal Router V3 recipients and V4 ABI alternatives agree in WASM and Native", async (t) => {
+  const { decoderSnapshot, decoderSnapshotInfo } = await import("@dambi/core/decoders");
+  const bundles = JSON.parse(decoderSnapshot.artifact).bundles;
+  for (const { id, selector } of universalRouterRoutes) {
+    const matches = bundles.filter((bundle) => bundle.id === id);
+    assert.equal(matches.length, 1, `packaged snapshot must include ${id} exactly once`);
+    assert.equal(matches[0].match.selector, `0x${selector}`);
+  }
+  const setup = harness();
+  setup.local.decoderSnapshot = decoderSnapshot;
+  setup.config.decoderSnapshot = decoderSnapshot;
+  setup.local.limits.maxDecoderBytes = decoderSnapshotInfo.bytes;
+  const core = await createCore(setup.config);
+  t.after(() => core.dispose());
+
+  // The Native regression checks restored Action fields. Here the real package
+  // and WASM must preserve the same Day1 policy verdict, including non-self deny.
+  // This does not validate market/slippage/pool fallback values, every command,
+  // or V4's final TAKE/SETTLE receiver (the swap manifest uses tx.from).
+  for (const scenario of universalRouterCases(NOW)) {
+    const reference = native(setup.local, initialPolicy, scenario.request);
+    assert.deepEqual(reference.plan.calls, [], scenario.name);
+    const verdict = await core.check(scenario.request);
+    assert.deepEqual(verdict, reference.verdict, scenario.name);
+    assert.equal(verdict.source, "evaluated", scenario.name);
+    assert.equal(verdict.decision, scenario.decision, scenario.name);
+    assert.equal(
+      verdict.reasons.some((reason) => reason.policyId === "swap-recipient-not-self-deny"),
+      scenario.decision === "deny", scenario.name,
+    );
+  }
+});
+
+test("WASM rejects malformed nested ABI alternatives in a pinned packaged snapshot", async () => {
+  const { decoderSnapshot } = await import("@dambi/core/decoders");
+  const snapshot = JSON.parse(decoderSnapshot.artifact);
+  const bundle = snapshot.bundles.find(({ id }) => id === universalRouterRoutes[0].id);
+  assert.ok(bundle, "Universal Router must be included in the built package");
+  const entry = bundle.emit.per_opcode_body["0x10"].nested.per_opcode_body["0x07"];
+  const alternatives = entry.inputs_abi_alternatives;
+  assert.ok(Array.isArray(alternatives) && alternatives.length > 0);
+  // Re-pin the mutated bytes: the schema gate, rather than a digest mismatch,
+  // must reject a non-array value and a malformed candidate after valid ones.
+  for (const invalid of [false, [...alternatives, "(uint256 amount"]]) {
+    entry.inputs_abi_alternatives = invalid;
+    const artifact = JSON.stringify(snapshot);
+    const setup = harness();
+    setup.config.decoderSnapshot = {
+      artifact, expectedDigest: `0x${createHash("sha256").update(artifact, "utf8").digest("hex")}`,
+    };
+    setup.config.limits.maxDecoderBytes = Buffer.byteLength(artifact, "utf8");
+    await assert.rejects(createCore(setup.config), code("INVALID_DECODER_SNAPSHOT"));
+  }
+});
+
+async function packagedAave(t, policy = initialPolicy) {
+  const { decoderSnapshot, decoderSnapshotInfo } = await import("@dambi/core/decoders");
+  const bundles = JSON.parse(decoderSnapshot.artifact).bundles;
+  for (const { id, selector, to } of aaveRoutes) {
+    const matches = bundles.filter((bundle) => bundle.id === id);
+    assert.equal(matches.length, 1, `packaged snapshot must include ${id} exactly once`);
+    assert.equal(matches[0].match.selector, selector);
+    assert.ok(matches[0].match.chain_to_addresses["1"].includes(to));
+  }
+  const setup = harness(policy);
+  setup.local.decoderSnapshot = decoderSnapshot;
+  setup.config.decoderSnapshot = decoderSnapshot;
+  setup.local.limits.maxDecoderBytes = decoderSnapshotInfo.bytes;
+  const core = await createCore(setup.config);
+  t.after(() => core.dispose());
+  return { core, local: setup.local };
+}
+
+// Test-only policies prove that decoded values survive the WASM/Cedar boundary.
+// These observation policies never change the signed Day1 fixture or product policies.
+function observationPolicy(checks) {
+  const payload = JSON.parse(initialPolicy.payload);
+  for (const { id, tag, action, predicate, policyRpc = [], fields = {} } of checks) {
+    payload.policies.push({
+      id,
+      policy: `@id("${id}") @severity("deny") forbid(principal, action == ${action}, resource) when { ${predicate} };`,
+      manifest: {
+        id, schema_version: 2, trigger: { where: { "action.tag": { eq: tag } } },
+        policy_rpc: policyRpc, custom_context: { fields },
+      },
+    });
+  }
+  return signed(payload);
+}
+
+test("packaged Aave governance retains U256 fields across WASM and Native policies", async (t) => {
+  const checks = [
+    {
+      id: "test-aave-proposal-u256", tag: "redeem_cancellation_fee",
+      action: 'Governance::Action::"RedeemCancellationFee"',
+      predicate: `context.proposalId == "${MAX_U256}"`,
+    },
+    {
+      id: "test-aave-representative-chain", tag: "update_representative",
+      action: 'Governance::Action::"UpdateRepresentative"',
+      predicate: `context.representativeChainId == "0x20000000000001" && context.representative == "${aaveSender}"`,
+    },
+  ];
+  const policy = observationPolicy(checks);
+  const { core, local } = await packagedAave(t, policy);
+  for (const [index, scenario] of aaveGovernanceCases().entries()) {
+    for (const [req, decision] of [[scenario.request, "deny"], [scenario.controlRequest, "allow"]]) {
+      const label = `${scenario.name}: ${decision}`;
+      const reference = native(local, policy, req);
+      assert.deepEqual(reference.plan.calls, [], label);
+      const verdict = await core.check(req);
+      assert.deepEqual(verdict, reference.verdict, label);
+      assert.equal(verdict.source, "evaluated", label);
+      assert.equal(verdict.decision, decision, label);
+      assert.equal(verdict.reasons.some((reason) => reason.policyId === checks[index].id), decision === "deny", label);
+    }
+  }
+});
+
+test("packaged Aave Umbrella preserves restake and helper in WASM and Native", async (t) => {
+  const id = "test-umbrella-restake-intent";
+  const policy = observationPolicy([{
+    id, tag: "claim_rewards", action: 'Staking::Action::"ClaimRewards"',
+    predicate: `context has restake && context.restake
+      && context.venue.name == "aave_umbrella_batch_helper"
+      && context.venue has helper && context.venue.helper == "${aaveHelper}"
+      && context has recipient && context.recipient == "${aaveSender}"`,
+  }]);
+  const { core, local } = await packagedAave(t, policy);
+  // These are claim/restake intents, not proof of permit validity, live stake
+  // paths, received amounts or execution. The bool does not imply all rewards restake.
+  for (const scenario of aaveUmbrellaCases(NOW)) {
+    const reference = native(local, policy, scenario.request);
+    assert.deepEqual(reference.plan.calls, [], scenario.name);
+    const verdict = await core.check(scenario.request);
+    assert.deepEqual(verdict, reference.verdict, scenario.name);
+    assert.equal(verdict.source, "evaluated", scenario.name);
+    assert.equal(verdict.decision, scenario.decision, scenario.name);
+    assert.equal(verdict.reasons.some((reason) => reason.policyId === id), scenario.restake, scenario.name);
+  }
+});
+
+test("packaged Aave empty arrays warn and malformed calldata fails closed", async (t) => {
+  const { core, local } = await packagedAave(t);
+  for (const scenario of aaveEmptyCases(NOW)) {
+    const reference = native(local, initialPolicy, scenario.request);
+    const verdict = await core.check(scenario.request);
+    assert.deepEqual(verdict, reference.verdict, scenario.name);
+    assert.equal(verdict.decision, "warn", scenario.name);
+    assert.equal(verdict.source, "evaluated", scenario.name);
+    assert.ok(verdict.diagnostics.some((item) => item.code === "partial_decode"), scenario.name);
+
+    // Keep each known selector but remove its ABI arguments. plan() rejects;
+    // check() turns the same error into an explicit fail-closed verdict.
+    const malformed = { ...scenario.request, data: scenario.route.selector };
+    await assert.rejects(core.plan(malformed), code("INVALID_REQUEST"));
+    const failure = await core.check(malformed);
+    assert.equal(failure.decision, "deny", scenario.name);
+    assert.equal(failure.source, "fail_closed", scenario.name);
+    assert.ok(failure.diagnostics.some((item) => item.code === "invalid_request"), scenario.name);
+  }
+});
+
+async function selectedPools(t, policy = initialPolicy) {
+  // The shared generator must have run first. Missing inputs/artifacts fail;
+  // there is no skip, inline materialization or packaged-snapshot fallback.
+  const base = new URL("../../../fixtures/sdk/pool-materialization/generated/pools-preview/", import.meta.url);
+  const [artifact, metaText] = await Promise.all([
+    readFile(new URL("snapshot.json", base), "utf8"),
+    readFile(new URL("snapshot.meta.json", base), "utf8"),
+  ]);
+  const meta = JSON.parse(metaText);
+  const snapshot = JSON.parse(artifact);
+  const expectedDigest = `0x${createHash("sha256").update(artifact, "utf8").digest("hex")}`;
+  assert.equal(meta.digest, expectedDigest);
+  assert.equal(meta.bytes, Buffer.byteLength(artifact, "utf8"));
+  assert.equal(meta.schema_version, 1);
+  assert.equal(snapshot.schema_version, 1);
+  assert.equal(meta.bundle_count, poolRoutes.length);
+  assert.equal(snapshot.bundles.length, poolRoutes.length);
+  assert.equal(meta.selection.purpose, "regression-only");
+  assert.equal(meta.selection.route_count, poolRoutes.length);
+  assert.equal(meta.excluded_count, 0);
+  assert.deepEqual(meta.rejected_by_core, []);
+  assert.deepEqual(meta.selection.inputs.map(({ id }) => id), snapshot.bundles.map(({ id }) => id));
+  for (const { id, selector, to } of poolRoutes) {
+    const entries = snapshot.bundles.filter((bundle) => bundle.id === id);
+    assert.equal(entries.length, 1, id);
+    assert.deepEqual(entries[0].match, { selector, chain_to_addresses: { "1": [to] } });
+  }
+  const setup = harness(policy);
+  setup.local.decoderSnapshot = { artifact, expectedDigest };
+  setup.config.decoderSnapshot = setup.local.decoderSnapshot;
+  setup.local.limits.maxDecoderBytes = meta.bytes;
+  const core = await createCore(setup.config);
+  t.after(() => core.dispose());
+  return { core, local: setup.local };
+}
+
+async function poolParity(core, local, policy, req, decision, label) {
+  const reference = native(local, policy, req);
+  assert.deepEqual(reference.plan.calls, [], label);
+  const verdict = await core.check(req);
+  assert.deepEqual(verdict, reference.verdict, label);
+  assert.equal(verdict.source, "evaluated", label);
+  assert.equal(verdict.decision, decision, label);
+  return verdict;
+}
+
+function swapTokenPredicate(tokenIn, tokenOut) {
+  return `context.tokenIn.key.standard == "erc20"
+    && context.tokenIn.key.chain == "eip155:1"
+    && context.tokenIn.key has address && context.tokenIn.key.address == "${tokenIn}"
+    && context has tokenOut && context.tokenOut.key.standard == "erc20"
+    && context.tokenOut.key.chain == "eip155:1"
+    && context.tokenOut.key has address && context.tokenOut.key.address == "${tokenOut}"`;
+}
+
+test("selected Curve pool preserves coin direction and full-width calldata amounts in Native and WASM", async (t) => {
+  const cases = curvePoolCases();
+  const checks = cases.map((scenario, index) => ({
+    id: `test-pool-curve-${index}`, tag: "swap", action: 'Amm::Action::"Swap"',
+    predicate: `${swapTokenPredicate(scenario.tokenIn, scenario.tokenOut)}
+      && context.venue.name == "curve_v1" && context.venue has pool
+      && context.venue.pool == "${poolRoutes[0].to}"
+      && context.venue has nCoins && context.venue.nCoins == 2
+      && context.venue has isMeta && !context.venue.isMeta
+      && context.direction.kind == "exact_input"
+      && context.direction has amountIn && context.direction.amountIn == "0x${poolAmount.toString(16)}"
+      && context.direction has minAmountOut && context.direction.minAmountOut == "0x384"
+      && context.recipient == "${poolSender}"`,
+  }));
+  const policy = observationPolicy(checks);
+  const { core, local } = await selectedPools(t, policy);
+  // The manifest's slippage 0 and live-input skeletons are not observed prices.
+  for (const [index, scenario] of cases.entries()) {
+    for (const [req, decision] of [[scenario.request, "deny"], [scenario.controlRequest, "allow"]]) {
+      const verdict = await poolParity(core, local, policy, req, decision, scenario.name);
+      assert.equal(verdict.reasons.some((reason) => reason.policyId === checks[index].id), decision === "deny");
+    }
+  }
+});
+
+test("selected Balancer pool preserves token-amount association and LP intent across Native and WASM", async (t) => {
+  const id = "test-pool-balancer-pairs";
+  const tokenAmounts = (amounts) => [poolTokens.usdc, poolTokens.weth].map((address, index) => ({
+    token: { key: { standard: "erc20", chain: "eip155:1", address } },
+    amount: `0x${amounts[index].toString(16)}`,
+  }));
+  const matchedPairs = tokenAmounts([poolAmount, 7n]);
+  const policy = observationPolicy([{
+    id, tag: "add_liquidity", action: 'Amm::Action::"AddLiquidity"',
+    policyRpc: [{
+      id: "token-pairs", method: "test.pool-token-pairs",
+      params: { tokens: "$.action.params.tokens" },
+      outputs: [{ kind: "context", field: "pairsMatch", type: "Bool", from: "$.result.pairsMatch", required: true }],
+      optional: false,
+    }],
+    fields: { pairsMatch: "Bool" },
+    predicate: `context.venue.name == "balancer_v3"
+      && context.venue has poolId && context.venue.poolId == "${balancerPool}"
+      && context.params.kind == "pooled" && context.params has tokens
+      && context has custom && context.custom has pairsMatch && context.custom.pairsMatch
+      && context.params has minLpOut && context.params.minLpOut == "0x9"
+      && context.params has recipient && context.params.recipient == "${poolSender}"`,
+  }]);
+  const { core, local } = await selectedPools(t, policy);
+  // Cedar's strict validator cannot compare optional TokenKey records with a
+  // concrete record literal. Observe the real lowered token array through plan
+  // params, assert it exactly, then supply a local test Fact for the predicate.
+  // No external service is used; LP fields are still read directly by Cedar.
+  // Amounts are maxAmountsIn caps, not amounts actually deposited. The template
+  // hardcodes weighted without evidence; no test treats that as a verified type.
+  for (const [req, amounts, decision, label] of [
+    [balancerPoolRequest(), [poolAmount, 7n], "deny", "ordered pairs"],
+    [balancerPoolRequest({ amounts: [7n, poolAmount] }), [7n, poolAmount], "allow", "swapped amount control"],
+    // Known gap: wethIsEth is not represented in the Action. This documents
+    // unchanged observed intent, not valid ETH funding or execution support.
+    [balancerPoolRequest({ wethIsEth: true }), [poolAmount, 7n], "deny", "unrepresented wethIsEth"],
+  ]) {
+    const plan = await core.plan(req);
+    assert.equal(plan.calls.length, 1, label);
+    const [call] = plan.calls;
+    assert.equal(call.method, "test.pool-token-pairs", label);
+    assert.deepEqual(call.params, { tokens: tokenAmounts(amounts) }, label);
+    const fact = {
+      value: { pairsMatch: isDeepStrictEqual(call.params.tokens, matchedPairs) },
+      source: "fixture:balancer-token-pairs", observedAt: NOW,
+    };
+    const reference = native(local, policy, req, [fact]);
+    assert.deepEqual(withoutCallIds(plan), withoutCallIds(reference.plan), label);
+    const verdict = core.evaluate(plan, { planId: plan.planId, results: { [call.callId]: fact } });
+    assert.deepEqual(verdict, reference.verdict, label);
+    assert.equal(verdict.source, "evaluated", label);
+    assert.equal(verdict.decision, decision, label);
+    assert.equal(verdict.reasons.some((reason) => reason.policyId === id), decision === "deny", label);
+  }
+});
+
+test("selected Uniswap pool retains signed amount and recipient semantics with explicit price-limit gaps", async (t) => {
+  const cases = uniswapPoolCases();
+  const checks = cases.map((scenario, index) => ({
+    id: `test-pool-uniswap-${index}`, tag: "swap", action: 'Amm::Action::"Swap"',
+    predicate: `${swapTokenPredicate(scenario.tokenIn, scenario.tokenOut)}
+      && context.venue.name == "uniswap_v3" && context.venue has pool
+      && context.venue.pool == "${poolRoutes[2].to}"
+      && context.venue has feeTierBp && context.venue.feeTierBp == 100
+      && context.direction.kind == "${scenario.kind}"
+      && ${scenario.kind === "exact_input"
+        ? `context.direction has amountIn && context.direction.amountIn == "0x${poolAmount.toString(16)}"
+          && context.direction has minAmountOut && context.direction.minAmountOut == "0x0"
+          && context.slippageBp == 10000`
+        : `context.direction has amountOut && context.direction.amountOut == "0x${poolAmount.toString(16)}"
+          && context.direction has maxAmountIn && context.direction.maxAmountIn == "${MAX_U256}"`}
+      && context.recipient == "${poolSender}"`,
+  }));
+  const policy = observationPolicy(checks);
+  const { core, local } = await selectedPools(t, policy);
+  // minOut=0 / maxIn=U256::MAX are conservative model defaults. sqrtPriceLimitX96
+  // is lost, and slippageBp=10000 comes from minOut=0 lowering, not a live quote.
+  // The pinned token0 has no token metadata; raw amounts need no decimal guess.
+  for (const [index, scenario] of cases.entries()) {
+    for (const [req, decision, observed] of [
+      [scenario.request, "deny", true],
+      [scenario.controlRequest, "allow", false],
+      [scenario.otherRecipientRequest, "deny", false],
+    ]) {
+      const verdict = await poolParity(core, local, policy, req, decision, scenario.name);
+      assert.equal(verdict.reasons.some((reason) => reason.policyId === checks[index].id), observed);
+      assert.equal(verdict.reasons.some((reason) => reason.policyId === "swap-recipient-not-self-deny"), req === scenario.otherRecipientRequest);
+    }
+  }
+  const boundary = await poolParity(core, local, policy,
+    uniswapPoolRequest({ sqrtPriceLimitX96: (1n << 96n) + 1n }), "deny", "unrepresented price boundary");
+  assert.ok(boundary.reasons.some((reason) => reason.policyId === checks[0].id));
+});
+
+test("selected pools distinguish unknown context and route misses from malformed known calldata", async (t) => {
+  const { core, local } = await selectedPools(t);
+  for (const req of [
+    balancerPoolRequest({ pool: poolOther }),
+    balancerPoolRequest({ amounts: [7n] }),
+  ]) {
+    const verdict = await poolParity(core, local, initialPolicy, req, "warn", "unmapped or mismatched pool tokens");
+    assert.ok(verdict.diagnostics.some((item) => item.code === "partial_decode"));
+  }
+  const invalid = [
+    ...poolRoutes.map(({ to, selector }) => ({ ...curvePoolRequest(), to, data: selector })),
+    curvePoolRequest(2, 1),
+  ];
+  for (const req of invalid) {
+    assert.throws(() => native(local, initialPolicy, req),
+      (error) => error.status === 1 && String(error.stderr).includes("native session: INVALID_REQUEST:"));
+    await assert.rejects(core.plan(req), code("INVALID_REQUEST"));
+    const verdict = await core.check(req);
+    assert.equal(verdict.decision, "deny");
+    assert.equal(verdict.source, "fail_closed");
+    assert.ok(verdict.diagnostics.some((item) => item.code === "invalid_request"));
+  }
+  for (const req of [
+    { ...curvePoolRequest(), chainId: "eip155:10" },
+    { ...curvePoolRequest(), to: poolOther },
+  ]) {
+    assert.throws(() => native(local, initialPolicy, req),
+      (error) => error.status === 1 && String(error.stderr).includes("native session: UNSUPPORTED_REQUEST:"));
+    await assert.rejects(core.plan(req), code("UNSUPPORTED_REQUEST"));
+    const verdict = await core.check(req);
+    assert.equal(verdict.decision, "warn");
+    assert.equal(verdict.source, "evaluated");
+    assert.ok(verdict.diagnostics.some((item) => item.code === "unsupported_request"));
+  }
 });
 
 test("handles bind immutable requests to one instance and are consumed once", async (t) => {

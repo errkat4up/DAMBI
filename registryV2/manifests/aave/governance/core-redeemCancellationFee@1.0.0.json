@@ -31,7 +31,7 @@
   "emit": {
     "strategy": "array_emit",
     "array_source": "$args.proposalIds",
-    "per_item_body": {
+    "body": {
       "domain": "governance",
       "governance": {
         "action": "redeem_cancellation_fee",

@@ -1,0 +1,21 @@
+{
+  "schema_version": "3-source-context",
+  "source": "uniswap:v3_pool_candidates",
+  "chain_id": 1,
+  "address": "0x2c40c7b9f106f39a6e2aab6d9f1f29364e7250bc",
+  "context": {
+    "batch": "uniswap-v3-child-universe-deferred",
+    "disposition": "cover",
+    "reason": "representative latest mainnet Uniswap V3 pool from Dune sample; PoolCreated metadata materialized into direct V3 pool swap semantics and explicit Unknown/fail-closed manifests for remaining mutable pool entrypoints",
+    "token0": "0x87c9053c819bb28e0d73d33059e1b3da80afb0cf",
+    "token1": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    "fee_tier_bp": 100,
+    "tick_spacing": 1,
+    "pool_inventory_status": "sample_pool_metadata_written",
+    "source": "Dune decoded PoolCreated",
+    "source_query": "https://dune.com/queries/7633398",
+    "address": "0x2c40c7b9f106f39a6e2aab6d9f1f29364e7250bc",
+    "chainId": 1,
+    "id_suffix": "1-v3-pool-2c40c7b9"
+  }
+}

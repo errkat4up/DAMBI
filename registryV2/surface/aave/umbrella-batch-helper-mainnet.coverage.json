@@ -7,7 +7,7 @@
     "0xa5fbb680": {
       "name": "claimRewardsPermit",
       "decision": "cover",
-      "reason": "user-facing Aave claimRewardsPermit action covered by registry manifest"
+      "reason": "ClaimRewards intent per requested token, preserving restake preference and batch-helper venue; caller is the final beneficiary. Actual restaking, token conversion amounts and permit validity are not inferred."
     },
     "0x51d3bf6d": {
       "name": "cooldownPermit",

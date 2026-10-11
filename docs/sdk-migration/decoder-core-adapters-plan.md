@@ -324,8 +324,10 @@ Call tuple `(to,data,value,skipRevert,callbackHash)`의 순서·동적 offset/le
 | 작업 | 구현 범위·완료 조건 | 상태 |
 | --- | --- | --- |
 | D4-1 정책 wire 계약 | `contracts/core-v1/`에 payload/envelope 타입·JSON Schema·정상/오류 예시와 구조 검증. B 문자열 UTF-8 원문 서명, `registry_ref: null`, 정책/decoder 키 역할 구분 | 당시 초안 검증 완료. C1-1의 API 정합화 변경도 사용자 검증 완료 |
-| D4-2 제품 snapshot 선택 | chain·token·transaction/typed 경로·정책 적용 범위를 명시한 제품 선택 목록. DEC-07의 검증 범위 및 Permit2 v3·multicall 한계, Day-1 swap 정책에 필요한 decoder의 미검증 범위를 대조 | [제품 선택안](../../contracts/core-v1/snapshot-selection.proposal.json) 작성, 사용자 범위 결정 대기 |
-| D4-3 재현 생성·인계 | 선택 manifest/token/정적 프로토콜 자료와 builder 의존 목록 고정. `scripts/sdk/` 생성 진입점, 정렬된 snapshot·개별 bundle JCS digest·전체 로컬 digest·coverage. 확장/서버/cache 없이 같은 입력으로 재생성 | 미착수 |
+| D4-2 제품 snapshot 선택 | chain·token·transaction/typed 경로·정책 적용 범위를 명시한 제품 선택 목록. DEC-07의 검증 범위 및 Permit2 v3·multicall 한계, Day-1 swap 정책에 필요한 decoder의 미검증 범위를 대조 | [제품·요청 범위 인계](../../contracts/core-v1/snapshot-selection.proposal.json) 확정. 기존 DEC 선택과 공개 Core 지원을 구분하며 확대 범위는 제외 |
+| D4-3 재현 생성·인계 | 선택 manifest/token/정적 프로토콜 자료와 builder 의존 목록 고정. 정렬된 snapshot·개별 bundle JCS digest·전체 로컬 digest·coverage. 확장/서버/cache 없이 같은 입력으로 재생성 | 선택 입력의 생성·raw·격리 검증 및 [번들 B4](bundle-development-plan.md) 인계 완료. 전체 corpus 원본 재생성·제품 확대는 후속 |
+
+**2026-10-05 진행 순서:** Core v0.0.1 이후 [번들 세부 계획](bundle-development-plan.md)의 선택 범위·호환성·재현 생성·raw 검증을 완료하고, 그 데이터 의존성과 현재 포트를 바탕으로 어댑터 세부 계획을 작성한다. 전체 Registry 지원 완료를 어댑터 착수 조건으로 삼지 않는다.
 
 D4-1의 정상 예시는 D3 공유 정책을 사용하고 payload 객체는 거절한다. 당시 fixture는 필수 필드 누락·빈 manifest·잘못된 타입/버전·비-null registry_ref를 구조 오류로 구분했다. 중복 정책 ID·manifest ID 일치·시간 관계·서명 변조·잘못된 역할의 키는 의미/암호 검증용 사례이며 실제 Core 검증 완료 표시는 C3까지 보류한다. 후속 소스 대조에서 `registry-api`의 `GET /v1/bundle`, OpenAPI와 정책 publisher·ADR가 확인됐으므로, 현재 wire는 이 구현을 근거로 C1-1에서 정합화한다. 백업이나 과거 대화만을 계약 근거로 사용하지 않는다. 서명된 B 내부의 필드·수치 형식은 adapter가 변경하지 않고 Core parser와 fixture를 맞추며, wrapper 이름 변환과 미확정 운영 정보는 구분한다. 상세 차이·권장안은 [Core 세부 계획](core-development-plan.md)에 둔다.
 
@@ -398,7 +400,7 @@ C 단계 이후에 브랜치를 만든다. HTTP와 Fact 어댑터는 SDK의 선�
 
 `oracle.usd_value` 같은 기존 이름만 보고 구현된 데이터 소스가 있다고 가정하지 않는다. 정책 서버의 `dambi.evaluate_v3` 최종 평가 결과는 원본 Fact의 대체물이 아니다. 실제 데이터 API가 없으면 해당 method의 연동을 미완료로 남기고 필요한 서버 계약을 구체적으로 전달한다.
 
-API 연동은 현재 OpenAPI·publisher의 B wrapper와 서명 예제를 기준으로 한다. staging/production URL, 운영 공개 키·인증 절차와 갱신 정책은 API 담당과 확인하며 미확인 항목을 실제 통합 완료로 표기하지 않는다. 정책 publisher의 기본 입력은 D3 이전 확장 경로를 가리키므로 API 담당이 공유 원본 경로로 수정해야 한다. 이 수정은 A1 실제 정책 재발행·연동 전 선행 작업이며 fixture 기반 Core 개발의 전체 차단 조건은 아니다. 감사 전송이 필요하면 별도 transport로 연결하되 기본 평가가 감사 서버 가용성에 종속되지 않게 한다.
+API 연동은 현재 OpenAPI·publisher의 B wrapper와 서명 예제를 기준으로 한다. staging/production URL, 운영 공개 키·인증 절차와 갱신 정책은 API 담당과 확인하며 미확인 항목을 실제 통합 완료로 표기하지 않는다. 2026-10-12 확인 기준 publisher는 공유 `policy-bundles/`·SDK loader로 전환됐다. 이 경로 수정을 반복하지 않고 실제 발행 payload와 A1 통합을 확인한다. 감사 전송이 필요하면 별도 transport로 연결하되 기본 평가가 감사 서버 가용성에 종속되지 않게 한다.
 
 ## 7. 마지막 통합·패키징
 
@@ -436,6 +438,24 @@ API 연동은 현재 OpenAPI·publisher의 B wrapper와 서명 예제를 기준�
 CI에는 이 명령을 소스부터 실행하는 SDK 전용 job을 둔다. extension/server job의 성공, 그 job이 올린 WASM 파일, dashboard fixture 생성이 선행 조건이어서는 안 된다. Core 단계에서는 해당 시점의 지원 사례로 먼저 통과시키고, 어댑터·패키징 단계에서 릴리스 대상 전체 사례로 확장한다.
 
 완료 증거: 포함한 source 목록, 사용한 toolchain/lockfile, Native/WASM 시험 결과와 필수 case 수, npm/Cargo package 포함 목록 및 소비자 실행 결과, 빌드 전후 경계 검사 결과. 실패 항목이 있으면 SDK 소스·빌드 독립화는 미완료다.
+
+### 7.2 개발 중 SDK의 CI 확장 기준
+
+CI는 현재 Core에 고정하지 않고 어댑터·새 탐지 기능·온체인 Registry가 제품에 추가되는 단계에서 함께 확장한다. **기존 전체 CI 실행은 아직 없는 기능의 시험까지 검증한다는 뜻이 아니다.** 스캠 탐지·태그/평판 데이터와 온체인 Registry의 구체 API·구현 위치·체인은 후속 설계에서 정하며 현재 지원 완료로 표시하지 않는다.
+
+- 평소 PR/main 검사는 `scripts/ci/select-jobs.mjs`의 변경 경로와 소비자 의존 관계로 선택한다. 공통 Rust·Registry·계약·fixture·의존성·CI 설정·미등록 경로는 기존 전체 CI를 실행한다. `packages/core/` 내부의 새 기능은 기본적으로 Core 검사 대상이다.
+- 새 SDK 기능, 신뢰/판정 계약 변경, 여러 모듈의 통합을 개발하는 PR에는 **`ci:full` 라벨**을 붙여 해당 PR의 후속 push마다 기존 전체 CI를 실행한다. 라벨 추가/제거 시 다시 판별하며, 제거하면 경로 선택으로 돌아간다. 수동 `ci` 실행도 전체 검사다. 영향 관계와 전용 시험을 확인한 뒤 범위를 좁힌다.
+- **새 기능 구현과 같은 변경에서 실제 시험 실행을 CI에 연결한다.** SDK 소스 포함 목록(`scripts/sdk/sdk-source-files.json`), 격리 검증의 시험 목록, 패키지 시험 명령과 필요한 job을 함께 확인한다. 현재 Core 런타임 시험은 명시된 파일만 실행하므로 새 시험 파일을 만드는 것만으로 검증 완료가 되지 않는다. 새 경로의 전체 CI 통과도 그 기능의 전용 시험을 대신하지 않는다.
+
+| 추가 영역 | 함께 연결할 검증 | 실행 범위 |
+| --- | --- | --- |
+| A1~A3 HTTP/RPC 어댑터 | 정상 응답·원문 보존·체인 라우팅·timeout/취소·오류, 실제 Core 판정 연결. 패키지 export·Node/브라우저 소비 | 결정적인 fixture/로컬 서버 시험은 관련 PR CI. 실제 외부 API 공동 시험은 단계 완료·출시 검증으로 구분 |
+| 스캠 탐지·태그/평판 데이터 | 정상·위험·미확인 사례, 오탐/미탐 회귀, 데이터 누락·만료·장애, 출처·스키마와 Core 판정 계약 | 제공 데이터와 판정 로직의 소유 영역에 시험을 두고 관련 소비자 검사 연결. 외부 응답을 그대로 최종 판정으로 신뢰하지 않음 |
+| 온체인 Registry·조회 어댑터·노드 | 컨트랙트 등록/갱신 권한, chain·주소·ABI 일치, 조회부터 SDK 검증/판정까지 연결, 노드 장애와 확정성·재구성(reorg) 처리 | 구현 단계에 전용 통합 job 추가. 고정 버전의 임시 로컬 체인/노드와 시험 데이터를 사용하고 관련 경로·`ci:full`·수동 전체 검사에 연결 |
+
+선택적 어댑터나 노드가 추가돼도 순수 Core 빌드·격리 회귀가 운영 RPC·API·상시 노드를 요구해서는 안 된다. 노드가 필요한 통합 job은 자체 시험 환경을 기동하고 준비 확인·timeout·정리까지 맡는다. live testnet/staging 연결 검증과 운영 노드 배포는 별도 실행으로 관리한다.
+
+CD는 기능 시험과 분리한다. 향후 노드/Registry 배포를 추가할 때 대상 커밋의 필수 CI 성공과 배포 환경 승인을 연결하며, 일반 SDK PR이 운영 노드를 배포하지 않게 한다. 현재 `ci` 전체 실행은 별도 서버 DB 시험·의존성 감사 워크플로까지 자동 실행한다는 의미가 아니므로 관련 변경의 완료 조건에는 해당 검사를 포함한다.
 
 ## 8. 브랜치 인계와 보고 단위
 
