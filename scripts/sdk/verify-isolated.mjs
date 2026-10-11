@@ -15,6 +15,7 @@ const runtimeTests = [
   "packages/core/tests/runtime.test.mjs",
   "packages/core/tests/check.test.mjs",
   "packages/core/tests/adapters/policy-api.test.mjs",
+  "packages/core/tests/adapters/policy-api-core.test.mjs",
 ];
 const keep = process.argv.includes("--keep");
 const args = process.argv.slice(2);

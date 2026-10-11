@@ -46,6 +46,29 @@ function source(options = {}) {
   });
 }
 
+function taggedResponse(value = envelope, etag = '"initial"') {
+  return new Response(JSON.stringify(value), {
+    headers: etag === undefined ? {} : { etag },
+  });
+}
+
+function responseQueue() {
+  const queue = [];
+  return {
+    fetch: async (_url, init) => {
+      const next = queue.shift();
+      assert.ok(next, "an injected request must have a scheduled response");
+      next.request.resolve(init);
+      return next.response.promise;
+    },
+    schedule() {
+      const next = { request: deferred(), response: deferred() };
+      queue.push(next);
+      return next;
+    },
+  };
+}
+
 test("adapter validates endpoint, limits and fixed request settings before any I/O", () => {
   let requests = 0;
   const fetch = () => { requests++; throw new Error("unexpected request"); };
@@ -290,4 +313,160 @@ test("a body stream failure rejects instead of exposing partial or sensitive res
     assert.equal(String(error).includes(secret), false);
     return true;
   });
+});
+
+test("HTTP ETags reuse the exact envelope on 304 and remain local to each source", async (t) => {
+  const changed = { payload: " {\"sequence\":2}\n", signature: "second-signature" };
+  const seen = [];
+  const baseUrl = await serverFor(t, (req, res) => {
+    seen.push(req.headers["if-none-match"]);
+    const step = seen.length;
+    if (step === 2 || step === 4) {
+      // A 304's own ETag cannot relabel the signed envelope or change the next request.
+      res.writeHead(304, { etag: '"unrelated-304-tag"' });
+      res.end();
+    } else {
+      res.writeHead(200, { etag: step === 3 ? 'W/"second"' : '"first"' });
+      res.end(JSON.stringify(step === 3 ? changed : envelope));
+    }
+  });
+  const policy = source({ baseUrl });
+  assert.deepEqual(await policy.fetch(), expected);
+  assert.deepEqual(await policy.fetch(), expected);
+  assert.deepEqual(await policy.fetch(), changed);
+  assert.deepEqual(await policy.fetch(), changed);
+  assert.deepEqual(await source({ baseUrl }).fetch(), expected);
+  assert.deepEqual(seen, [undefined, '"first"', '"first"', 'W/"second"', undefined]);
+});
+
+test("only one valid opaque ETag enables revalidation and an untagged 200 clears conditional state", async () => {
+  for (const etag of ['"strong"', 'W/"weak"', '""', '"comma,backslash\\ok"', '"\x80"']) {
+    const seen = [];
+    const policy = source({ fetch: async (_url, init) => {
+      seen.push(init.headers.get("if-none-match"));
+      return seen.length === 1 ? taggedResponse(envelope, etag) : new Response(null, {
+        status: 304,
+        // A 304's length describes a representation; there is no body to read.
+        headers: { "content-length": "99999999" },
+      });
+    } });
+    assert.deepEqual(await policy.fetch(), expected);
+    assert.deepEqual(await policy.fetch(), expected);
+    assert.deepEqual(seen, [null, etag]);
+  }
+
+  for (const etag of [null, "unquoted", "*", 'w/"lowercase"', '"one", "two"', '"space here"', 'W/ "space"', '"quote"inside"']) {
+    const seen = [];
+    const replacement = { payload: "replacement", signature: "replacement-signature" };
+    const policy = source({ fetch: async (_url, init) => {
+      seen.push(init.headers.get("if-none-match"));
+      if (seen.length === 1) return taggedResponse();
+      if (seen.length === 2) return new Response(JSON.stringify(replacement), {
+        headers: etag === null ? {} : { etag },
+      });
+      return new Response(null, { status: 304 });
+    } });
+    await policy.fetch();
+    // The new envelope is usable for this call even when its cache validator is unusable.
+    assert.deepEqual(await policy.fetch(), replacement);
+    await assert.rejects(policy.fetch(), code("HTTP_ERROR", 304));
+    assert.deepEqual(seen, [null, '"initial"', null]);
+  }
+});
+
+test("concurrent requests pin their own 304 envelope and failed newest work blocks older cache publication", { timeout: 5_000 }, async () => {
+  const transport = responseQueue();
+  const policy = source({ fetch: transport.fetch });
+  const seed = transport.schedule();
+  seed.response.resolve(taggedResponse());
+  await policy.fetch();
+
+  const older = transport.schedule();
+  const olderResult = policy.fetch();
+  assert.equal((await older.request.promise).headers.get("if-none-match"), '"initial"');
+  const newer = transport.schedule();
+  const newerResult = policy.fetch();
+  assert.equal((await newer.request.promise).headers.get("if-none-match"), '"initial"');
+  const second = { payload: "second", signature: "second-signature" };
+  newer.response.resolve(taggedResponse(second, '"second"'));
+  assert.deepEqual(await newerResult, second);
+  older.response.resolve(new Response(null, { status: 304, headers: { etag: '"ignored"' } }));
+  assert.deepEqual(await olderResult, expected);
+
+  const late = transport.schedule();
+  const lateResult = policy.fetch();
+  assert.equal((await late.request.promise).headers.get("if-none-match"), '"second"');
+  const failed = transport.schedule();
+  const failedResult = policy.fetch();
+  const failure = assert.rejects(failedResult, code("INVALID_RESPONSE"));
+  await failed.request.promise;
+  failed.response.resolve(new Response('{"payload":"missing-signature"}', { headers: { etag: '"invalid"' } }));
+  await failure;
+  const third = { payload: "late-third", signature: "third-signature" };
+  late.response.resolve(taggedResponse(third, '"third"'));
+  assert.deepEqual(await lateResult, third);
+
+  const probe = transport.schedule();
+  const probeResult = policy.fetch();
+  assert.equal((await probe.request.promise).headers.get("if-none-match"), '"second"');
+  probe.response.resolve(new Response(null, { status: 304 }));
+  assert.deepEqual(await probeResult, second);
+});
+
+test("cancelled header and body work cannot change cached envelopes or cancel an independent refresh", { timeout: 5_000 }, async () => {
+  const transport = responseQueue();
+  const policy = source({ fetch: transport.fetch });
+  const seed = transport.schedule();
+  seed.response.resolve(taggedResponse());
+  await policy.fetch();
+
+  const older = transport.schedule();
+  const olderResult = policy.fetch();
+  await older.request.promise;
+  const cancelled = transport.schedule();
+  const cancellation = new AbortController();
+  const cancelledResult = policy.fetch({ signal: cancellation.signal });
+  const rejected = assert.rejects(cancelledResult, code("ABORTED"));
+  await cancelled.request.promise;
+  cancellation.abort();
+  await rejected;
+  const lateValue = { payload: "older-response", signature: "older-signature" };
+  older.response.resolve(taggedResponse(lateValue, '"older"'));
+  assert.deepEqual(await olderResult, lateValue);
+  const discarded = deferred();
+  cancelled.response.resolve(new Response(new ReadableStream({ cancel() { discarded.resolve(); } }), {
+    headers: { etag: '"cancelled"' },
+  }));
+  await discarded.promise;
+
+  const reading = deferred();
+  let bodyCancelled = false;
+  const pendingBody = transport.schedule();
+  pendingBody.response.resolve(new Response(new ReadableStream({
+    start(controller) { controller.enqueue(bytes.subarray(0, 10)); },
+    pull() { reading.resolve(); },
+    cancel() { bodyCancelled = true; },
+  }), { headers: { etag: '"incomplete"' } }));
+  const bodyCancellation = new AbortController();
+  const bodyResult = policy.fetch({ signal: bodyCancellation.signal });
+  const bodyRejected = assert.rejects(bodyResult, code("ABORTED"));
+  assert.equal((await pendingBody.request.promise).headers.get("if-none-match"), '"initial"');
+  await reading.promise;
+  const sibling = transport.schedule();
+  const siblingResult = policy.fetch();
+  const siblingInit = await sibling.request.promise;
+  assert.equal(siblingInit.headers.get("if-none-match"), '"initial"');
+  assert.equal(siblingInit.signal, undefined);
+  bodyCancellation.abort();
+  await bodyRejected;
+  assert.equal(bodyCancelled, true);
+  const replacement = { payload: "sibling", signature: "sibling-signature" };
+  sibling.response.resolve(taggedResponse(replacement, '"sibling"'));
+  assert.deepEqual(await siblingResult, replacement);
+
+  const probe = transport.schedule();
+  const probeResult = policy.fetch();
+  assert.equal((await probe.request.promise).headers.get("if-none-match"), '"sibling"');
+  probe.response.resolve(new Response(null, { status: 304 }));
+  assert.deepEqual(await probeResult, replacement);
 });

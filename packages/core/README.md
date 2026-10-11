@@ -145,10 +145,15 @@ bundle validity. The wrapper limit is separate from Core's `maxPolicyBytes`.
 Use an HTTPS origin; loopback HTTP is allowed for local development. Optional
 `headers` and `fetch` are captured at construction. Redirects are rejected.
 
-A1-1 performs an uncached request without automatic retries. ETag reuse and
-Core integration checks follow in A1-2. Direct callers can pass
-`policy.fetch({ signal })` for cancellation/deadlines and inspect `AdapterError`;
-Core normalizes a rejected policy source to `POLICY_FETCH_FAILED`.
+The source keeps an ETag and envelope together and reuses that exact envelope
+on a matching conditional request's 304 response. Each call captures its own
+cache pair; late responses cannot overwrite a newer request's cache state.
+ETags do not authenticate policies or extend their lifetime: Core rechecks the
+returned bundle. Missing, inaccessible or malformed ETags disable conditional
+reuse. The source bypasses the browser HTTP cache and does not retry requests.
+Direct callers can pass `policy.fetch({ signal })` for cancellation/deadlines
+and inspect `AdapterError`; Core normalizes a rejected policy source to
+`POLICY_FETCH_FAILED`.
 
 ## Public contract and migration
 
@@ -307,13 +312,13 @@ against the Native session runner. They fail if artifacts are absent and never
 build them implicitly. No legacy extension WASM package is loaded.
 `npm run core:pack` separately inspects package contents without publishing.
 
-For changes confined to the adapter transport, a TypeScript build is sufficient
-for the local HTTP and consumer-type checks; no WASM rebuild is needed:
+For changes confined to the adapter transport, rebuild TypeScript and run the
+adapter suite below. Its Core integration cases reuse the existing packaged
+WASM; run `core:build` first only if that artifact is absent or Rust has changed.
 
 ```sh
 node node_modules/typescript/bin/tsc -p packages/core/tsconfig.build.json
 npm run core:test:adapters
-npm run core:test:types
 ```
 
 `core:test:runtime` first prepares the selected decoder fixtures with the shared

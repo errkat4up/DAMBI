@@ -21,10 +21,15 @@ export function callSignal(options?: CallOptions): AbortSignal | undefined {
   }
 }
 
-/** Read decoded HTTP body bytes with a hard limit, including chunked responses. */
+type TextResponse =
+  | { readonly status: 200; readonly text: string; readonly etag: string | null }
+  | { readonly status: 304 };
+
+/** Read decoded HTTP body bytes with a hard limit; 304 requires a caller-owned cache. */
 export function fetchText(
   fetcher: typeof globalThis.fetch, url: string, init: RequestInit, maxBytes: number, signal?: AbortSignal,
-): Promise<string> {
+  allowNotModified = false,
+): Promise<TextResponse> {
   return new Promise((resolve, reject) => {
     let settled = false;
     let response: Response | undefined;
@@ -55,9 +60,19 @@ export function fetchText(
         // do not honor the signal. Each call owns its own response and reader.
         if (settled) { cancelBody(); return; }
         assertNotAborted(signal);
+        if (response.status === 304 && allowNotModified) {
+          // A 304 has no representation body. Its Content-Length, if present,
+          // describes the cached representation, not bytes to consume here.
+          settled = true;
+          cleanup();
+          cancelBody();
+          resolve({ status: 304 });
+          return;
+        }
         if (response.status !== 200) {
           throw new AdapterError("HTTP_ERROR", "The endpoint returned an unsuccessful HTTP status.", response.status);
         }
+        const etag = response.headers.get("etag");
         const declared = response.headers.get("content-length");
         if (declared !== null) {
           if (!/^[0-9]+$/.test(declared)) {
@@ -90,7 +105,7 @@ export function fetchText(
         const text = parts.join("");
         settled = true;
         cleanup();
-        resolve(text);
+        resolve({ status: 200, text, etag });
       } catch (error) {
         fail(error instanceof AdapterError ? error
           : new AdapterError("NETWORK_ERROR", "The endpoint response could not be received."));

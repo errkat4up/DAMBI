@@ -44,7 +44,7 @@ function ownConfig(options: PolicyApiSourceOptions): SourceConfig {
         headers.set(name, value);
       }
     }
-    // Conditional requests belong to this source's future ETag state, not host
+    // Conditional requests belong to this source's ETag state, not host
     // headers that could produce a 304 without a matching cached envelope.
     if (headers.has("if-none-match") || headers.has("if-modified-since")) throw new Error();
     headers.set("accept", "application/json");
@@ -112,22 +112,52 @@ function parseWrapper(text: string): SignedPolicyBundle {
   return Object.freeze(bundle);
 }
 
-/** A1-1: uncached transport. Core owns verification, expiry and refresh state. */
+interface CachedEnvelope {
+  readonly etag: string;
+  readonly bundle: SignedPolicyBundle;
+}
+
+// One HTTP entity-tag, preserved exactly (including weak tags). An absent,
+// inaccessible or malformed tag disables conditional reuse for that response.
+function usableETag(value: string | null): value is string {
+  return value !== null && /^(?:W\/)?"[\x21\x23-\x7e\x80-\xff]*"$/.test(value);
+}
+
+/** Transport cache only. Core rechecks signature, expiry and sequence on every fetch. */
 export function createPolicyApiSource(options: PolicyApiSourceOptions): PolicySource {
   const config = ownConfig(options);
+  let cached: CachedEnvelope | undefined;
+  let latestRequest: object | undefined;
   return Object.freeze({
     async fetch(options?: CallOptions): Promise<SignedPolicyBundle> {
       const signal = callSignal(options);
       assertNotAborted(signal);
-      const text = await fetchText(config.fetcher, config.url, {
+      const request = {};
+      latestRequest = request;
+      const previous = cached;
+      const headers = new Headers(config.headers);
+      if (previous) headers.set("if-none-match", previous.etag);
+      const response = await fetchText(config.fetcher, config.url, {
         method: "GET",
-        headers: new Headers(config.headers),
+        headers,
         redirect: "error",
         credentials: "omit",
         cache: "no-store",
-      }, config.maxBytes, signal);
+      }, config.maxBytes, signal, previous !== undefined);
       assertNotAborted(signal);
-      return parseWrapper(text);
+      if (response.status === 304) {
+        if (!previous) throw new AdapterError("HTTP_ERROR", "No policy wrapper matches this response.", 304);
+        // Do not substitute a newer envelope or publish an old captured pair.
+        return previous.bundle;
+      }
+      const bundle = parseWrapper(response.text);
+      if (latestRequest === request) {
+        // A later request owns publication even if it fails or is cancelled.
+        // Malformed wrappers never reach this assignment; unverified signatures
+        // may, since trust validation belongs to the consuming Core instance.
+        cached = usableETag(response.etag) ? { etag: response.etag, bundle } : undefined;
+      }
+      return bundle;
     },
   });
 }

@@ -1,6 +1,6 @@
 # 어댑터 세부 개발 계획 — Policy API와 첫 EVM Fact
 
-작성일: 2026-10-12. 상태: **A1-1 완료, A1-2 대기**. 기준: `feat/bundles`의 `ab6d013`과 B4 인계. 어댑터 개발은 `feat/adapters`에서 진행하며 번들 PR #11과 별도로 관리한다. main 병합·패키지 발행은 진행하지 않는다. C1~C6 완료선을 Core v0.0.1로 부르던 구분을 유지하며, 현재 저장소의 npm 패키지 버전은 0.1.0이다. 이번 계획으로 버전을 변경하지 않는다.
+작성일: 2026-10-12. 상태: **A1-1·A1-2 완료, A1-3 대기**. 기준: `feat/bundles`의 `ab6d013`과 B4 인계. 어댑터 개발은 `feat/adapters`에서 진행하며 번들 PR #11과 별도로 관리한다. main 병합·패키지 발행은 진행하지 않는다. C1~C6 완료선을 Core v0.0.1로 부르던 구분을 유지하며, 현재 저장소의 npm 패키지 버전은 0.1.0이다. 이번 계획으로 버전을 변경하지 않는다.
 
 상위 기준: [전체 계획 §6·§7](decoder-core-adapters-plan.md#6-3차-작업-featadapters) · [번들 B4 인계](bundle-development-plan.md#7-b4--어댑터-세부-계획에-넘길-완료-기준) · [제품·요청 범위](../../contracts/core-v1/snapshot-selection.proposal.json) · [첫 Fact 계약](../../fixtures/sdk/first-fact-contract.json). 이 문서는 해당 계약을 복제하지 않고 구현 순서·설계 선택·시험 연결을 구체화한다.
 
@@ -54,10 +54,10 @@
 
 ### 3.2 ETag·동시 호출·오류 경계
 
-A1-1은 `cache: "no-store"`로 매번 조회하며 조건부 header를 받지 않고 304를 HTTP 오류로 처리한다. 아래 ETag 상태와 실제 Core 연결은 A1-2에서 구현한다. 호출별 signal 분리와 기본 취소는 A1-1에 포함한다.
+`cache: "no-store"`로 전송하며 조건부 header는 어댑터가 관리한다. A1-2에서 아래 ETag 상태와 실제 Core 연결 시험을 추가했다. 호출별 signal 분리와 기본 취소는 A1-1에서 이어진다.
 
 - 인스턴스의 URL/profile/version·인증 설정은 고정한다. ETag와 마지막 **전송 형식 검사에 통과한 envelope**를 함께 보관한다. 이는 서명 검증 완료 cache가 아니다.
-- 요청 시작 시 캡처한 cache/ETag에 대해서만 `If-None-Match`를 전송한다. 304는 해당 요청에 결속된 envelope가 있을 때만 재사용한다. cache 없는 304는 오류다. 200에 ETag가 없으면 다음 요청은 조건부 header 없이 진행한다.
+- 요청 시작 시 캡처한 cache/ETag에 대해서만 `If-None-Match`를 전송한다. 304는 해당 요청에 결속된 envelope가 있을 때만 재사용한다. cache 없는 304는 오류다. 200에 ETag가 없거나 단일 entity-tag 형식이 아니면 이전 조건부 cache를 지우고 다음 요청은 조건부 header 없이 진행한다.
 - 취소·실패한 응답은 cache를 덮지 않는다. 나중에 시작한 요청이 우선하며 이전 응답이 늦게 도착해 최신 cache를 바꾸지 못하게 한다. 각 호출의 signal을 분리하여 한 Core의 취소가 다른 Core의 요청을 취소하지 않게 한다.
 - API ETag는 wrapper byte의 식별자이며 정책 신뢰/유효기간의 증명이 아니다. 304로 반환한 B도 Core가 재검증하므로 정책 수명을 연장하지 않는다. 내부 HTTP cache가 이 처리를 가리지 않도록 Fetch cache 동작을 명시한다.
 - 현재 API CORS는 `Access-Control-Expose-Headers: ETag`를 제공하지 않는다. 브라우저 cross-origin에서 ETag가 안 보이면 조건부 요청을 생략해 200 경로로 동작한다. ETag 최적화가 필요하면 API 담당의 header 보완과 실제 브라우저 시험을 추가한다.
@@ -114,7 +114,7 @@ body 크기·UTF-8·JSON 오류도 발생한 요청 단계에 따라 공통 준�
 | 단계 | 구현 단위 | 완료 조건 |
 | --- | --- | --- |
 | A1-1 진입점·HTTP 기본 — 완료 | subpath export, 설정/전송 오류, bounded HTTP, wire→port mapping | 로컬 HTTP 원문·형식·크기·query 시험과 소비자 타입 검사, 새 시험 CI 연결 |
-| A1-2 상태·Core 연결 | ETag, 동시 호출/취소, 실제 Core init/refresh | cache·timeout·서명/refresh 실패 경계를 실제 Core로 검증 |
+| A1-2 상태·Core 연결 — 완료 | ETag, 동시 호출/취소, 실제 Core init/refresh | cache·timeout·서명/refresh 실패 경계를 실제 Core로 검증 |
 | A1-3 실제 API 확인 | 배포 URL·신뢰 키·인증/CORS·발행본 연결 | 실제 서명 bundle init/refresh. 환경 미확정이면 구현 완료와 별도로 대기 표시 |
 | A2-1 method·ABI | params/체인/주소·U256·JSON-RPC codec | 순수 변환 및 거절 경계 시험. Node 전용 런타임 의존 없음 |
 | A2-2 RPC·FactBatch | 체인/블록 조회, 제한 동시성, 부분 실패·취소 | 로컬 RPC의 실제 HTTP 경로에서 ID·값·provenance·실패표 검증 |
@@ -147,6 +147,6 @@ A1-3의 외부 환경이 준비되지 않아도 A2-1/A2-2 구현은 진행할 �
 
 ## 8. 진행·기록
 
-현재 상태는 **A1-1 완료 / A1-2~A3 미착수 / 실제 환경 미확정**이다. 다음은 A1-2의 ETag 상태와 실제 Core init/refresh 연결이다. 개발 브랜치는 `feat/adapters`이며 번들 PR 병합은 별도 승인 대상으로 남는다.
+현재 상태는 **A1-1·A1-2 완료 / A1-3~A3 미착수 / 실제 환경 미확정**이다. 개발 브랜치는 `feat/adapters`이며 번들 PR 병합은 별도 승인 대상으로 남는다.
 
 소단계마다 기능과 필요한 검증을 함께 마친다. 결과는 기존 `fixtures/sdk/README.md` 한 곳에 변경 범위·통과/실패·남은 문제만 짧게 기록하고, 이 문서에는 단계 상태만 갱신한다. 커밋은 독립적인 구현 단위에 맞춰 나누며 문서만을 위한 중복 시험·해시 기록은 만들지 않는다.
