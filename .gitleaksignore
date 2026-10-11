@@ -3,3 +3,9 @@
 # changes to this file remain subject to the normal secret-scanning rules.
 763c4fac6a04bfd5c49dfff92ae54eaf52a0e6ad:contracts/core-v1/examples/test-only-keys.json:private-key:8
 763c4fac6a04bfd5c49dfff92ae54eaf52a0e6ad:contracts/core-v1/examples/test-only-keys.json:private-key:14
+
+# UniswapX decoder note copied from its Registry manifest: field-mapping prose,
+# not an API key. Ignore only the two historical snapshot additions; future
+# snapshot edits and other secret rules remain scanned.
+429c3440978765b8132a0a66c596fae995f0267f:packages/core/decoder-snapshots/full/snapshot.json:generic-api-key:1
+4aed0ec8fd10b01f35c72f4e011029c403782425:packages/core/decoder-snapshots/full/snapshot.json:generic-api-key:1
