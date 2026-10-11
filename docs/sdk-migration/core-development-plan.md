@@ -10,7 +10,7 @@
 - [Decoder 인계](../../fixtures/decoder-policy/README.md#dec-07--decoder-인계), [D3 정책 검증](../../fixtures/sdk/README.md#결과-기록), [D4-1 계약 fixture 검증](../../contracts/core-v1/README.md#결과-기록)은 완료됐다. 기존 통과 수와 로그는 해당 기록을 따르며 여기 복제하지 않는다.
 - `packages/core` 0.0.1은 C5에서 `createCore/plan/evaluate/refreshPolicies/dispose`를 SDK 전용 WASM과 연결했고 C6에서 `check`·Fact 자동 조회·cache·hook을 구현했다. 검증 범위와 보완 변경의 상태는 [패키지 개발 안내](../../packages/core/README.md#development-checks)를 따른다. 과거 `backup/core-sdk-b219617`의 코드·시험 결과를 현재 구현으로 사용하지 않는다.
 - D4-1 완료는 **당시 SDK 초안의 fixture 검증**이다. C1-1에서 현재 `GET /v1/bundle`의 payload 필드·sequence 타입·wrapper에 맞춘 변경의 사용자 실행 검증을 마쳤다. 실제 운영 API 통합 검증은 후속이다. 기존 통과 기록을 수정된 계약의 검증 결과로 재사용하지 않는다.
-- [D4-2 제품 선택안](../../contracts/core-v1/snapshot-selection.proposal.json)은 미확정이다. D4-2·D4-3은 C1/C2 및 고정 fixture를 사용하는 C3~C6 개발의 전체 선행 조건이 아니다. 제품 범위·제품 snapshot 재현성·최종 배포 완료 표시는 확정된 D4-2·D4-3 결과가 있어야 한다.
+- [D4-2 제품·요청 범위](../../contracts/core-v1/snapshot-selection.proposal.json)와 선택 범위의 D4-3/B4 인계는 완료했다. D4-2·D4-3은 당시 C1/C2 및 고정 fixture를 사용하는 C3~C6 개발의 전체 선행 조건이 아니었다. 현재 완료 범위는 [번들 계획](bundle-development-plan.md)을 따르며 실제 어댑터 연동·최종 배포는 후속이다.
 
 이번부터의 흐름은 **C1-1 정책 API·fixture 정합화 → C1-2/3 공개 타입·소비자 검증 → C2 소스·실행부 추출 → C3 신뢰 검증 → C4 snapshot → C5 plan/evaluate → C6 check**다. 별도 준비 단계를 늘리지 않고 C1 안에서 계약을 맞춘다. C3는 정합화한 계약과 최소 `dambi-core` 경계가 준비되면 fixture 기반으로 병행할 수 있다. D4의 제품 결정은 별도 항목으로 유지한다.
 

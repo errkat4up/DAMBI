@@ -324,8 +324,8 @@ Call tuple `(to,data,value,skipRevert,callbackHash)`의 순서·동적 offset/le
 | 작업 | 구현 범위·완료 조건 | 상태 |
 | --- | --- | --- |
 | D4-1 정책 wire 계약 | `contracts/core-v1/`에 payload/envelope 타입·JSON Schema·정상/오류 예시와 구조 검증. B 문자열 UTF-8 원문 서명, `registry_ref: null`, 정책/decoder 키 역할 구분 | 당시 초안 검증 완료. C1-1의 API 정합화 변경도 사용자 검증 완료 |
-| D4-2 제품 snapshot 선택 | chain·token·transaction/typed 경로·정책 적용 범위를 명시한 제품 선택 목록. DEC-07의 검증 범위 및 Permit2 v3·multicall 한계, Day-1 swap 정책에 필요한 decoder의 미검증 범위를 대조 | [제품 선택안](../../contracts/core-v1/snapshot-selection.proposal.json) 작성, 사용자 범위 결정 대기. [번들 세부 계획 B0](bundle-development-plan.md)에서 구체화 |
-| D4-3 재현 생성·인계 | 선택 manifest/token/정적 프로토콜 자료와 builder 의존 목록 고정. 정렬된 snapshot·개별 bundle JCS digest·전체 로컬 digest·coverage. 확장/서버/cache 없이 같은 입력으로 재생성 | snapshot 생성·패키징 구현됨. 호환성 보완 상태는 [번들 B1](bundle-development-plan.md) 참조. 원본 독립 생성·context 보완은 후속 |
+| D4-2 제품 snapshot 선택 | chain·token·transaction/typed 경로·정책 적용 범위를 명시한 제품 선택 목록. DEC-07의 검증 범위 및 Permit2 v3·multicall 한계, Day-1 swap 정책에 필요한 decoder의 미검증 범위를 대조 | [제품·요청 범위 인계](../../contracts/core-v1/snapshot-selection.proposal.json) 확정. 기존 DEC 선택과 공개 Core 지원을 구분하며 확대 범위는 제외 |
+| D4-3 재현 생성·인계 | 선택 manifest/token/정적 프로토콜 자료와 builder 의존 목록 고정. 정렬된 snapshot·개별 bundle JCS digest·전체 로컬 digest·coverage. 확장/서버/cache 없이 같은 입력으로 재생성 | 선택 입력의 생성·raw·격리 검증 및 [번들 B4](bundle-development-plan.md) 인계 완료. 전체 corpus 원본 재생성·제품 확대는 후속 |
 
 **2026-10-05 진행 순서:** Core v0.0.1 이후 [번들 세부 계획](bundle-development-plan.md)의 선택 범위·호환성·재현 생성·raw 검증을 완료하고, 그 데이터 의존성과 현재 포트를 바탕으로 어댑터 세부 계획을 작성한다. 전체 Registry 지원 완료를 어댑터 착수 조건으로 삼지 않는다.
 

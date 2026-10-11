@@ -1,18 +1,18 @@
 # 번들 세부 개발 계획 — Core 이후 제품 번들
 
-작성일: 2026-10-05. 수정일: 2026-10-12. 문서 상태: 단계별 구현 진행. 현재 기준: `main 7387536`, 패키지 **0.1.0**. 최초 작성 기준은 C1~C6 완료 당시의 `e53ad4e`·Core v0.0.1이었다. 상위 계획의 **D4-2 제품 선택·D4-3 재현 생성**을 구체화하며, 아래 B0~B4는 이 문서 안의 작업 구분이다. 이번 작업에서 패키지 버전은 변경하지 않는다.
+작성일: 2026-10-05. 수정일: 2026-10-12. 문서 상태: 선택 범위 구현·검증 및 B4 인계 완료. 현재 기준: B3 `cb3d52b`, 패키지 **0.1.0**. 최초 작성 기준은 C1~C6 완료 당시의 `e53ad4e`·Core v0.0.1이었다. 상위 계획의 **D4-2 제품 선택·D4-3 재현 생성**을 구체화하며, 아래 B0~B4는 이 문서 안의 작업 구분이다. 이번 작업에서 패키지 버전은 변경하지 않는다.
 
 진행 순서는 **번들 범위 확정 → 필요한 호환성 보완 → 재현 생성·원문 요청 검증 → 어댑터 세부 계획·구현**이다. 선택한 범위를 완료하면 어댑터 단계로 넘어간다. Registry 전체를 지원하는 것이 어댑터 착수 조건은 아니다.
 
-관련 문서: [전체 계획](decoder-core-adapters-plan.md) · [Core 계획](core-development-plan.md) · [Decoder 설계](decoder-design-plan.md) · [기존 제품 선택안](../../contracts/core-v1/snapshot-selection.proposal.json).
+관련 문서: [전체 계획](decoder-core-adapters-plan.md) · [Core 계획](core-development-plan.md) · [Decoder 설계](decoder-design-plan.md) · [확정한 제품·요청 인계](../../contracts/core-v1/snapshot-selection.proposal.json).
 
 ## 1. 현재 상태와 이번 작업의 경계
 
 | 항목 | 확인된 상태 | 번들 단계에서 할 일 |
 | --- | --- | --- |
 | Core 실행부 | C1~C6 구현·검증 완료. 현재 패키지 0.1.0에 `@dambi/core/decoders` 추가 | 필요한 Decoder 호환성만 보완. Core 전체 개발을 다시 시작하지 않음 |
-| 제품 snapshot | UR·Aave 편입 후 패키지 snapshot 804개 포함. 이전 11개 manifest·USDC 4개 선택안은 여전히 fixture 기반 제안 | 현재 snapshot을 기준으로 추가 지원 경로를 구체화. 이전 선택안으로 기존 799개를 축소하지 않음 |
-| 생성 경로 | [Registry 생성기](../../registryV2/scripts/build-decoder-snapshot.ts)와 [SDK 패키징](../../scripts/sdk/build-decoders.mjs) 구현됨 | 생성된 index·기존 Core dist 의존과 source-context 제외를 보완. 원본부터 SDK 독립 재현 생성은 남음 |
+| 제품 snapshot | UR·Aave 편입 후 패키지 snapshot 804개 포함. 이전 11개 manifest·USDC 4개는 DEC 회귀 선택이며 현재 제품 allowlist가 아님 | 확정 인계의 artifact·digest·검증한 요청·제한 유지 |
+| 생성 경로 | [공유 생성기](../../scripts/sdk/build-decoder-snapshot.mjs)·Registry wrapper·[SDK 패키징](../../scripts/sdk/build-decoders.mjs) 구현, 선택 입력의 격리 생성 검증 완료 | 기존 799개 기준선 + 원본 5개 재구성, 회귀 풀 3개 원본 생성. 전체 corpus 원본 재생성은 후속 |
 | 풀별 번들 | Registry에 template/context 구체화(materialization) 로직이 있음. Core는 완성된 V3 bundle만 받음 | 정적 풀 정보를 빌드 시 채워 넣고 현재 Registry와 결과 일치 확인 |
 | Universal Router 2개 | B1-1 검증기 보완·대표 Native/WASM 경로 검증·snapshot 편입 완료 | 필드의 엄격한 검증과 실제 `execute` 회귀를 추가. 시장 데이터 보강과 구분 |
 | Aave 3개 | Native/WASM 사용자 검증·snapshot 편입 완료 | 검증한 요청 의미·실행 제한 유지 |
@@ -21,7 +21,7 @@
 
 현재 [snapshot 메타데이터](../../packages/core/decoder-snapshots/full/snapshot.meta.json)는 **source-context 제외 30,484개·Core 거절 0개**를 기록한다. 기존 799개에 UR 2개·Aave 3개를 증분 편입했으며 전체 Registry를 재생성하지 않았다. 제외 수를 고유 풀 수나 지원 요청 수로 사용하지 않는다. 원본 포함, snapshot 설치 성공, 원문 요청 해석, 정책 판정 검증을 각각 구분한다.
 
-B1-1 UR·B1-2 Aave의 선택 경로에 대한 Native/WASM 검증·snapshot 편입을 완료했다. B2는 대표 풀 3개의 회귀 전용 정적 구체화·재현 생성 사용자 검증을 완료했다. 실제 API/RPC 연결과 풀별 제품 확대는 후속 범위다.
+B1~B3의 선택 경로 검증과 B4 데이터 인계를 완료했다. 제품 포함과 회귀 전용 범위를 유지하며, 실제 API/RPC 연결과 풀별 제품 확대는 후속 범위다.
 
 ## 2. 책임과 유지할 계약
 
@@ -39,9 +39,9 @@ B1-1 UR·B1-2 Aave의 선택 경로에 대한 Native/WASM 검증·snapshot 편�
 
 ## 3. B0 — 지원 범위와 데이터 의존성 확정 (D4-2)
 
-**목표:** 생성 입력과 실제 지원 요청을 함께 결정한다. 기존 선택안을 출발점으로 사용하되 다음은 아직 권장 후보이며 승인된 제품 범위가 아니다.
+**목표:** 생성 입력과 실제 지원 요청을 함께 결정한다. 현재 결정은 [B4 인계](../../contracts/core-v1/snapshot-selection.proposal.json)에 고정했다. 아래 후보 표는 최초 조사 범위이며 현재 공개 Core 지원표를 대신하지 않는다.
 
-**착수 범위(2026-10-12):** 현재 패키지의 799개를 설치 기준선으로 유지한다. 우선 구현은 상위 Core 계획 D4-3a의 UR 2개 검증기 보완이며, Native 원문 회귀는 mainnet의 두 execute selector·대표 V3/V4 ABI 경로에 한정한다. 다른 체인·opcode·시장 데이터까지 지원 완료로 확대하지 않는다. Aave의 `restake` 표현과 대표 풀의 제품 편입은 조사 후 결정한다. B0 전체 완료와 독립적인 호환성 수정의 착수를 구분한다.
+**확정 범위(2026-10-12):** 기존 799개 기준선에 검증한 UR 2개·Aave 3개를 포함한 제품 804개를 유지한다. 대표 풀 3개는 회귀 전용이다. 요청 검증은 인계에 연결한 사례 범위이며 다른 체인·opcode·시장 데이터까지 확대하지 않는다. 공개 `typed_signature`는 strict ERC-20 Permit 경로만 지원하며 Permit2 v3는 기존 DEC 회귀다. Aave `restake` 표현은 구현됐고 풀 제품 편입은 별도 결정이다.
 
 | 후보 | 권장 순서·범위 | 확정할 내용 |
 | --- | --- | --- |
@@ -146,21 +146,25 @@ snapshot은 Core의 `maxDecoderBytes`, route 설치 개수 65,536, routing 문�
 
 ## 7. B4 — 어댑터 세부 계획에 넘길 완료 기준
 
-다음 자료가 연결되면 `adapter-development-plan.md`를 새로 작성하고 A1부터 구현한다(문서 경로는 예정). 인계 내용은 기존 선택안·fixture·현재 포트 타입을 참조하며 동일한 계약을 여러 문서에 복제하지 않는다.
+아래 자료를 현재 코드와 대조해 연결했다. 다음 작업은 `adapter-development-plan.md` 작성이며 이후 A1부터 구현한다(문서 경로는 예정). 제품·요청 범위는 기존 선택안 파일을 갱신한 [B4 인계](../../contracts/core-v1/snapshot-selection.proposal.json), 첫 Fact 계약은 [기존 fixture](../../fixtures/sdk/first-fact-contract.json)를 기준으로 하며 다른 계획서에 복제하지 않는다.
 
-| 인계 항목 | 확정할 내용 | 어댑터 단계의 사용처 |
+| 인계 항목 | 확정한 기준·남은 작업 | 어댑터 단계의 사용처 |
 | --- | --- | --- |
-| 제품 선택과 snapshot | 고정 입력, artifact·신뢰하는 digest, 지원/미지원 raw 경로, 검증 사례 | 어댑터 시험의 동일한 Core 설정과 Decoder 입력 |
+| 제품 선택과 snapshot | [인계 JSON](../../contracts/core-v1/snapshot-selection.proposal.json)에 제품 artifact·로컬 digest·요청 사례·회귀 전용/미지원 범위 고정 | 어댑터 시험의 동일한 Core 설정과 Decoder 입력 |
 | 정책 전송 | [PolicySource](../../packages/core/src/ports/policy.ts), HTTP `{ payload, signature, key_id? }` → SDK `keyId?`, B 문자열 보존 | A1 URL·HTTP·취소·오류·실제 API 통합 |
-| 정책 발행 | publisher의 공유 `policy-bundles/`·SDK loader 전환은 구현됨. 실제 payload·키·환경 검증 상태를 인계 | A1 실제 연동 확인. 시험 키를 운영 신뢰로 사용하지 않음 |
-| 정책 Fact 목록 | method별 resolved params·원본 응답 형식/단위·chain·block·freshness·오류·optional/required·projection·소비 시점 | A2 첫 method와 A3 추가 method 선정 |
-| Decoder 보강 의존 | 정적/로컬 도출/LiveField 선언/외부값 구분, 필요한 경우 확정한 별도 계약, 미지원 경로 | 디코딩 선행 데이터를 FactProvider와 혼합하지 않도록 설계 |
-| 통합 환경 | 실제 endpoint·로컬 신뢰 키·인증 적용 여부·chain 라우팅·환경별 설정의 확인 담당과 미확정 값 | 실제 값은 A 단계에서 확인. 미확정 환경을 통합 완료로 표기하지 않음 |
+| 정책 발행 | 공유 `policy-bundles/`·SDK loader 전환 구현됨. `issued_at`은 초, `expires_at: null`도 Core 기본 최대 나이 72시간 적용. 운영 발행·재발행 잡 가동은 미검증 | API 담당과 A1에서 실제 발행본·갱신 주기 확인. 시험 키를 운영 신뢰로 사용하지 않음 |
+| 정책 Fact 목록 | Day-1 외부 Fact 없음. A2는 [portfolio.balance](../../fixtures/sdk/first-fact-contract.json)의 ERC-20 경로만. 공개 opaque ID·원본 응답·provenance·실패 계약 반영 | Core mock 검증과 실제 RPC 검증을 구분하고 A2에 연결 |
+| Decoder 보강 의존 | 선택한 calldata/수령인 중심 범위에는 새 선행 외부 포트 없음. pool/가격/nonce placeholder·V4 최종 수령인·풀 제품 확대는 인계 제한으로 명시 | Decoder/Registry 담당이 관련 정책 활성화·제품 확대 전에 해결. FactProvider가 보충한다고 가정하지 않음 |
+| 통합 환경 | A1: API 담당과 endpoint·신뢰 공개 키·env/profile·인증/CORS·발행본 확인. A2: SDK/RPC 설정 담당과 chain별 endpoint·자격 증명·조회 block 확인 | 각각 실제 A1/A2 통합 완료 전에 확정. 운영값은 추정하거나 시험 키로 대체하지 않음 |
+
+정책 경로는 `GET /v1/bundle?profile=default`이며 선택적 `version=N`은 특정 sequence를 가리킨다. API의 ETag/304·404/429/502 응답과 크기·취소 처리를 A1 설계에 포함하며, 실제 배포 앞단의 인증/CORS는 소스만으로 확정하지 않는다.
+
+정책 wrapper는 현재 공개 포트와 OpenAPI의 `SignedPolicyBundle` schema를 따른다. OpenAPI 경로 설명에 남은 `payload: unknown` 문장은 오래된 설명이며 현재 `payload: string` 계약을 변경하는 근거로 사용하지 않는다. 서버·publisher 구현 변경이나 외부 연락은 이 인계 작업에 포함하지 않았다.
 
 ### A 단계로 이어지는 순서
 
 1. **A1 Policy API:** 현재 포트를 구현하고 실제 서명 payload를 Core에 전달한다. wrapper 이름만 매핑하며 B 내부를 보정하지 않는다. 수정된 publisher를 기준으로 실제 환경·키 설정과 공동 통합을 확인한다.
-2. **A2 첫 Fact:** [기존 첫 Fact 자료](../../fixtures/sdk/first-fact-contract.json)의 `portfolio.balance` ERC-20 `balanceOf(owner)`부터 구현한다. 현재 [FactProvider](../../packages/core/src/ports/fact.ts)의 opaque `callId`/`planId`, 원본 응답 `{ balance: "0x64" }`, U256 정밀도, `source`, Unix ms `observedAt`, 실제 조회 block provenance를 따른다. 과거 자료의 완료 상태·call ID 예시는 현재 공개 타입에 맞춰 정리한다.
+2. **A2 첫 Fact:** [갱신한 첫 Fact 자료](../../fixtures/sdk/first-fact-contract.json)의 `portfolio.balance` ERC-20 `balanceOf(owner)`부터 구현한다. 현재 [FactProvider](../../packages/core/src/ports/fact.ts)의 opaque `callId`/`planId`, 원본 응답 `{ balance: "0x64" }`, U256 정밀도, `source`, Unix ms `observedAt`, 실제 조회 block provenance를 따른다.
 3. **A3 필요한 확장·전체 연결:** B0/B4의 의존 목록에서 실제 필요한 method만 추가하고 raw 요청 → 정책 API → Core plan → Fact → Verdict를 Node/브라우저에서 연결한다. 별도 Decoder 보강 계약이 필요하면 명시된 순서에 포함한다.
 
 `portfolio.balance`의 기존 catalog `optional` 의미를 유지하며 실패를 잔고 0으로 바꾸지 않는다. 원본 RPC ABI word를 의미 응답으로 해석하고, projection은 Core에 맡긴다. cache에서도 최초 관측 시간을 보존하고, 실제 확인하지 않은 block 번호를 만들지 않는다.
@@ -172,11 +176,11 @@ snapshot은 Core의 `maxDecoderBytes`, route 설치 개수 65,536, routing 문�
 | 단계 | 상태 |
 | --- | --- |
 | 세부 계획 | 작성 완료 |
-| B0 지원 범위·데이터 의존성 확정 | 기존 799개 기준선·UR 착수 범위·정적 풀 후보 조사. 제품 확대·데이터 보강 계약은 미확정 |
+| B0 지원 범위·데이터 의존성 확정 | 현재 제품·검증 요청·회귀 전용 범위 인계 확정. 제품 확대·시장 데이터 보강은 제외 |
 | B1-1 UR snapshot 검증·raw 회귀 | 대표 Native/WASM 경로 사용자 검증·snapshot 편입 완료. [결과·명령](../../fixtures/sdk/README.md#번들-b1-1--universal-router) |
 | B1-2 Aave 및 의미 보완 | 선택 경로 Native/WASM 사용자 검증·snapshot 편입 완료. [결과](../../fixtures/sdk/README.md#번들-b1-2--aave) |
 | B2 정적 입력·구체화·재현 생성 | 대표 3개 범위 사용자 검증 완료. [명령·제한](../../fixtures/sdk/README.md#번들-b2--대표-풀-정적-구체화) |
 | B3 raw 경로·정책·격리 검증 | 선택 범위 검증 완료. 생성 범위는 기존 799개 기준선 + UR/Aave 원본 5개 재구성, 회귀 풀 3개 원본 생성. 전체 804개 원본 재생성은 아님. [결과·제한](../../fixtures/sdk/README.md#번들-b3--원문-요청과-격리-생성) |
-| B4 어댑터 인계 확정 | 미착수. 완료 후 어댑터 세부 계획 작성 |
+| B4 어댑터 인계 확정 | 완료. 기존 선택안·첫 Fact 자료를 현재 포트에 정합화하고 A1/A2 미확정 환경의 담당·완료 시점 연결 |
 
-다음은 **B4 어댑터 인계 확정**이다. B0의 미결 의미·범위는 해당 경로의 제품 편입 전에 해결한다. 선택 범위의 B3 완료를 전체 Registry 지원 완료로 확대하지 않는다.
+다음은 **어댑터 세부 계획서 작성 후 A1 구현**이다. 인계의 제외 범위는 해당 경로의 제품 편입 전에 해결하며 전체 Registry 확대나 실제 외부 연동 완료를 번들 완료로 표기하지 않는다.

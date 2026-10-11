@@ -99,6 +99,10 @@ node --test --test-name-pattern='selected' packages/core/tests/runtime.test.mjs
 
 Balancer의 `weighted` 상수·`wethIsEth` 누락, Uniswap 가격 한계 미반영·token0 metadata 부재는 제품 편입 전 남은 사항이다. Uniswap exact-input의 Cedar `slippageBp=10000`은 최소 출력 0에서 도출한 값이며 실제 시세 관측이 아니다. 위 시험의 allow/deny는 입력 보존과 정책 연결의 증거로, 거래 실행 가능성이나 가격 검증의 증거가 아니다.
 
+## 번들 B4 — 어댑터 인계
+
+2026-10-12, B3 `cb3d52b` 기준: [제품·요청 범위](../../contracts/core-v1/snapshot-selection.proposal.json)와 [첫 Fact 계약](first-fact-contract.json)을 현재 코드에 맞춰 갱신하고 A1/A2 운영 설정의 담당·확인 시점을 연결했다. JSON 구문·참조 경로·기존 snapshot metadata 정합성을 확인했다. 런타임 변경이 없어 빌드·기능 시험은 반복하지 않았다. 남은 작업은 어댑터 세부 계획·HTTP/RPC 구현 및 실제 통합 검증이다.
+
 ## 공유 정책 입력
 
 Day-1 정책의 공유 원본은 [`policy-bundles/day1-safety/`](../../policy-bundles/day1-safety/package.json)이다. Cedar 본문과 manifest 10개는 그대로 이동했고 package의 원본 경로만 변경했다. [`policy-bundle.cjs`](../../scripts/sdk/policy-bundle.cjs)가 package 선언 순서대로 `{id, policy, manifest}`를 읽고 직렬화한다. SDK baseline과 기존 확장 asset copier가 같은 함수를 사용하며, DEC-02는 공유 Cedar/manifest를 직접 읽는다. 원본이 없으면 빈 set 또는 합성 manifest로 대체하지 않는다.
@@ -117,9 +121,9 @@ Day-1 정책의 공유 원본은 [`policy-bundles/day1-safety/`](../../policy-bu
 
 [`day1-policy.cases.json`](day1-policy.cases.json)은 trigger·필요 Action 입력·독립 기대값을 담는다. [`day1-policy.test.mjs`](day1-policy.test.mjs)는 기존 baseline 4개를 그대로 재사용하고, 경계·대소문자 정규화·비적용·필수 입력 누락을 실제 기존 WASM plan/evaluate로 확인한다. 입력 오류는 정책 deny와 구분한다. 기존 API에서 plan은 오류 envelope, evaluate는 `__engine::invalid_input_json` fail을 반환한다.
 
-Fact 0개는 `policy_rpc` 결과가 필요 없다는 뜻이다. 현재 Swap Action의 `live_inputs`와 Permit2 `nonce` 같은 필수 DTO 구조까지 생략할 수 있다는 뜻은 아니다. 시험의 해당 값은 합성 입력이며 실제 시장 데이터·nonce 조회의 증거가 아니다. 스왑·Permit2 사례는 이미 해석한 Action부터 검증한다. raw approve→판정은 기존 DEC-02 시험을 재사용하며, Day-1 전체 원문 요청→판정이나 SDK `createCore()` 실행 완료를 뜻하지 않는다.
+Fact 0개는 `policy_rpc` 결과가 필요 없다는 뜻이다. 현재 Swap Action의 `live_inputs`와 Permit2 `nonce` 같은 필수 DTO 구조까지 생략할 수 있다는 뜻은 아니다. 위 D3 시험의 해당 값은 합성 입력이며 실제 시장 데이터·nonce 조회의 증거가 아니다. D3 자체는 Action부터의 검사이며, 이후 Core 실행과 UR raw swap 사례 등 현재 검증 범위는 위 B1~B3 기록 및 [B4 인계](../../contracts/core-v1/snapshot-selection.proposal.json)를 따른다.
 
-[`first-fact-contract.json`](first-fact-contract.json)은 후속 A2의 `portfolio.balance` ERC-20 경로를 선정한 개발용 인계 자료다. params·원본 응답·projection·optional·향후 오류 사례를 기록한다. Day-1에 활성화하지 않으며 직접 RPC adapter와 Core 원본 Fact 검증은 후속 구현이다. 기존 catalog의 optional 선언을 필수로 바꾸지 않는다.
+[`first-fact-contract.json`](first-fact-contract.json)은 후속 A2의 `portfolio.balance` ERC-20 경로를 선정한 인계 자료다. B4에서 현재 공개 `PlannedCall`·`FactBatch`·provenance 계약에 맞췄다. Core의 원본 Fact 검증·projection·cache는 C5/C6에서 구현됐으며 직접 RPC adapter와 실제 조회 검증은 A2에 남는다. Day-1에는 활성화하지 않고 기존 catalog의 optional 선언도 유지한다.
 
 ## D3 사용자 실행
 
