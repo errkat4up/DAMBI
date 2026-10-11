@@ -281,12 +281,19 @@ against the Native session runner. They fail if artifacts are absent and never
 build them implicitly. No legacy extension WASM package is loaded.
 `npm run core:pack` separately inspects package contents without publishing.
 
-`npm run sdk:verify:isolated` performs these C6 checks in a temporary copy of the
-listed SDK sources, without extension/server/legacy WASM sources or existing
-build output. It installs dependencies and builds the Native runner and SDK
-WASM there. The packaged decoder snapshot is copied from its committed
-Registry source and is checked by `runtime.test.mjs`. Final tarball/browser
-consumer checks are part of each release.
+`core:test:runtime` first prepares the selected decoder fixtures with the shared
+SDK generator. It requires the Native runner (including its `--canonicalize`
+mode) and built Core, and does not build either automatically.
+
+`npm run sdk:verify:isolated` performs these checks in a temporary copy of the
+listed SDK sources, without extension/server/Registry/legacy WASM sources or
+existing build output. It installs dependencies and builds the Native runner
+and SDK WASM there. The decoder check preserves the committed 799-bundle
+baseline, rebuilds the selected UR/Aave additions from five pinned originals,
+checks exact equality with the 804-bundle product and packages that result.
+It also generates three separate pool regression bundles for Native/WASM raw
+policy checks. This is selected-input reconstruction, not regeneration of the
+entire Registry corpus. Final tarball/browser consumer checks remain a release gate.
 
 User verification (2026-09-28, local C6 before the review corrections):
 `sdk:verify:isolated` reached its final success marker, including Native session,

@@ -75,6 +75,30 @@ npm --prefix registryV2 run build:decoder-snapshot -- \
   --selection ../fixtures/sdk/pool-materialization/selection.json
 ```
 
+## 번들 B3 — 원문 요청과 격리 생성
+
+2026-10-12, B2 커밋 `2bb877e` 이후 변경: 대표 풀의 raw calldata → Core → 시험용 Cedar 정책 → Verdict를 실제 Native/WASM에서 비교하는 시험 4개를 추가했다. Curve 방향·큰 U256, Balancer 토큰/금액 대응·LP 의도, Uniswap signed amount·수령인, 잘못된 calldata/route 및 Unknown을 구분한다. 시험용 정책은 메모리에서 복제·서명하며 Day-1 원본은 변경하지 않는다. **사용자 격리 검증에서 runtime 15개·check 8개 통과, 남은 실패 0개. Balancer 시험 정책 수정 후 해당 1개만 재시험했으며 기존 통과 14개는 반복하지 않았다. 같은 격리 폴더의 `core:pack`(`npm pack --dry-run`) 정상 종료도 실행 로그로 확인했다. 마지막 정적 경계 검사에서 금지 디렉터리·외부 링크가 없고 시험 수정본이 일치함을 확인해 선택 범위의 B3 검증을 완료했다. 제품 804개와 풀 3개의 회귀 전용 구분은 유지한다.**
+
+기존 생성기는 [`scripts/sdk/build-decoder-snapshot.mjs`](../../scripts/sdk/build-decoder-snapshot.mjs) 하나로 옮겼고 Registry 명령은 wrapper로 유지했다. SDK에서는 이미 사용하는 Rust JCS를 Native runner의 `--canonicalize`로 호출하므로 새 라이브러리·서버·Registry 설치가 필요 없다. [UR/Aave 원본 5개](resolved-decoders/selection.json)를 고정해 기존 799개 기준선과 합친 결과가 제품 804개의 정확한 바이트·metadata와 같은지 검증한다. 전체 804개의 원본 재생성을 의미하지 않는다. 풀 3개는 원본 template/context부터 두 번 생성하고 그 산출물을 raw 시험에서 소비한다.
+
+격리 도구는 새 입력과 생성기를 복사하고, Core 빌드 후 재구성한 제품을 다시 패키징해 소비한다. Registry·확장·서버 디렉터리 없이 생성부터 검증하며 기존 통합 시험도 이 새 경로에서 실행한다. 다음 명령은 Registry wrapper 타입·원본 사본 일치와 전체 격리 경로를 확인한다. 격리 도구가 필요한 Native/WASM을 자체 빌드하므로 로컬 재빌드를 먼저 할 필요는 없다.
+
+```sh
+npm --prefix registryV2 run typecheck &&
+npm --prefix registry-api test -- src/__tests__/sdk-materialization-parity.test.ts &&
+npm run sdk:verify:isolated
+```
+
+로컬에서 풀 시험만 디버깅할 때는 아래를 사용한다. 기존 Core WASM은 재사용하며 변경된 Native runner만 빌드한다. 위 격리 검증까지 통과했다면 이 명령을 반복할 필요는 없다.
+
+```sh
+cargo build --locked -p dambi-core --example session_runner &&
+npm run bundle:verify:generation &&
+node --test --test-name-pattern='selected' packages/core/tests/runtime.test.mjs
+```
+
+Balancer의 `weighted` 상수·`wethIsEth` 누락, Uniswap 가격 한계 미반영·token0 metadata 부재는 제품 편입 전 남은 사항이다. Uniswap exact-input의 Cedar `slippageBp=10000`은 최소 출력 0에서 도출한 값이며 실제 시세 관측이 아니다. 위 시험의 allow/deny는 입력 보존과 정책 연결의 증거로, 거래 실행 가능성이나 가격 검증의 증거가 아니다.
+
 ## 공유 정책 입력
 
 Day-1 정책의 공유 원본은 [`policy-bundles/day1-safety/`](../../policy-bundles/day1-safety/package.json)이다. Cedar 본문과 manifest 10개는 그대로 이동했고 package의 원본 경로만 변경했다. [`policy-bundle.cjs`](../../scripts/sdk/policy-bundle.cjs)가 package 선언 순서대로 `{id, policy, manifest}`를 읽고 직렬화한다. SDK baseline과 기존 확장 asset copier가 같은 함수를 사용하며, DEC-02는 공유 Cedar/manifest를 직접 읽는다. 원본이 없으면 빈 set 또는 합성 manifest로 대체하지 않는다.

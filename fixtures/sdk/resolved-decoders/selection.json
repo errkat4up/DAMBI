@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "manifests": [
+    "manifests/uniswap/universal-router/execute-v2@1.0.0.json",
+    "manifests/uniswap/universal-router/execute-v2-no-deadline@1.0.0.json",
+    "manifests/aave/governance/core-redeemCancellationFee@1.0.0.json",
+    "manifests/aave/governance/core-updateRepresentativesForChain@1.0.0.json",
+    "manifests/aave/umbrella/batch-claimRewardsPermit@1.0.0.json"
+  ]
+}

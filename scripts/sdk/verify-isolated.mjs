@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// This is the C6 source gate, not the final npm/Cargo/browser release gate.
+// Core + selected decoder source gate, not the final npm/Cargo/browser release gate.
 // Build tools must already be installed; package dependencies are installed only
 // in the disposable copy. No generated output or node_modules is copied in.
 const root = await realpath(fileURLToPath(new URL("../../", import.meta.url)));
@@ -162,6 +162,11 @@ try {
   await run("cargo", ["build", "--locked", "-p", "dambi-core", "--example", "session_runner"]);
   await run(process.execPath, [...yarn, "core:typecheck"]);
   await run(process.execPath, [...yarn, "core:build"]);
+  // The first build supplies the real WASM installation gate. Then reconstruct
+  // the selected product additions and pool fixtures using only copied SDK
+  // inputs, and package the reconstructed product before consumers load it.
+  await run(process.execPath, ["scripts/sdk/verify-decoder-generation.mjs", "--install-product"]);
+  await run(process.execPath, ["scripts/sdk/build-decoders.mjs"]);
   await run(process.execPath, [...yarn, "core:test:types"]);
   for (const file of runtimeTests) {
     const output = await run(process.execPath, ["--test", "--test-reporter=tap", file]);
@@ -173,7 +178,7 @@ try {
   await run(process.execPath, [...yarn, "core:pack"]);
   await checkBoundary();
   success = true;
-  console.log("\n[isolated] C6 SDK source verification passed (Native session + WASM + types + runtime/check).");
+  console.log("\n[isolated] SDK source verification passed (Native + WASM + selected decoder generation + raw pool parity + types/runtime/check).");
 } finally {
   if (success && !keep) await rm(isolated, { recursive: true, force: true });
   else console.log(`[isolated] Copy retained for inspection: ${isolated}`);

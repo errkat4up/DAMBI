@@ -51,4 +51,17 @@ describe("selected SDK source materialization parity", () => {
       expect(JSON.stringify([template, context]), label).toBe(before);
     }
   });
+
+  it("pins exact UR and Aave originals for isolated selected-product reconstruction", () => {
+    const inputs = new URL("fixtures/sdk/resolved-decoders/", ROOT);
+    const selected = JSON.parse(readFileSync(new URL("selection.json", inputs), "utf8")) as {
+      schema_version: number; manifests: string[];
+    };
+    expect(selected.schema_version).toBe(1);
+    expect(selected.manifests).toHaveLength(5);
+    for (const path of selected.manifests) {
+      expect(readFileSync(new URL(path, inputs), "utf8"), path)
+        .toBe(readFileSync(new URL(`registryV2/${path}`, ROOT), "utf8"));
+    }
+  });
 });
