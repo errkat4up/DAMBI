@@ -54,6 +54,27 @@ node --test --test-name-pattern="packaged (decoder snapshot|Aave)" packages/core
 
 WASM 시험은 실제 `@dambi/core/decoders`를 사용하며, 큰 정수와 `restake`/helper/수령인 조건을 읽는 시험 전용 정책으로 Native 판정과 비교한다. 조건이 없는 대조군은 allow여야 한다. 빈 배열의 warn과 잘못된 calldata의 fail-closed도 확인한다. Registry 실행 의존성을 추가하지 않았으며, 제품 Day-1 정책은 그대로다.
 
+## 번들 B2 — 대표 풀 정적 구체화
+
+2026-10-12, B1-2 패키지 커밋 `4aed0ec` 이후 변경: [선택 입력](pool-materialization/selection.json)에 Curve NG·Balancer V3·Uniswap V3 대표 template/context 3개를 고정했다. 기존 Registry builder의 순수 구체화 helper를 SDK 도구로 추출하고 snapshot 생성기에 `--selection` 경로를 추가했다. 원본 template 사본과 정적 context만 읽으며 RPC·resolver·index/cache 보충은 없다. 중복 ID·충돌 route·누락 입력을 거절하고, 전체 후보의 실제 Core 설치 검증이 성공해야 별도 산출물을 저장한다. 개별 JCS digest·전체 바이트 digest·선택 파일·route 수를 metadata에 남긴다. **제품 804개는 변경하지 않았다. 사용자 확인 기준 타입 검사와 구체화·생성 시험 6개, API parity 2개가 통과했다(총 8개·0 실패). 대표 3개 범위의 B2 검증을 완료했다.**
+
+원본은 계획서 B0 표의 세 manifest와 각 protocol의 저장된 universe다. Balancer context는 Router에 대표 한 pool의 USDC/WETH map만 넣으므로 전체 resolver corpus와 동일한 digest를 주장하지 않는다. API parity는 동일한 선택 context에 대한 두 구현의 비교다. token 주소·순서는 고정했지만 별도 token metadata나 live 관측값을 합성하지 않는다. Balancer의 `weighted` 근거·`wethIsEth`, Uniswap의 미주입 slippage·가격 한계·token0 metadata, 각 경로의 raw 의미는 B3/제품 편입 전에 검증한다.
+
+아래는 순수 구체화·생성 검증 6개와 API parity 2개다. 생성 시험은 임시 폴더에서 두 번 생성한 바이트/metadata, 실제 WASM 설치, 잘못된 후보의 기존 산출물 보존을 확인한다. B1-2에서 빌드한 Core를 재사용하므로 Rust/WASM 재빌드는 필요 없다.
+
+```sh
+npm --prefix registryV2 run typecheck &&
+npm --prefix registryV2 run test:decoder-materialization &&
+npm --prefix registry-api test -- src/__tests__/sdk-materialization-parity.test.ts
+```
+
+산출물을 파일로 확인할 때는 아래 명령을 별도로 사용한다. 출력은 `pool-materialization/generated/pools-preview/`이며 Git에서 제외한다. 회귀 전용 선택 입력으로 제품 snapshot을 덮어쓰거나 Core 검증을 생략할 수 없다. 원본부터의 SDK 격리 검증은 B3에 남는다.
+
+```sh
+npm --prefix registryV2 run build:decoder-snapshot -- \
+  --selection ../fixtures/sdk/pool-materialization/selection.json
+```
+
 ## 공유 정책 입력
 
 Day-1 정책의 공유 원본은 [`policy-bundles/day1-safety/`](../../policy-bundles/day1-safety/package.json)이다. Cedar 본문과 manifest 10개는 그대로 이동했고 package의 원본 경로만 변경했다. [`policy-bundle.cjs`](../../scripts/sdk/policy-bundle.cjs)가 package 선언 순서대로 `{id, policy, manifest}`를 읽고 직렬화한다. SDK baseline과 기존 확장 asset copier가 같은 함수를 사용하며, DEC-02는 공유 Cedar/manifest를 직접 읽는다. 원본이 없으면 빈 set 또는 합성 manifest로 대체하지 않는다.

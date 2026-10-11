@@ -21,7 +21,7 @@
 
 현재 [snapshot 메타데이터](../../packages/core/decoder-snapshots/full/snapshot.meta.json)는 **source-context 제외 30,484개·Core 거절 0개**를 기록한다. 기존 799개에 UR 2개·Aave 3개를 증분 편입했으며 전체 Registry를 재생성하지 않았다. 제외 수를 고유 풀 수나 지원 요청 수로 사용하지 않는다. 원본 포함, snapshot 설치 성공, 원문 요청 해석, 정책 판정 검증을 각각 구분한다.
 
-B1-1 UR·B1-2 Aave의 선택 경로에 대한 Native/WASM 검증·snapshot 편입을 완료했다. 다음은 B2의 대표 풀 범위·정적 입력 구체화와 재현 생성이다. 실제 API/RPC 연결과 풀별 확대는 후속 범위다.
+B1-1 UR·B1-2 Aave의 선택 경로에 대한 Native/WASM 검증·snapshot 편입을 완료했다. B2는 대표 풀 3개의 회귀 전용 정적 구체화·재현 생성 사용자 검증을 완료했다. 실제 API/RPC 연결과 풀별 제품 확대는 후속 범위다.
 
 ## 2. 책임과 유지할 계약
 
@@ -175,8 +175,8 @@ snapshot은 Core의 `maxDecoderBytes`, route 설치 개수 65,536, routing 문�
 | B0 지원 범위·데이터 의존성 확정 | 기존 799개 기준선·UR 착수 범위·정적 풀 후보 조사. 제품 확대·데이터 보강 계약은 미확정 |
 | B1-1 UR snapshot 검증·raw 회귀 | 대표 Native/WASM 경로 사용자 검증·snapshot 편입 완료. [결과·명령](../../fixtures/sdk/README.md#번들-b1-1--universal-router) |
 | B1-2 Aave 및 의미 보완 | 선택 경로 Native/WASM 사용자 검증·snapshot 편입 완료. [결과](../../fixtures/sdk/README.md#번들-b1-2--aave) |
-| B2 정적 입력·구체화·재현 생성 | 기존 생성기에 지정 manifest 증분 추가 구현. 원본 독립 생성·context 보완 미착수 |
+| B2 정적 입력·구체화·재현 생성 | 대표 3개 범위 사용자 검증 완료. [명령·제한](../../fixtures/sdk/README.md#번들-b2--대표-풀-정적-구체화) |
 | B3 raw 경로·정책·격리 검증 | UR·Aave 패키지 회귀 입력을 격리 source 목록에 포함. 원본 생성부터의 격리 검증은 미완료 |
 | B4 어댑터 인계 확정 | 미착수. 완료 후 어댑터 세부 계획 작성 |
 
-다음은 **B2 대표 풀의 범위 확정·정적 입력 구체화와 재현 생성**이다. B0의 미결 의미·범위는 해당 경로의 제품 편입 전에 해결한다. UR·Aave 선택 범위의 B1 완료를 전체 Registry 지원 완료로 확대하지 않는다.
+다음은 **B3의 raw 의미·생성부터의 SDK 격리 검증**이다. B0의 미결 의미·범위는 해당 경로의 제품 편입 전에 해결한다. UR·Aave 선택 범위의 B1 완료를 전체 Registry 지원 완료로 확대하지 않는다.

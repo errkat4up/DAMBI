@@ -38,6 +38,11 @@
  * every existing bundle and requires the whole candidate to install: no bundle
  * is dropped and --no-verify is forbidden in this mode.
  *
+ * `--selection ../fixtures/sdk/pool-materialization/selection.json` builds the
+ * explicitly pinned template/context inputs into a separate regression artifact.
+ * It never reads index/, invokes resolvers or changes the packaged full snapshot.
+ * All selected bundles must pass the Core gate; missing inputs are fatal.
+ *
  *   npm run build:decoder-snapshot                    # name=full
  *   npm run build:decoder-snapshot -- --name full --dry-run
  *   npm run build:decoder-snapshot -- --add-manifest manifests/uniswap/universal-router/execute-v2@1.0.0.json
@@ -47,6 +52,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { materializeSelectedDecoder } from "../../scripts/sdk/materialize-decoder.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REGISTRY_ROOT = resolve(HERE, "..");
@@ -82,6 +88,12 @@ export interface SnapshotMeta {
   excluded: Record<string, number>;
   /** bundles Core refused to install, by id; null when the gate was skipped */
   rejected_by_core: { id: string; error: string }[] | null;
+  /** Present only for the separate, non-product materialization regression. */
+  selection?: {
+    purpose: "regression-only";
+    route_count: number;
+    inputs: { id: string; template: string; context: string; bundle_sha256: string }[];
+  };
 }
 
 export interface BuildOptions {
@@ -95,6 +107,8 @@ export interface BuildOptions {
   verify?: boolean;
   /** Extend the saved snapshot with these Registry-relative manifests; always verify, never drop. */
   addManifests?: string[];
+  /** Pinned template/context selection; output defaults beside it in generated/. */
+  selectionFile?: string;
   log?: (msg: string) => void;
 }
 
@@ -283,6 +297,59 @@ async function addManifests(
   };
 }
 
+/** Read only explicit local inputs. No resolver, RPC, index or cache fallback. */
+function selectedInputPath(base: string, value: unknown): string {
+  if (typeof value !== "string" || !/^(?:[A-Za-z0-9_@.-]+\/)*[A-Za-z0-9_@.-]+\.json$/.test(value)
+    || value.split("/").some((part) => part === "." || part === "..")) {
+    throw new Error(`selection input must be a normalized relative JSON path: ${String(value)}`);
+  }
+  const path = realpathSync(join(base, value));
+  const within = relative(realpathSync(base), path);
+  if (isAbsolute(within) || within.split(sep).includes("..")) {
+    throw new Error(`selection input escapes its directory: ${value}`);
+  }
+  return path;
+}
+
+export async function collectSelectedBundles(selectionFile: string): Promise<{
+  bundles: Bundle[];
+  selection: NonNullable<SnapshotMeta["selection"]>;
+}> {
+  const selection: unknown = readJson(selectionFile);
+  if (!isRecord(selection) || selection.schema_version !== 1 || selection.purpose !== "regression-only"
+    || !Array.isArray(selection.entries) || selection.entries.length === 0
+    || Object.keys(selection).some((key) => !["schema_version", "purpose", "entries"].includes(key))) {
+    throw new Error("selection must declare schema_version 1, regression-only purpose and nonempty entries");
+  }
+  const base = dirname(selectionFile);
+  const byId = new Map<string, Bundle>();
+  const routes = new Set<string>();
+  const inputs: NonNullable<SnapshotMeta["selection"]>["inputs"] = [];
+  for (const entry of selection.entries) {
+    if (!isRecord(entry) || Object.keys(entry).some((key) => key !== "template" && key !== "context")) {
+      throw new Error("selection entry must contain only template and context paths");
+    }
+    const template = readJson<unknown>(selectedInputPath(base, entry.template));
+    const context = readJson<unknown>(selectedInputPath(base, entry.context));
+    const bundle = checkedBundle(materializeSelectedDecoder(template, context), String(entry.template));
+    if (byId.has(bundle.id)) throw new Error(`duplicate selected bundle id: ${bundle.id}`);
+    // The strict materializer produces exactly one chain/address route.
+    const addresses = bundle.match.chain_to_addresses as Record<string, string[]>;
+    const [[chain, targets]] = Object.entries(addresses);
+    const route = `${chain}:${targets[0]}:${String(bundle.match.selector).toLowerCase()}`;
+    if (routes.has(route)) throw new Error(`conflicting selected route: ${route}`);
+    routes.add(route);
+    byId.set(bundle.id, bundle);
+    inputs.push({ id: bundle.id, template: entry.template as string, context: entry.context as string,
+      bundle_sha256: sha256(await canonical(bundle)) });
+  }
+  inputs.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  return {
+    bundles: inputs.map(({ id }) => byId.get(id)!),
+    selection: { purpose: "regression-only", route_count: routes.size, inputs },
+  };
+}
+
 // ---- Core gate --------------------------------------------------------------
 
 interface CoreModule {
@@ -374,18 +441,36 @@ async function coreGate(
 
 export async function buildDecoderSnapshot(opts: BuildOptions = {}): Promise<BuildResult> {
   const log = opts.log ?? (() => {});
-  const name = opts.name ?? "full";
+  const selected = opts.selectionFile !== undefined;
+  const name = opts.name ?? (selected ? "pools-preview" : "full");
   if (!NAME_RE.test(name)) throw new Error(`name must match ${NAME_RE}: "${name}"`);
   const root = opts.registryRoot ?? REGISTRY_ROOT;
-  const dir = join(opts.outRoot ?? join(REPO_ROOT, "packages", "core", "decoder-snapshots"), name);
+  const productRoot = join(REPO_ROOT, "packages", "core", "decoder-snapshots");
+  const dir = resolve(opts.outRoot ?? (selected ? join(dirname(opts.selectionFile!), "generated") : productRoot), name);
   const extending = (opts.addManifests?.length ?? 0) > 0;
   if (extending && opts.verify === false) throw new Error("--add-manifest requires the Core gate; --no-verify is not allowed");
+  if (selected && extending) throw new Error("--selection cannot be combined with --add-manifest");
+  if (selected && opts.verify === false) throw new Error("--selection requires the Core gate; --no-verify is not allowed");
+  if (selected) {
+    const withinProduct = relative(productRoot, dir);
+    if (!isAbsolute(withinProduct) && !withinProduct.split(sep).includes("..")) {
+      throw new Error("regression-only selection cannot write a packaged decoder snapshot");
+    }
+    const previousMetaPath = join(dir, "snapshot.meta.json");
+    if (existsSync(previousMetaPath) && readJson<SnapshotMeta>(previousMetaPath).selection?.purpose !== "regression-only") {
+      throw new Error("regression-only selection cannot replace an existing product snapshot");
+    }
+  }
 
   let bundles: Bundle[];
   let excluded: Record<string, number>;
   let previousMeta: SnapshotMeta | undefined;
   let selectedIds = new Set<string>();
-  if (extending) {
+  let selection: SnapshotMeta["selection"];
+  if (selected) {
+    ({ bundles, selection } = await collectSelectedBundles(opts.selectionFile!));
+    excluded = {};
+  } else if (extending) {
     const saved = readSavedSnapshot(dir, name);
     previousMeta = saved.meta;
     excluded = saved.meta.excluded;
@@ -396,7 +481,7 @@ export async function buildDecoderSnapshot(opts: BuildOptions = {}): Promise<Bui
   let artifact: string;
   let rejected: { id: string; error: string }[] | null = null;
   if (opts.verify ?? true) {
-    ({ bundles, artifact, rejected } = await coreGate(bundles, log, extending));
+    ({ bundles, artifact, rejected } = await coreGate(bundles, log, extending || selected));
     if (previousMeta) {
       rejected = (previousMeta.rejected_by_core ?? []).filter(({ id }) => !selectedIds.has(id));
     }
@@ -413,6 +498,7 @@ export async function buildDecoderSnapshot(opts: BuildOptions = {}): Promise<Bui
     excluded_count: Object.values(excluded).reduce((a, b) => a + b, 0),
     excluded,
     rejected_by_core: rejected,
+    ...(selection ? { selection } : {}),
   };
 
   const written: string[] = [];
@@ -439,17 +525,18 @@ export async function buildDecoderSnapshot(opts: BuildOptions = {}): Promise<Bui
 
 // ---- CLI --------------------------------------------------------------------
 
-function parseArgs(argv: string[]): { name: string; dryRun: boolean; verify: boolean; addManifests: string[] } {
-  const out = { name: "full", dryRun: false, verify: true, addManifests: [] as string[] };
+function parseArgs(argv: string[]): BuildOptions {
+  const out: BuildOptions = { dryRun: false, verify: true, addManifests: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--dry-run") out.dryRun = true;
     else if (a === "--no-verify") out.verify = false;
-    else if (a === "--name" || a === "--add-manifest") {
+    else if (a === "--name" || a === "--add-manifest" || a === "--selection") {
       const value = argv[++i];
       if (!value || value.startsWith("--")) throw new Error(`${a} requires a value`);
       if (a === "--name") out.name = value;
-      else out.addManifests.push(value);
+      else if (a === "--selection") out.selectionFile = resolve(value);
+      else out.addManifests!.push(value);
     }
     else throw new Error(`unknown argument: ${a}`);
   }
