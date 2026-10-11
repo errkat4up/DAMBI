@@ -25,6 +25,10 @@
       "types": "./dist/decoders.d.ts",
       "import": "./dist/decoders.js"
     },
+    "./adapters": {
+      "types": "./dist/adapters/index.d.ts",
+      "import": "./dist/adapters/index.js"
+    },
     "./internal": {
       "types": "./dist/internal.d.ts",
       "import": "./dist/internal.js"
@@ -49,6 +53,7 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json && node ../../scripts/sdk/build-decoders.mjs && node ../../scripts/sdk/build-wasm.mjs",
     "test:types": "tsc -p tsconfig.consumer.json",
     "test:runtime": "node ../../scripts/sdk/verify-decoder-generation.mjs && node --test tests/runtime.test.mjs tests/check.test.mjs",
+    "test:adapters": "node --test tests/adapters/policy-api.test.mjs",
     "pack:check": "npm pack --dry-run"
   },
   "devDependencies": {

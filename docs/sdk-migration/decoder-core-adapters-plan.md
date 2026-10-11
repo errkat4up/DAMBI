@@ -390,6 +390,8 @@ C5–C6에서는 empty bundle, 매칭 정책 없음, 엔진 오류, 부분 디�
 
 ## 6. 3차 작업: feat/adapters
 
+세부 실행 기준은 [어댑터 개발 계획](adapter-development-plan.md)을 따른다. 현재 A1-1 완료, 다음은 A1-2다.
+
 C 단계 이후에 브랜치를 만든다. HTTP와 Fact 어댑터는 SDK의 선택적 모듈로 구현하며, Core는 이 구현을 강제로 참조하지 않는다.
 
 | 단계 | 구현 범위 | 완료 조건 |

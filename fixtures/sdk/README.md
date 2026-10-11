@@ -103,6 +103,10 @@ Balancer의 `weighted` 상수·`wethIsEth` 누락, Uniswap 가격 한계 미반�
 
 2026-10-12, B3 `cb3d52b` 기준: [제품·요청 범위](../../contracts/core-v1/snapshot-selection.proposal.json)와 [첫 Fact 계약](first-fact-contract.json)을 현재 코드에 맞춰 갱신하고 A1/A2 운영 설정의 담당·확인 시점을 연결했다. JSON 구문·참조 경로·기존 snapshot metadata 정합성을 확인했다. 런타임 변경이 없어 빌드·기능 시험은 반복하지 않았다. 남은 작업은 어댑터 세부 계획·HTTP/RPC 구현 및 실제 통합 검증이다.
 
+## 어댑터 A1-1 — 정책 HTTP 기본
+
+2026-10-12, `feat/adapters`의 A1-1 변경: `@dambi/core/adapters` 진입점, 정책 wrapper 원문 보존, URL·형식·byte 상한·오류·취소 처리와 격리/릴리스 시험 연결을 구현했다. 로컬 HTTP 시험 **8 passed / 0 failed**, TypeScript 빌드·소비자 타입 검사·릴리스 workflow actionlint·diff 검사를 통과했다. package dry-run으로 어댑터 코드/타입 포함과 시험 파일 제외를 확인했다. 전체 격리 빌드와 원격 CI는 이번 변경에서 실행하지 않았다. 다음은 A1-2의 ETag·실제 Core init/refresh 연결이며 실제 배포 API 확인은 A1-3에 남는다.
+
 ## 공유 정책 입력
 
 Day-1 정책의 공유 원본은 [`policy-bundles/day1-safety/`](../../policy-bundles/day1-safety/package.json)이다. Cedar 본문과 manifest 10개는 그대로 이동했고 package의 원본 경로만 변경했다. [`policy-bundle.cjs`](../../scripts/sdk/policy-bundle.cjs)가 package 선언 순서대로 `{id, policy, manifest}`를 읽고 직렬화한다. SDK baseline과 기존 확장 asset copier가 같은 함수를 사용하며, DEC-02는 공유 Cedar/manifest를 직접 읽는다. 원본이 없으면 빈 set 또는 합성 manifest로 대체하지 않는다.

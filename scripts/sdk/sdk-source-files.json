@@ -39,6 +39,7 @@
     { "from": "packages/core/tests/fixtures/aave.mjs" },
     { "from": "packages/core/tests/fixtures/pools.mjs" },
     { "from": "packages/core/tests/check.test.mjs" },
+    { "from": "packages/core/tests/adapters" },
     { "from": "crates/dambi-core/Cargo.toml" },
     { "from": "crates/dambi-core/src" },
     { "from": "crates/dambi-core/examples/session_runner.rs" },

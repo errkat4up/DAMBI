@@ -11,7 +11,11 @@ const root = await realpath(fileURLToPath(new URL("../../", import.meta.url)));
 const manifest = JSON.parse(await readFile(new URL("./sdk-source-files.json", import.meta.url), "utf8"));
 const forbidden = ["browser-extension", "crates/policy-server", "crates/policy-engine-wasm", "registryV2"];
 const generated = new Set([".git", "target", "node_modules", "dist", "pkg", ".cache"]);
-const runtimeTests = ["packages/core/tests/runtime.test.mjs", "packages/core/tests/check.test.mjs"];
+const runtimeTests = [
+  "packages/core/tests/runtime.test.mjs",
+  "packages/core/tests/check.test.mjs",
+  "packages/core/tests/adapters/policy-api.test.mjs",
+];
 const keep = process.argv.includes("--keep");
 const args = process.argv.slice(2);
 const phase = args.includes("--ci-prepare") ? "prepare" : args.includes("--ci-verify") ? "verify" : "all";
@@ -192,7 +196,7 @@ try {
     console.log("[isolated] Sources and pinned Cargo workspace prepared for dependency cache restore.");
   } else {
     await verify();
-    console.log("\n[isolated] SDK source verification passed (Native + WASM + selected decoder generation + raw pool parity + types/runtime/check).");
+    console.log("\n[isolated] SDK source verification passed (Native + WASM + selected decoder generation + raw pool parity + types/runtime/check/adapters).");
   }
   success = true;
 } finally {

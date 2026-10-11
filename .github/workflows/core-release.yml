@@ -8,7 +8,7 @@
 #
 # Gates, in order: the tag matches packages/core/package.json, the version is not
 # already on npm, the SDK source-isolation check passes (same as CI's `core`
-# job), and the in-repo build passes types + runtime tests. The tarball that is
+# job), and the in-repo build passes types + runtime + adapter tests. The tarball that is
 # published is built in this run from the tagged commit — never a local dist.
 name: core-release
 
@@ -66,7 +66,7 @@ jobs:
       - name: Install wasm-pack
         run: cargo install wasm-pack --version "${WASM_PACK_VERSION}" --locked
 
-      - name: SDK source isolation (Native + WASM + types + runtime/check)
+      - name: SDK source isolation (Native + WASM + types + runtime/check/adapters)
         run: npm run sdk:verify:isolated
 
   publish:
@@ -113,10 +113,11 @@ jobs:
       - name: Native session runner (runtime test reference)
         run: cargo build --locked -p dambi-core --example session_runner
 
-      - name: Types + runtime tests on the build being published
+      - name: Types + runtime + adapter tests on the build being published
         run: |
           yarn workspace @dambi/core test:types
           yarn workspace @dambi/core test:runtime
+          yarn workspace @dambi/core test:adapters
 
       - name: Publish
         working-directory: packages/core

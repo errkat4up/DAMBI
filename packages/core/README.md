@@ -124,6 +124,32 @@ const verdict = await core.check({
   defaults.
 - `POST /v1/audit` (verdict reporting) requires an API key and is optional.
 
+## Optional policy HTTP adapter (development)
+
+The checkout provides `createPolicyApiSource` through the separate
+`@dambi/core/adapters` entry point. This addition has not been published yet.
+
+```ts
+import { createPolicyApiSource } from "@dambi/core/adapters";
+
+const policy = createPolicyApiSource({
+  baseUrl: "https://policies.example", // API origin from host configuration
+  maxResponseBytes: 2_000_000, // Example HTTP wrapper limit, in bytes
+});
+// Pass policy as CoreConfig.ports.policy; retain local trust and decoder settings.
+```
+
+The source requests `/v1/bundle?profile=default`, maps `key_id` to `keyId`, and
+preserves the signed payload string. Core still verifies the signature and
+bundle validity. The wrapper limit is separate from Core's `maxPolicyBytes`.
+Use an HTTPS origin; loopback HTTP is allowed for local development. Optional
+`headers` and `fetch` are captured at construction. Redirects are rejected.
+
+A1-1 performs an uncached request without automatic retries. ETag reuse and
+Core integration checks follow in A1-2. Direct callers can pass
+`policy.fetch({ signal })` for cancellation/deadlines and inspect `AdapterError`;
+Core normalizes a rejected policy source to `POLICY_FETCH_FAILED`.
+
 ## Public contract and migration
 
 - Use `await createCore(config, options?)`. The instance exposes `plan`, `evaluate`,
@@ -280,6 +306,15 @@ The runtime checks load actual packaged WASM and compare plan/evaluate output
 against the Native session runner. They fail if artifacts are absent and never
 build them implicitly. No legacy extension WASM package is loaded.
 `npm run core:pack` separately inspects package contents without publishing.
+
+For changes confined to the adapter transport, a TypeScript build is sufficient
+for the local HTTP and consumer-type checks; no WASM rebuild is needed:
+
+```sh
+node node_modules/typescript/bin/tsc -p packages/core/tsconfig.build.json
+npm run core:test:adapters
+npm run core:test:types
+```
 
 `core:test:runtime` first prepares the selected decoder fixtures with the shared
 SDK generator. It requires the Native runner (including its `--canonicalize`
