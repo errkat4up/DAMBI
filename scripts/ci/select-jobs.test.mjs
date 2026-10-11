@@ -85,6 +85,9 @@ test('shared code, build inputs, CI configuration and unknown paths force the fu
     'crates/asset-model/action/src/lib.rs', 'Registry/decoder.json',
     'scripts/sdk/verify-isolated.mjs', 'fixtures/sdk/contract.json',
     'policies/day1.cedar', 'contracts/core-v1/schema.json', 'new-component/source.ts',
+    // Illustrative future paths: no component is assumed to exist yet.
+    'packages/scam-detector/src/index.ts', 'onchain/contracts/Registry.sol',
+    'infra/registry-node/compose.yml',
   ];
   for (const path of paths) {
     expectJobs(selectJobs(modified('packages/core/src/index.ts', path)), JOBS);
@@ -137,8 +140,35 @@ test('PR selection uses its merge base so unrelated target branch changes do not
     git('checkout', 'main');
     await write('crates/asset-model/action/src/lib.rs');
     const base = commit('unrelated main change');
-    const event = { pull_request: { base: { sha: base }, head: { sha: head } } };
+    const event = { pull_request: { base: { sha: base }, head: { sha: head }, labels: [] } };
     expectJobs(await planForEvent('pull_request', event, { cwd }), ['core']);
+  });
+});
+
+test('PR full-CI labels override path selection and malformed label metadata fails safe', async () => {
+  await withRepository(async ({ cwd, write, commit }) => {
+    const base = commit('initial');
+    await write('packages/core/src/cache.ts');
+    const head = commit('core change');
+    const request = { base: { sha: base }, head: { sha: head } };
+    const cases = [
+      ['synchronize', [], ['core']],
+      ['labeled', [{ name: 'enhancement' }], ['core']],
+      ['labeled', [{ name: 'enhancement' }, { name: 'ci:full' }], JOBS],
+      ['synchronize', [{ name: 'ci:full' }], JOBS],
+      ['unlabeled', [], ['core']],
+    ];
+    for (const [action, labels, expected] of cases) {
+      expectJobs(await planForEvent('pull_request', {
+        action, pull_request: { ...request, labels },
+      }, { cwd }), expected);
+    }
+    expectJobs(await planForEvent('pull_request', { pull_request: request }, { cwd }), JOBS);
+    for (const labels of [null, 'ci:full', [null], [{}], [{ name: 42 }], [{ name: 'ci:full' }, { name: null }]]) {
+      expectJobs(await planForEvent('pull_request', {
+        pull_request: { ...request, labels },
+      }, { cwd }), JOBS);
+    }
   });
 });
 

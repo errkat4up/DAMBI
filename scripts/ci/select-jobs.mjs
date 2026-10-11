@@ -58,6 +58,15 @@ function git(cwd, args) {
 export function planForEvent(eventName, event, { cwd = process.cwd() } = {}) {
   if (!["push", "pull_request"].includes(eventName)) return full("Manual or unsupported event: full verification");
   if (event?.forced) return full("Forced push: full verification");
+  if (eventName === "pull_request") {
+    const labels = event?.pull_request?.labels;
+    if (!Array.isArray(labels) || labels.some((label) => typeof label?.name !== "string")) {
+      return full("Missing or invalid pull request labels");
+    }
+    // Keep new SDK capabilities under full regression on every PR update until
+    // their dependencies and dedicated checks are established.
+    if (labels.some((label) => label.name === "ci:full")) return full("Pull request requests full verification (ci:full)");
+  }
   const base = eventName === "pull_request" ? event?.pull_request?.base?.sha : event?.before;
   const head = eventName === "pull_request" ? event?.pull_request?.head?.sha : event?.after;
   const validSha = (sha) => typeof sha === "string" && /^[a-f0-9]{40}$/i.test(sha) && !/^0+$/.test(sha);

@@ -2,6 +2,9 @@ name: ci
 
 on:
   pull_request:
+    # ci:full opts an evolving SDK feature into full regression on every update.
+    # Re-evaluate all label events normally; a no-op run could cancel real checks.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
   workflow_dispatch: {} # allow manual re-runs from the Actions tab / `gh workflow run`
