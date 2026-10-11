@@ -1,25 +1,12 @@
 {
   "name": "full",
   "schema_version": 1,
-  "digest": "0x9950c91189e146a1d3f6b10016e9770bb891f5704ccb95667c000ad2746e7ee1",
-  "bytes": 2560914,
-  "bundle_count": 801,
+  "digest": "0x807c56cdec2e1997c278f977ebbf4caf2eaebffc9082ef4f6520336787256093",
+  "bytes": 2564423,
+  "bundle_count": 804,
   "excluded_count": 30484,
   "excluded": {
     "index entry requires source context materialization": 30484
   },
-  "rejected_by_core": [
-    {
-      "id": "aave/governance/core/redeemCancellationFee@1.0.0",
-      "error": "emit: missing body"
-    },
-    {
-      "id": "aave/governance/core/updateRepresentativesForChain@1.0.0",
-      "error": "emit: missing body"
-    },
-    {
-      "id": "aave/umbrella/batch/claimRewardsPermit@1.0.0",
-      "error": "emit: missing body"
-    }
-  ]
+  "rejected_by_core": []
 }

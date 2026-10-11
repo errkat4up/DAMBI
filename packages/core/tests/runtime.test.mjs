@@ -7,6 +7,9 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { CoreError, createCore } from "@dambi/core";
 import { universalRouterCases, universalRouterRoutes } from "./fixtures/universal-router.mjs";
+import {
+  aaveRoutes, aaveSender, aaveHelper, aaveGovernanceCases, aaveUmbrellaCases, aaveEmptyCases,
+} from "./fixtures/aave.mjs";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const fixtures = new URL("../../../crates/dambi-core/tests/fixtures/", import.meta.url);
@@ -218,6 +221,114 @@ test("WASM rejects malformed nested ABI alternatives in a pinned packaged snapsh
     };
     setup.config.limits.maxDecoderBytes = Buffer.byteLength(artifact, "utf8");
     await assert.rejects(createCore(setup.config), code("INVALID_DECODER_SNAPSHOT"));
+  }
+});
+
+async function packagedAave(t, policy = initialPolicy) {
+  const { decoderSnapshot, decoderSnapshotInfo } = await import("@dambi/core/decoders");
+  const bundles = JSON.parse(decoderSnapshot.artifact).bundles;
+  for (const { id, selector, to } of aaveRoutes) {
+    const matches = bundles.filter((bundle) => bundle.id === id);
+    assert.equal(matches.length, 1, `packaged snapshot must include ${id} exactly once`);
+    assert.equal(matches[0].match.selector, selector);
+    assert.ok(matches[0].match.chain_to_addresses["1"].includes(to));
+  }
+  const setup = harness(policy);
+  setup.local.decoderSnapshot = decoderSnapshot;
+  setup.config.decoderSnapshot = decoderSnapshot;
+  setup.local.limits.maxDecoderBytes = decoderSnapshotInfo.bytes;
+  const core = await createCore(setup.config);
+  t.after(() => core.dispose());
+  return { core, local: setup.local };
+}
+
+// Test-only policies prove that decoded values survive the WASM/Cedar boundary.
+// Day1 has no governance/restake safety policy; the product policies are unchanged.
+function aavePolicy(checks) {
+  const payload = JSON.parse(initialPolicy.payload);
+  for (const { id, tag, action, predicate } of checks) {
+    payload.policies.push({
+      id,
+      policy: `@id("${id}") @severity("deny") forbid(principal, action == ${action}, resource) when { ${predicate} };`,
+      manifest: {
+        id, schema_version: 2, trigger: { where: { "action.tag": { eq: tag } } },
+        policy_rpc: [], custom_context: { fields: {} },
+      },
+    });
+  }
+  return signed(payload);
+}
+
+test("packaged Aave governance retains U256 fields across WASM and Native policies", async (t) => {
+  const checks = [
+    {
+      id: "test-aave-proposal-u256", tag: "redeem_cancellation_fee",
+      action: 'Governance::Action::"RedeemCancellationFee"',
+      predicate: `context.proposalId == "${MAX_U256}"`,
+    },
+    {
+      id: "test-aave-representative-chain", tag: "update_representative",
+      action: 'Governance::Action::"UpdateRepresentative"',
+      predicate: `context.representativeChainId == "0x20000000000001" && context.representative == "${aaveSender}"`,
+    },
+  ];
+  const policy = aavePolicy(checks);
+  const { core, local } = await packagedAave(t, policy);
+  for (const [index, scenario] of aaveGovernanceCases().entries()) {
+    for (const [req, decision] of [[scenario.request, "deny"], [scenario.controlRequest, "allow"]]) {
+      const label = `${scenario.name}: ${decision}`;
+      const reference = native(local, policy, req);
+      assert.deepEqual(reference.plan.calls, [], label);
+      const verdict = await core.check(req);
+      assert.deepEqual(verdict, reference.verdict, label);
+      assert.equal(verdict.source, "evaluated", label);
+      assert.equal(verdict.decision, decision, label);
+      assert.equal(verdict.reasons.some((reason) => reason.policyId === checks[index].id), decision === "deny", label);
+    }
+  }
+});
+
+test("packaged Aave Umbrella preserves restake and helper in WASM and Native", async (t) => {
+  const id = "test-umbrella-restake-intent";
+  const policy = aavePolicy([{
+    id, tag: "claim_rewards", action: 'Staking::Action::"ClaimRewards"',
+    predicate: `context has restake && context.restake
+      && context.venue.name == "aave_umbrella_batch_helper"
+      && context.venue has helper && context.venue.helper == "${aaveHelper}"
+      && context has recipient && context.recipient == "${aaveSender}"`,
+  }]);
+  const { core, local } = await packagedAave(t, policy);
+  // These are claim/restake intents, not proof of permit validity, live stake
+  // paths, received amounts or execution. The bool does not imply all rewards restake.
+  for (const scenario of aaveUmbrellaCases(NOW)) {
+    const reference = native(local, policy, scenario.request);
+    assert.deepEqual(reference.plan.calls, [], scenario.name);
+    const verdict = await core.check(scenario.request);
+    assert.deepEqual(verdict, reference.verdict, scenario.name);
+    assert.equal(verdict.source, "evaluated", scenario.name);
+    assert.equal(verdict.decision, scenario.decision, scenario.name);
+    assert.equal(verdict.reasons.some((reason) => reason.policyId === id), scenario.restake, scenario.name);
+  }
+});
+
+test("packaged Aave empty arrays warn and malformed calldata fails closed", async (t) => {
+  const { core, local } = await packagedAave(t);
+  for (const scenario of aaveEmptyCases(NOW)) {
+    const reference = native(local, initialPolicy, scenario.request);
+    const verdict = await core.check(scenario.request);
+    assert.deepEqual(verdict, reference.verdict, scenario.name);
+    assert.equal(verdict.decision, "warn", scenario.name);
+    assert.equal(verdict.source, "evaluated", scenario.name);
+    assert.ok(verdict.diagnostics.some((item) => item.code === "partial_decode"), scenario.name);
+
+    // Keep each known selector but remove its ABI arguments. plan() rejects;
+    // check() turns the same error into an explicit fail-closed verdict.
+    const malformed = { ...scenario.request, data: scenario.route.selector };
+    await assert.rejects(core.plan(malformed), code("INVALID_REQUEST"));
+    const failure = await core.check(malformed);
+    assert.equal(failure.decision, "deny", scenario.name);
+    assert.equal(failure.source, "fail_closed", scenario.name);
+    assert.ok(failure.diagnostics.some((item) => item.code === "invalid_request"), scenario.name);
   }
 });
 

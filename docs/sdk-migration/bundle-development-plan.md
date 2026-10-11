@@ -11,17 +11,17 @@
 | 항목 | 확인된 상태 | 번들 단계에서 할 일 |
 | --- | --- | --- |
 | Core 실행부 | C1~C6 구현·검증 완료. 현재 패키지 0.1.0에 `@dambi/core/decoders` 추가 | 필요한 Decoder 호환성만 보완. Core 전체 개발을 다시 시작하지 않음 |
-| 제품 snapshot | UR 편입 후 패키지 snapshot 801개 포함. 이전 11개 manifest·USDC 4개 선택안은 여전히 fixture 기반 제안 | 현재 snapshot을 기준으로 추가 지원 경로를 구체화. 이전 선택안으로 기존 799개를 축소하지 않음 |
+| 제품 snapshot | UR·Aave 편입 후 패키지 snapshot 804개 포함. 이전 11개 manifest·USDC 4개 선택안은 여전히 fixture 기반 제안 | 현재 snapshot을 기준으로 추가 지원 경로를 구체화. 이전 선택안으로 기존 799개를 축소하지 않음 |
 | 생성 경로 | [Registry 생성기](../../registryV2/scripts/build-decoder-snapshot.ts)와 [SDK 패키징](../../scripts/sdk/build-decoders.mjs) 구현됨 | 생성된 index·기존 Core dist 의존과 source-context 제외를 보완. 원본부터 SDK 독립 재현 생성은 남음 |
 | 풀별 번들 | Registry에 template/context 구체화(materialization) 로직이 있음. Core는 완성된 V3 bundle만 받음 | 정적 풀 정보를 빌드 시 채워 넣고 현재 Registry와 결과 일치 확인 |
 | Universal Router 2개 | B1-1 검증기 보완·대표 Native/WASM 경로 검증·snapshot 편입 완료 | 필드의 엄격한 검증과 실제 `execute` 회귀를 추가. 시장 데이터 보강과 구분 |
-| Aave 3개 | 선언·Umbrella restake/helper 모델 보완, Native 사용자 검증 완료 | WASM 검증·snapshot 편입 |
+| Aave 3개 | Native/WASM 사용자 검증·snapshot 편입 완료 | 검증한 요청 의미·실행 제한 유지 |
 | 외부 데이터 | 정책 Fact 포트는 구현됨. 구체적인 HTTP/RPC 어댑터는 미구현 | 필요한 데이터와 소비 시점을 정리해 A 단계로 인계 |
 | 정책 publisher | 공유 `policy-bundles/`와 SDK loader를 읽도록 수정됨 | 경로 수정 재구현 없이 실제 A1 전송·운영 검증으로 인계 |
 
-현재 [snapshot 메타데이터](../../packages/core/decoder-snapshots/full/snapshot.meta.json)는 **source-context 제외 30,484개·Aave 거절 3개**를 기록한다. 기존 799개에 UR 2개를 증분 편입했으며 전체 Registry를 재생성하지 않았다. 제외 수를 고유 풀 수나 지원 요청 수로 사용하지 않는다. 원본 포함, snapshot 설치 성공, 원문 요청 해석, 정책 판정 검증을 각각 구분한다.
+현재 [snapshot 메타데이터](../../packages/core/decoder-snapshots/full/snapshot.meta.json)는 **source-context 제외 30,484개·Core 거절 0개**를 기록한다. 기존 799개에 UR 2개·Aave 3개를 증분 편입했으며 전체 Registry를 재생성하지 않았다. 제외 수를 고유 풀 수나 지원 요청 수로 사용하지 않는다. 원본 포함, snapshot 설치 성공, 원문 요청 해석, 정책 판정 검증을 각각 구분한다.
 
-B1-1 대표 UR 경로의 호환성·Native/WASM 회귀·증분 편입과 B1-2 Aave 선언·의미 보완의 Native 검증을 완료했다. 다음은 Aave WASM 검증·snapshot 편입이다. 실제 API/RPC 연결과 풀별 확대는 후속 범위다.
+B1-1 UR·B1-2 Aave의 선택 경로에 대한 Native/WASM 검증·snapshot 편입을 완료했다. 다음은 B2의 대표 풀 범위·정적 입력 구체화와 재현 생성이다. 실제 API/RPC 연결과 풀별 확대는 후속 범위다.
 
 ## 2. 책임과 유지할 계약
 
@@ -104,7 +104,7 @@ Balancer universe의 `disposition: exclude`는 직접 callkey 대상 제외를 �
 
 `array_emit.per_item_body`를 Core의 canonical `body` 선언에 맞추고 실제 배열 입력의 항목·순서·필드 매핑을 검증한다. 다른 strategy까지 일괄적으로 body를 요구하지 않는다. 현재 ABI bridge의 단일 tuple 평탄화도 고려해 `$args` 경로를 확인한다.
 
-Umbrella의 `restake`를 [ClaimRewardsAction](../../crates/asset-model/action/src/staking/claim_rewards.rs)의 optional bool과 Cedar context에 보존한다. 미지정과 `false`를 구분하며 기존 Curve 입력은 필드 없이 유지한다. BatchHelper는 전용 venue로 표현하고 controller 주소로 오표시하지 않는다. 수령인은 최종 beneficiary인 caller이며, `restake`는 지원 경로의 재예치 요청을 뜻한다. 실행 성공·실제 수령 토큰/수량·permit 유효성은 추론하지 않는다. 선언·모델 구현과 Native 사용자 검증을 마쳤으며 WASM 검증·패키지 편입이 남는다.
+Umbrella의 `restake`를 [ClaimRewardsAction](../../crates/asset-model/action/src/staking/claim_rewards.rs)의 optional bool과 Cedar context에 보존한다. 미지정과 `false`를 구분하며 기존 Curve 입력은 필드 없이 유지한다. BatchHelper는 전용 venue로 표현하고 controller 주소로 오표시하지 않는다. 수령인은 최종 beneficiary인 caller이며, `restake`는 지원 경로의 재예치 요청을 뜻한다. 실행 성공·실제 수령 토큰/수량·permit 유효성은 추론하지 않는다. 선언·모델 구현과 Native/WASM 사용자 검증·패키지 편입을 완료했다.
 
 **완료 조건:** 선택 manifest의 설치·실제 요청 의미가 일치하고, 잘못된 ABI/필수 입력을 계속 거절한다. 설치 검증을 완화하는 것만으로 완료하지 않는다. 변경한 Core/공통 모델에 관련된 기존 회귀도 유지한다.
 
@@ -174,9 +174,9 @@ snapshot은 Core의 `maxDecoderBytes`, route 설치 개수 65,536, routing 문�
 | 세부 계획 | 작성 완료 |
 | B0 지원 범위·데이터 의존성 확정 | 기존 799개 기준선·UR 착수 범위·정적 풀 후보 조사. 제품 확대·데이터 보강 계약은 미확정 |
 | B1-1 UR snapshot 검증·raw 회귀 | 대표 Native/WASM 경로 사용자 검증·snapshot 편입 완료. [결과·명령](../../fixtures/sdk/README.md#번들-b1-1--universal-router) |
-| B1-2 Aave 및 의미 보완 | 선언·restake/helper 모델·Native 사용자 검증 완료. WASM 검증·snapshot 편입 대기 |
+| B1-2 Aave 및 의미 보완 | 선택 경로 Native/WASM 사용자 검증·snapshot 편입 완료. [결과](../../fixtures/sdk/README.md#번들-b1-2--aave) |
 | B2 정적 입력·구체화·재현 생성 | 기존 생성기에 지정 manifest 증분 추가 구현. 원본 독립 생성·context 보완 미착수 |
-| B3 raw 경로·정책·격리 검증 | UR 패키지 회귀 입력을 격리 source 목록에 포함. 원본 생성부터의 격리 검증은 미완료 |
+| B3 raw 경로·정책·격리 검증 | UR·Aave 패키지 회귀 입력을 격리 source 목록에 포함. 원본 생성부터의 격리 검증은 미완료 |
 | B4 어댑터 인계 확정 | 미착수. 완료 후 어댑터 세부 계획 작성 |
 
-다음은 **B1-2 Aave WASM 검증·snapshot 편입**이다. B0의 미결 의미·범위는 해당 경로의 제품 편입 전에 해결한다. UR 완료와 Aave Native 통과를 B1 전체 완료로 표시하지 않는다.
+다음은 **B2 대표 풀의 범위 확정·정적 입력 구체화와 재현 생성**이다. B0의 미결 의미·범위는 해당 경로의 제품 편입 전에 해결한다. UR·Aave 선택 범위의 B1 완료를 전체 Registry 지원 완료로 확대하지 않는다.

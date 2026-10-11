@@ -28,7 +28,7 @@ node --test --test-name-pattern="packaged" packages/core/tests/runtime.test.mjs
 
 ## 번들 B1-2 — Aave
 
-2026-10-12, `429c344` 이후 변경: Aave 3개 `array_emit.body` 선언 교정, Umbrella `restake`의 모델·Cedar 전달 및 BatchHelper venue 구분. **사용자 로그 기준 Native 5개 통과·0 실패**(Governance 3개·Umbrella 2개). 별도 모델·Cedar 단위 시험 4개의 로그는 공유되지 않았다. 저장된 801개 snapshot에는 아직 Aave를 편입하지 않았으며 WASM 검증·편입이 남는다. 아래 명령은 재현용이며 통과한 Native 시험은 관련 변경이 없으면 반복하지 않는다.
+2026-10-12, Native 변경 커밋 `ec5f2d0`: Aave 3개 `array_emit.body` 선언 교정, Umbrella `restake`의 모델·Cedar 전달 및 BatchHelper venue 구분. **사용자 로그 기준 Native 5개 통과·0 실패**(Governance 3개·Umbrella 2개). 별도 모델·Cedar 단위 시험 4개의 로그는 공유되지 않았다. 후속 패키지 검증도 **4개 통과·0 실패**(기존 설치 1개·Aave WASM 3개)했다. 저장된 snapshot은 기존 801개를 보존한 804개이며 Core 거절 0개·source-context 제외 30,484개를 확인했다. 격리 source 목록에 Aave 입력을 포함했으며 원본부터의 생성 격리는 B3에 남는다. 아래 Native 명령은 재현용이며 통과한 시험은 관련 변경이 없으면 반복하지 않는다.
 
 ```sh
 cargo test --locked -p policy-engine --lib lowering_v2::staking::claim_rewards::tests &&
@@ -37,7 +37,22 @@ cargo test --locked -p dambi-core --test aave_governance --test aave_umbrella
 
 첫 명령은 기존 Curve 호환성과 `restake`/helper 모델·Cedar 연결 4개, 다음 명령은 Governance 3개·Umbrella 2개 시험이다. 배열 순서·U256 정밀도, 단일 tuple의 reward 목록, `false/true` 정책 전달, 빈 배열·잘못된 calldata를 확인한다. 재예치 조건을 구분하는 정책은 시험 전용이며 Day-1에는 추가하지 않는다. Governance의 Day-1 `allow`는 대응 정책이 없는 경로의 판정으로, 거버넌스 안전성 검증을 뜻하지 않는다.
 
-[Aave 계약 소스](https://github.com/aave-dao/aave-umbrella/blob/main/src/contracts/helpers/UmbrellaBatchHelper.sol)의 `claimRewardsPermit`·`_claimRewardsPermit`·`_depositToStake`를 기준으로 재예치 요청과 최종 beneficiary를 표현했다. 실제 permit 유효성·재예치 가능 경로·수령 수량·실행 성공은 이 디코딩 시험의 범위가 아니다. 다음 단계는 WASM 검증·snapshot 편입이다.
+[Aave 계약 소스](https://github.com/aave-dao/aave-umbrella/blob/main/src/contracts/helpers/UmbrellaBatchHelper.sol)의 `claimRewardsPermit`·`_claimRewardsPermit`·`_depositToStake`를 기준으로 재예치 요청과 최종 beneficiary를 표현했다. 실제 permit 유효성·재예치 가능 경로·수령 수량·실행 성공은 이 디코딩 시험의 범위가 아니다. 선택한 Aave 경로의 Native/WASM 검증·snapshot 편입은 완료했다.
+
+아래 패키지 편입·WASM 검증 명령은 통과한 실행의 재현용이다. 관련 변경이 없으면 반복하지 않는다. 새 Native runner·WASM을 빌드한 뒤 기존 생성기의 엄격한 증분 추가를 사용한다. 전체 후보가 설치 검증을 통과해야 저장되며 기존 번들을 빼지 않는다. 새 artifact를 패키징한 다음 기존 snapshot 설치 시험 1개와 Aave 시험 3개를 실행한다. 결과는 위 기록과 같다.
+
+```sh
+cargo build --locked -p dambi-core --example session_runner &&
+npm run core:build &&
+npm --prefix registryV2 run build:decoder-snapshot -- \
+  --add-manifest manifests/aave/governance/core-redeemCancellationFee@1.0.0.json \
+  --add-manifest manifests/aave/governance/core-updateRepresentativesForChain@1.0.0.json \
+  --add-manifest manifests/aave/umbrella/batch-claimRewardsPermit@1.0.0.json &&
+node scripts/sdk/build-decoders.mjs &&
+node --test --test-name-pattern="packaged (decoder snapshot|Aave)" packages/core/tests/runtime.test.mjs
+```
+
+WASM 시험은 실제 `@dambi/core/decoders`를 사용하며, 큰 정수와 `restake`/helper/수령인 조건을 읽는 시험 전용 정책으로 Native 판정과 비교한다. 조건이 없는 대조군은 allow여야 한다. 빈 배열의 warn과 잘못된 calldata의 fail-closed도 확인한다. Registry 실행 의존성을 추가하지 않았으며, 제품 Day-1 정책은 그대로다.
 
 ## 공유 정책 입력
 
