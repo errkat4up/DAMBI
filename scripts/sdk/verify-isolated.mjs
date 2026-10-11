@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
-import { copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, sep } from "node:path";
+import { copyFile, lstat, mkdir, readFile, readdir, realpath, rm } from "node:fs/promises";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { inside, markIsolatedWorkspacePrepared, openIsolatedWorkspace } from "./isolated-workspace.mjs";
 
 // Core + selected decoder source gate, not the final npm/Cargo/browser release gate.
 // Build tools must already be installed; package dependencies are installed only
@@ -13,13 +13,13 @@ const forbidden = ["browser-extension", "crates/policy-server", "crates/policy-e
 const generated = new Set([".git", "target", "node_modules", "dist", "pkg", ".cache"]);
 const runtimeTests = ["packages/core/tests/runtime.test.mjs", "packages/core/tests/check.test.mjs"];
 const keep = process.argv.includes("--keep");
-if (process.argv.slice(2).some((arg) => arg !== "--keep")) throw new Error("Usage: npm run sdk:verify:isolated -- [--keep]");
-if (Number(process.versions.node.split(".")[0]) < 20) throw new Error("Node.js >=20 is required");
-
-function inside(base, path) {
-  const rel = relative(base, path);
-  return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
+const args = process.argv.slice(2);
+const phase = args.includes("--ci-prepare") ? "prepare" : args.includes("--ci-verify") ? "verify" : "all";
+if (args.some((arg) => !["--keep", "--ci-prepare", "--ci-verify"].includes(arg))
+    || (args.includes("--ci-prepare") && args.includes("--ci-verify")) || (keep && phase !== "all")) {
+  throw new Error("Usage: npm run sdk:verify:isolated -- [--keep | --ci-prepare | --ci-verify]");
 }
+if (Number(process.versions.node.split(".")[0]) < 20) throw new Error("Node.js >=20 is required");
 
 function sourcePath(path) {
   if (typeof path !== "string" || path.length === 0 || path.includes("\\") || isAbsolute(path)
@@ -57,8 +57,7 @@ async function assertSourceParents(path) {
   }
 }
 
-const isolated = await mkdtemp(join(await realpath(tmpdir()), "dambi-sdk-isolated-"));
-if (inside(root, isolated)) throw new Error("The verification directory must be outside the checkout");
+const isolated = await openIsolatedWorkspace(root, phase);
 const env = { ...process.env, CARGO_TARGET_DIR: join(isolated, "target"), CARGO_TERM_COLOR: "never" };
 // Do not let caller overrides reuse an existing binary, JS preloader or compiler
 // output. Normal Cargo registry downloads/cache and the installed toolchain are OK.
@@ -122,9 +121,7 @@ async function checkBoundary() {
   await visit(isolated);
 }
 
-let success = false;
-try {
-  console.log(`[isolated] ${manifest.scope}\n[isolated] ${isolated}`);
+async function prepare() {
   for (const entry of manifest.copies) {
     const from = sourcePath(entry.from);
     const to = sourcePath(entry.to ?? from);
@@ -133,16 +130,17 @@ try {
     await copySource(join(root, from), join(isolated, to));
   }
   await checkBoundary();
+}
+
+async function validateCargo({ prune }) {
   const toolchain = (await readFile(join(isolated, "rust-toolchain.toml"), "utf8")).match(/^channel\s*=\s*"(\d+\.\d+\.\d+)"$/m)?.[1];
   if (!toolchain) throw new Error("An exact Rust toolchain version is required");
   env.RUSTUP_TOOLCHAIN = toolchain;
-  const wasmPack = await run("wasm-pack", ["--version"], { capture: true });
-  if (!/^wasm-pack 0\.14\.0\s*$/.test(wasmPack.trim())) throw new Error("wasm-pack 0.14.0 is required");
 
   // Only prune the seed lock's old workspace graph. --workspace preserves
   // dependency resolutions; the comparison below also rejects new versions.
-  const originalPackages = lockedPackages(await readFile(join(isolated, "Cargo.lock"), "utf8"));
-  await run("cargo", ["update", "--workspace"]);
+  const originalPackages = lockedPackages(await readFile(join(root, "Cargo.lock"), "utf8"));
+  if (prune) await run("cargo", ["update", "--workspace"]);
   for (const pkg of lockedPackages(await readFile(join(isolated, "Cargo.lock"), "utf8"))) {
     if (!originalPackages.has(pkg)) throw new Error(`Isolated Cargo resolution changed the pinned dependency: ${pkg}`);
   }
@@ -153,7 +151,12 @@ try {
       if (dep.path && !inside(isolated, dep.path)) throw new Error(`External Cargo path dependency: ${dep.path}`);
     }
   }
+}
 
+async function verify() {
+  await checkBoundary();
+  const wasmPack = await run("wasm-pack", ["--version"], { capture: true });
+  if (!/^wasm-pack 0\.14\.0\s*$/.test(wasmPack.trim())) throw new Error("wasm-pack 0.14.0 is required");
   await run(process.execPath, [...yarn, "install", "--immutable"]);
   const native = await run("cargo", ["test", "--locked", "-p", "dambi-core", "--test", "session"]);
   if (!/test result: ok\. [1-9]\d* passed; 0 failed; 0 ignored; 0 measured; 0 filtered out/.test(native)) {
@@ -177,9 +180,25 @@ try {
   }
   await run(process.execPath, [...yarn, "core:pack"]);
   await checkBoundary();
+}
+
+let success = false;
+try {
+  console.log(`[isolated] ${manifest.scope}\n[isolated] ${isolated}`);
+  if (phase !== "verify") await prepare();
+  await validateCargo({ prune: phase !== "verify" });
+  if (phase === "prepare") {
+    await markIsolatedWorkspacePrepared(isolated);
+    console.log("[isolated] Sources and pinned Cargo workspace prepared for dependency cache restore.");
+  } else {
+    await verify();
+    console.log("\n[isolated] SDK source verification passed (Native + WASM + selected decoder generation + raw pool parity + types/runtime/check).");
+  }
   success = true;
-  console.log("\n[isolated] SDK source verification passed (Native + WASM + selected decoder generation + raw pool parity + types/runtime/check).");
 } finally {
-  if (success && !keep) await rm(isolated, { recursive: true, force: true });
+  // CI's post-job rust-cache step still needs target and Cargo manifests.
+  // GitHub-hosted runners clean RUNNER_TEMP after all post-job steps finish.
+  if (phase !== "all") console.log(`[isolated] CI workspace retained for post-job dependency cache: ${isolated}`);
+  else if (success && !keep) await rm(isolated, { recursive: true, force: true });
   else console.log(`[isolated] Copy retained for inspection: ${isolated}`);
 }

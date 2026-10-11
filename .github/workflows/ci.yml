@@ -340,9 +340,20 @@ jobs:
           toolchain: 1.95.0
           targets: wasm32-unknown-unknown
 
+      - name: SDK isolation lifecycle tests
+        run: node --test scripts/sdk/isolated-workspace.test.mjs
+
+      - name: Prepare isolated SDK sources and lockfile
+        run: npm run sdk:verify:isolated -- --ci-prepare
+
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "core-wasm"
+          # Include the virtual workspace profile and WASM build settings.
+          # rust-cache also hashes the isolated member manifests and lockfile.
+          shared-key: core-isolated-v1-${{ hashFiles('scripts/sdk/isolated/Cargo.toml', 'scripts/sdk/build-wasm.mjs') }}
+          workspaces: "${{ runner.temp }}/dambi-sdk-isolated -> target"
+          cache-workspace-crates: false
+          env-vars: WASM_PACK_VERSION
 
       - name: Install wasm-pack
         run: cargo install wasm-pack --version "${WASM_PACK_VERSION}" --locked
@@ -351,4 +362,4 @@ jobs:
         run: npm run contract:test
 
       - name: SDK source isolation (Native + WASM + types + runtime/check)
-        run: npm run sdk:verify:isolated
+        run: npm run sdk:verify:isolated -- --ci-verify
