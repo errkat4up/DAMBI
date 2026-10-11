@@ -216,10 +216,13 @@ It is not the DEC-07 handoff index or unresolved source manifests. The container
 `expectedDigest` is `0x` plus lowercase SHA-256 of its exact UTF-8 bytes, pinned
 independently in trusted local config. Existing per-bundle `bundle_sha256` rules
 remain distinct. The packaged `@dambi/core/decoders` snapshot is generated
-reproducibly from the Registry (`npm run build:decoder-snapshot` in
-`registryV2/`) and contains only bundles Core installs. Source-based pool
-decoders and five bundles Core currently rejects are excluded; they are D4-3
-follow-up work, not part of 0.1.0.
+from the Registry (`npm run build:decoder-snapshot` in `registryV2/`) and contains
+only bundles Core installs. Its `snapshot.meta.json` records source-context
+exclusions and rejected bundles. The generator also supports checked incremental
+additions with `--add-manifest`; this preserves the saved baseline and requires
+the whole candidate to install. It does not regenerate that baseline from source.
+The [bundle plan](../../docs/sdk-migration/bundle-development-plan.md) tracks
+remaining materialization work and the raw request paths actually verified.
 
 `CoreLimits` requires explicit UTF-8 size limits (`maxPolicyBytes` for B,
 `maxDecoderBytes`, `maxRequestBytes` for canonical digest input, `maxFactBytes`

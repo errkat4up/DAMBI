@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { CoreError, createCore } from "@dambi/core";
+import { universalRouterCases, universalRouterRoutes } from "./fixtures/universal-router.mjs";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const fixtures = new URL("../../../crates/dambi-core/tests/fixtures/", import.meta.url);
@@ -163,6 +164,61 @@ test("packaged decoder snapshot installs and routes Registry tokens", async (t) 
   const plan = await core.plan(usdc);
   assert.equal(core.evaluate(plan, emptyFacts(plan)).source, "evaluated");
   await assert.rejects(core.plan(request()), code("UNSUPPORTED_REQUEST"));
+});
+
+test("packaged Universal Router V3 recipients and V4 ABI alternatives agree in WASM and Native", async (t) => {
+  const { decoderSnapshot, decoderSnapshotInfo } = await import("@dambi/core/decoders");
+  const bundles = JSON.parse(decoderSnapshot.artifact).bundles;
+  for (const { id, selector } of universalRouterRoutes) {
+    const matches = bundles.filter((bundle) => bundle.id === id);
+    assert.equal(matches.length, 1, `packaged snapshot must include ${id} exactly once`);
+    assert.equal(matches[0].match.selector, `0x${selector}`);
+  }
+  const setup = harness();
+  setup.local.decoderSnapshot = decoderSnapshot;
+  setup.config.decoderSnapshot = decoderSnapshot;
+  setup.local.limits.maxDecoderBytes = decoderSnapshotInfo.bytes;
+  const core = await createCore(setup.config);
+  t.after(() => core.dispose());
+
+  // The Native regression checks restored Action fields. Here the real package
+  // and WASM must preserve the same Day1 policy verdict, including non-self deny.
+  // This does not validate market/slippage/pool fallback values, every command,
+  // or V4's final TAKE/SETTLE receiver (the swap manifest uses tx.from).
+  for (const scenario of universalRouterCases(NOW)) {
+    const reference = native(setup.local, initialPolicy, scenario.request);
+    assert.deepEqual(reference.plan.calls, [], scenario.name);
+    const verdict = await core.check(scenario.request);
+    assert.deepEqual(verdict, reference.verdict, scenario.name);
+    assert.equal(verdict.source, "evaluated", scenario.name);
+    assert.equal(verdict.decision, scenario.decision, scenario.name);
+    assert.equal(
+      verdict.reasons.some((reason) => reason.policyId === "swap-recipient-not-self-deny"),
+      scenario.decision === "deny", scenario.name,
+    );
+  }
+});
+
+test("WASM rejects malformed nested ABI alternatives in a pinned packaged snapshot", async () => {
+  const { decoderSnapshot } = await import("@dambi/core/decoders");
+  const snapshot = JSON.parse(decoderSnapshot.artifact);
+  const bundle = snapshot.bundles.find(({ id }) => id === universalRouterRoutes[0].id);
+  assert.ok(bundle, "Universal Router must be included in the built package");
+  const entry = bundle.emit.per_opcode_body["0x10"].nested.per_opcode_body["0x07"];
+  const alternatives = entry.inputs_abi_alternatives;
+  assert.ok(Array.isArray(alternatives) && alternatives.length > 0);
+  // Re-pin the mutated bytes: the schema gate, rather than a digest mismatch,
+  // must reject a non-array value and a malformed candidate after valid ones.
+  for (const invalid of [false, [...alternatives, "(uint256 amount"]]) {
+    entry.inputs_abi_alternatives = invalid;
+    const artifact = JSON.stringify(snapshot);
+    const setup = harness();
+    setup.config.decoderSnapshot = {
+      artifact, expectedDigest: `0x${createHash("sha256").update(artifact, "utf8").digest("hex")}`,
+    };
+    setup.config.limits.maxDecoderBytes = Buffer.byteLength(artifact, "utf8");
+    await assert.rejects(createCore(setup.config), code("INVALID_DECODER_SNAPSHOT"));
+  }
 });
 
 test("handles bind immutable requests to one instance and are consumed once", async (t) => {

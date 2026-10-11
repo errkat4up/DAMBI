@@ -324,8 +324,10 @@ Call tuple `(to,data,value,skipRevert,callbackHash)`의 순서·동적 offset/le
 | 작업 | 구현 범위·완료 조건 | 상태 |
 | --- | --- | --- |
 | D4-1 정책 wire 계약 | `contracts/core-v1/`에 payload/envelope 타입·JSON Schema·정상/오류 예시와 구조 검증. B 문자열 UTF-8 원문 서명, `registry_ref: null`, 정책/decoder 키 역할 구분 | 당시 초안 검증 완료. C1-1의 API 정합화 변경도 사용자 검증 완료 |
-| D4-2 제품 snapshot 선택 | chain·token·transaction/typed 경로·정책 적용 범위를 명시한 제품 선택 목록. DEC-07의 검증 범위 및 Permit2 v3·multicall 한계, Day-1 swap 정책에 필요한 decoder의 미검증 범위를 대조 | [제품 선택안](../../contracts/core-v1/snapshot-selection.proposal.json) 작성, 사용자 범위 결정 대기 |
-| D4-3 재현 생성·인계 | 선택 manifest/token/정적 프로토콜 자료와 builder 의존 목록 고정. `scripts/sdk/` 생성 진입점, 정렬된 snapshot·개별 bundle JCS digest·전체 로컬 digest·coverage. 확장/서버/cache 없이 같은 입력으로 재생성 | 미착수 |
+| D4-2 제품 snapshot 선택 | chain·token·transaction/typed 경로·정책 적용 범위를 명시한 제품 선택 목록. DEC-07의 검증 범위 및 Permit2 v3·multicall 한계, Day-1 swap 정책에 필요한 decoder의 미검증 범위를 대조 | [제품 선택안](../../contracts/core-v1/snapshot-selection.proposal.json) 작성, 사용자 범위 결정 대기. [번들 세부 계획 B0](bundle-development-plan.md)에서 구체화 |
+| D4-3 재현 생성·인계 | 선택 manifest/token/정적 프로토콜 자료와 builder 의존 목록 고정. 정렬된 snapshot·개별 bundle JCS digest·전체 로컬 digest·coverage. 확장/서버/cache 없이 같은 입력으로 재생성 | snapshot 생성·패키징 구현됨. 호환성 보완 상태는 [번들 B1](bundle-development-plan.md) 참조. 원본 독립 생성·context 보완은 후속 |
+
+**2026-10-05 진행 순서:** Core v0.0.1 이후 [번들 세부 계획](bundle-development-plan.md)의 선택 범위·호환성·재현 생성·raw 검증을 완료하고, 그 데이터 의존성과 현재 포트를 바탕으로 어댑터 세부 계획을 작성한다. 전체 Registry 지원 완료를 어댑터 착수 조건으로 삼지 않는다.
 
 D4-1의 정상 예시는 D3 공유 정책을 사용하고 payload 객체는 거절한다. 당시 fixture는 필수 필드 누락·빈 manifest·잘못된 타입/버전·비-null registry_ref를 구조 오류로 구분했다. 중복 정책 ID·manifest ID 일치·시간 관계·서명 변조·잘못된 역할의 키는 의미/암호 검증용 사례이며 실제 Core 검증 완료 표시는 C3까지 보류한다. 후속 소스 대조에서 `registry-api`의 `GET /v1/bundle`, OpenAPI와 정책 publisher·ADR가 확인됐으므로, 현재 wire는 이 구현을 근거로 C1-1에서 정합화한다. 백업이나 과거 대화만을 계약 근거로 사용하지 않는다. 서명된 B 내부의 필드·수치 형식은 adapter가 변경하지 않고 Core parser와 fixture를 맞추며, wrapper 이름 변환과 미확정 운영 정보는 구분한다. 상세 차이·권장안은 [Core 세부 계획](core-development-plan.md)에 둔다.
 
@@ -398,7 +400,7 @@ C 단계 이후에 브랜치를 만든다. HTTP와 Fact 어댑터는 SDK의 선�
 
 `oracle.usd_value` 같은 기존 이름만 보고 구현된 데이터 소스가 있다고 가정하지 않는다. 정책 서버의 `dambi.evaluate_v3` 최종 평가 결과는 원본 Fact의 대체물이 아니다. 실제 데이터 API가 없으면 해당 method의 연동을 미완료로 남기고 필요한 서버 계약을 구체적으로 전달한다.
 
-API 연동은 현재 OpenAPI·publisher의 B wrapper와 서명 예제를 기준으로 한다. staging/production URL, 운영 공개 키·인증 절차와 갱신 정책은 API 담당과 확인하며 미확인 항목을 실제 통합 완료로 표기하지 않는다. 정책 publisher의 기본 입력은 D3 이전 확장 경로를 가리키므로 API 담당이 공유 원본 경로로 수정해야 한다. 이 수정은 A1 실제 정책 재발행·연동 전 선행 작업이며 fixture 기반 Core 개발의 전체 차단 조건은 아니다. 감사 전송이 필요하면 별도 transport로 연결하되 기본 평가가 감사 서버 가용성에 종속되지 않게 한다.
+API 연동은 현재 OpenAPI·publisher의 B wrapper와 서명 예제를 기준으로 한다. staging/production URL, 운영 공개 키·인증 절차와 갱신 정책은 API 담당과 확인하며 미확인 항목을 실제 통합 완료로 표기하지 않는다. 2026-10-12 확인 기준 publisher는 공유 `policy-bundles/`·SDK loader로 전환됐다. 이 경로 수정을 반복하지 않고 실제 발행 payload와 A1 통합을 확인한다. 감사 전송이 필요하면 별도 transport로 연결하되 기본 평가가 감사 서버 가용성에 종속되지 않게 한다.
 
 ## 7. 마지막 통합·패키징
 

@@ -134,6 +134,131 @@ fn unresolved_sources_and_unsupported_bundle_shapes_are_rejected() {
     }
 }
 
+fn opcode_bundle(nested: bool) -> (Value, &'static str) {
+    let mut bundle = approve_bundle();
+    let entry = json!({
+        "inputs_abi": "(((address,address,uint24,int24,address),bool,uint128,uint128,uint256,bytes) params)",
+        "inputs_abi_alternatives": [
+            "(((address,address,uint24,int24,address),bool,uint128,uint128,bytes) params)"
+        ],
+        "body": bundle["emit"]["body"].clone()
+    });
+    bundle["emit"] = json!({
+        "strategy": "opcode_stream_dispatch",
+        "per_opcode_body": {"0x06": entry.clone()}
+    });
+    if nested {
+        bundle["emit"]["per_opcode_body"] = json!({
+            "0x10": {
+                "inputs_abi": "(bytes actions, bytes[] params)",
+                "nested": {
+                    "inner_actions_source": "$inputs.actions",
+                    "inner_params_source": "$inputs.params",
+                    "per_opcode_body": {"0x06": entry}
+                }
+            }
+        });
+        (
+            bundle,
+            "/emit/per_opcode_body/0x10/nested/per_opcode_body/0x06",
+        )
+    } else {
+        (bundle, "/emit/per_opcode_body/0x06")
+    }
+}
+
+#[test]
+fn opcode_abi_alternatives_install_at_top_level_and_in_nested_dispatch() {
+    // Probe the installation gate with the two deployed V4 swap input shapes.
+    // Raw request decoding is covered separately; this synthetic bundle does
+    // not claim that an approve call is a Universal Router request.
+    for nested in [false, true] {
+        let (bundle, entry_path) = opcode_bundle(nested);
+        let mut alternatives_only = bundle.clone();
+        alternatives_only
+            .pointer_mut(entry_path)
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .remove("inputs_abi");
+        let mut no_alternatives = bundle.clone();
+        no_alternatives.pointer_mut(entry_path).unwrap()["inputs_abi_alternatives"] = json!([]);
+        for bundle in [bundle, alternatives_only, no_alternatives] {
+            let artifact = artifact(vec![bundle.clone()]);
+            let store =
+                SnapshotStore::new(config(), artifact.input(), day1().input(), NOW).unwrap();
+            // Validation never strips or rewrites a signed ABI candidate.
+            assert_eq!(
+                store.current(NOW).unwrap().decoder().bundle_digests(),
+                &[digest(&canonical(&bundle))]
+            );
+        }
+    }
+}
+
+#[test]
+fn malformed_opcode_abi_alternatives_reject_the_complete_snapshot() {
+    for nested in [false, true] {
+        for invalid in [
+            Value::Null,
+            json!("(uint256 amount)"),
+            json!([1]),
+            json!([""]),
+            json!(["(uint256 amount)", "(uint256 amount"]),
+        ] {
+            let (mut bundle, entry_path) = opcode_bundle(nested);
+            bundle.pointer_mut(entry_path).unwrap()["inputs_abi_alternatives"] = invalid;
+            let artifact = artifact(vec![bundle]);
+            expect_code(
+                SnapshotStore::new(config(), artifact.input(), day1().input(), NOW),
+                "INVALID_DECODER_SNAPSHOT",
+            );
+        }
+        // A valid alternative cannot hide a malformed primary signature.
+        let (mut bundle, entry_path) = opcode_bundle(nested);
+        bundle.pointer_mut(entry_path).unwrap()["inputs_abi"] = json!("(bytes");
+        expect_code(
+            SnapshotStore::new(
+                config(),
+                artifact(vec![bundle]).input(),
+                day1().input(),
+                NOW,
+            ),
+            "INVALID_DECODER_SNAPSHOT",
+        );
+    }
+
+    // Tagged dispatch runtimes only read inputs_abi; they must not silently
+    // accept alternatives which are used by opcode dispatch alone.
+    let (mut bundle, entry_path) = opcode_bundle(false);
+    let entry = bundle.pointer(entry_path).unwrap().clone();
+    for emit in [
+        json!({
+            "strategy": "tagged_dispatch",
+            "bytes_source": "$args.data",
+            "per_action_body": {"6": entry.clone()}
+        }),
+        json!({
+            "strategy": "parallel_tagged_dispatch",
+            "actions_source": "$args.actions",
+            "data_source": "$args.data",
+            "tag_encoding": "uint",
+            "per_tag": {"6": entry.clone()}
+        }),
+    ] {
+        bundle["emit"] = emit;
+        expect_code(
+            SnapshotStore::new(
+                config(),
+                artifact(vec![bundle.clone()]).input(),
+                day1().input(),
+                NOW,
+            ),
+            "INVALID_DECODER_SNAPSHOT",
+        );
+    }
+}
+
 #[test]
 fn resolved_typed_fixture_and_synthetic_colon_type_route_without_abi_selector_equality() {
     let permit: Value =

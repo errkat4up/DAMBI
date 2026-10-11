@@ -25,6 +25,7 @@
     { "from": "packages/core/src" },
     { "from": "packages/core/tests/consumer-types.ts" },
     { "from": "packages/core/tests/runtime.test.mjs" },
+    { "from": "packages/core/tests/fixtures/universal-router.mjs" },
     { "from": "packages/core/tests/check.test.mjs" },
     { "from": "crates/dambi-core/Cargo.toml" },
     { "from": "crates/dambi-core/src" },

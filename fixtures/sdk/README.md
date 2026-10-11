@@ -1,5 +1,33 @@
 # SDK 정책 입력과 Native 회귀
 
+## 번들 B1-1 — Universal Router
+
+2026-10-12, `main 7387536` 이후 B1-1 변경 검증: **Native 원문 2개 시험과 패키지 WASM 3개 시험 통과, 최종 WASM 로그 3 통과·0 실패.** 저장된 snapshot은 801개이며 기존 799개 내용 보존·UR 2개 추가·digest/bytes 일치를 확인했다. source-context 제외 30,484개와 Aave 거절 3개는 유지한다. 별도 `decoder_snapshot` target의 전체 결과는 공유되지 않았다. 대표 UR 경로의 편입·검증을 마쳤으며 다음은 B1-2 Aave다.
+
+아래는 관련 설치 회귀와 두 execute selector의 V3 수령인 정책·V4 primary/alternative ABI를 확인하는 명령이다. alternatives 제거 대조군도 포함한다. 이미 통과한 UR 사례는 관련 변경이 없으면 반복하지 않는다.
+
+```sh
+cargo test --locked -p dambi-core --test decoder_snapshot --test universal_router
+```
+
+현재 Mapper의 pool/slippage·LiveField 기본값은 실제 관측 데이터가 아니다. V3는 calldata 수령인 정책을, V4는 토큰·수량·대안 ABI 연결을 검사한다. V4 swap의 수령인은 manifest의 `$tx.from`이며 최종 TAKE/SETTLE 수령인이나 EVM 실행 성공을 검증하지 않는다.
+
+아래 명령은 재현용이다. 수정한 Native runner·WASM을 빌드하고, 기존 799개를 보존하며 UR 2개를 추가한다. 증분 생성은 전체 후보가 Core 설치 검증을 통과해야 저장하며, 실패 항목을 제외하고 성공 처리하지 않는다. 이어 새 snapshot만 패키징한 뒤 관련 WASM 시험 3개를 실행한다. 이미 통과했으므로 관련 변경이 없으면 반복하지 않는다.
+
+```sh
+cargo build --locked -p dambi-core --example session_runner &&
+npm run core:build &&
+npm --prefix registryV2 run build:decoder-snapshot -- \
+  --add-manifest manifests/uniswap/universal-router/execute-v2@1.0.0.json \
+  --add-manifest manifests/uniswap/universal-router/execute-v2-no-deadline@1.0.0.json &&
+node scripts/sdk/build-decoders.mjs &&
+node --test --test-name-pattern="packaged" packages/core/tests/runtime.test.mjs
+```
+
+새 시험은 두 selector의 V3 self/other·V4 primary/alternative 판정을 WASM `check()`와 Native 사이에서 비교하고, 손상된 nested ABI가 digest를 다시 고정해도 거절되는지 확인한다. 이 패키지 회귀 입력은 SDK 격리 source 목록에도 추가했다. Registry 원문을 직접 포함하는 Native target과 원본부터의 snapshot 생성 격리는 B3에 남는다. B1-2 Aave로 이어간다.
+
+## 공유 정책 입력
+
 Day-1 정책의 공유 원본은 [`policy-bundles/day1-safety/`](../../policy-bundles/day1-safety/package.json)이다. Cedar 본문과 manifest 10개는 그대로 이동했고 package의 원본 경로만 변경했다. [`policy-bundle.cjs`](../../scripts/sdk/policy-bundle.cjs)가 package 선언 순서대로 `{id, policy, manifest}`를 읽고 직렬화한다. SDK baseline과 기존 확장 asset copier가 같은 함수를 사용하며, DEC-02는 공유 Cedar/manifest를 직접 읽는다. 원본이 없으면 빈 set 또는 합성 manifest로 대체하지 않는다.
 
 ## 정책·Fact 범위

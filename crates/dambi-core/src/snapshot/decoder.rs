@@ -941,19 +941,31 @@ fn validate_dispatch(value: &Value, path: &str, opcode: bool) -> Result<(), Snap
                 "body",
                 "live_inputs",
                 "inputs_abi",
+                "inputs_abi_alternatives",
                 "nested",
                 "name",
                 "_note",
             ],
         )?;
-        for key in ["inputs_abi", "name", "_note"] {
+        for key in ["name", "_note"] {
             if let Some(value) = entry.get(key) {
                 string(value, path)?;
             }
         }
         if let Some(signature) = entry.get("inputs_abi") {
-            alloy_json_abi::Function::parse(&format!("step{}", string(signature, path)?))
-                .map_err(|error| invalid(path, format!("invalid dispatch inputs_abi: {error}")))?;
+            validate_dispatch_abi(signature, &format!("{path}/inputs_abi"))?;
+        }
+        if let Some(alternatives) = entry.get("inputs_abi_alternatives") {
+            let alternatives_path = format!("{path}/inputs_abi_alternatives");
+            if !opcode {
+                return Err(invalid(
+                    &alternatives_path,
+                    "ABI alternatives are only supported by opcode dispatch",
+                ));
+            }
+            for (index, signature) in array(alternatives, &alternatives_path)?.iter().enumerate() {
+                validate_dispatch_abi(signature, &format!("{alternatives_path}/{index}"))?;
+            }
         }
         if let Some(nested) = entry.get("nested") {
             if !opcode || entry.contains_key("body") {
@@ -999,6 +1011,14 @@ fn validate_dispatch(value: &Value, path: &str, opcode: bool) -> Result<(), Snap
             }
         }
     }
+    Ok(())
+}
+
+fn validate_dispatch_abi(value: &Value, path: &str) -> Result<(), SnapshotError> {
+    // Use the same tuple-signature parser for every candidate that the runtime
+    // may try, including alternatives inside a nested opcode table.
+    alloy_json_abi::Function::parse(&format!("step{}", string(value, path)?))
+        .map_err(|error| invalid(path, format!("invalid dispatch inputs_abi: {error}")))?;
     Ok(())
 }
 

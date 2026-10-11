@@ -32,13 +32,20 @@
  * final bytes install. `--no-verify` skips the gate (nothing proves the result
  * loads, so use it only for inspection).
  *
+ * `--add-manifest manifests/...json` instead extends an existing pinned snapshot
+ * without reading index/ or fetching pool data. This is a checked incremental
+ * addition, not regeneration from the original Registry inputs. It preserves
+ * every existing bundle and requires the whole candidate to install: no bundle
+ * is dropped and --no-verify is forbidden in this mode.
+ *
  *   npm run build:decoder-snapshot                    # name=full
  *   npm run build:decoder-snapshot -- --name full --dry-run
+ *   npm run build:decoder-snapshot -- --add-manifest manifests/uniswap/universal-router/execute-v2@1.0.0.json
  */
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -84,8 +91,10 @@ export interface BuildOptions {
   /** directory holding <name>/ — defaults to packages/core/decoder-snapshots */
   outRoot?: string;
   dryRun?: boolean;
-  /** load the result into @dambi/core and drop bundles it rejects (default true) */
+  /** Verify in @dambi/core (default true); only index collection may drop rejected bundles. */
   verify?: boolean;
+  /** Extend the saved snapshot with these Registry-relative manifests; always verify, never drop. */
+  addManifests?: string[];
   log?: (msg: string) => void;
 }
 
@@ -195,6 +204,85 @@ export async function collectBundles(root: string): Promise<{ bundles: Bundle[];
   return { bundles, excluded };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function checkedBundle(value: unknown, label: string): Bundle {
+  if (!isRecord(value) || typeof value.id !== "string" || value.id.length === 0 || !isRecord(value.match)) {
+    throw new Error(`${label}: expected a resolved bundle with id and match`);
+  }
+  return value as Bundle;
+}
+
+/** Verify the saved pair before preserving its bundles and exclusion history. */
+function readSavedSnapshot(dir: string, name: string): { bundles: Bundle[]; meta: SnapshotMeta } {
+  const artifact = readFileSync(join(dir, "snapshot.json"), "utf8");
+  const meta = readJson<SnapshotMeta>(join(dir, "snapshot.meta.json"));
+  const snapshot: unknown = JSON.parse(artifact);
+  if (!isRecord(snapshot) || snapshot.schema_version !== 1 || !Array.isArray(snapshot.bundles)
+    || Object.keys(snapshot).some((key) => key !== "schema_version" && key !== "bundles")) {
+    throw new Error(`${dir}: unsupported saved snapshot format`);
+  }
+  if (!isRecord(meta) || meta.name !== name || meta.schema_version !== 1
+    || meta.digest !== sha256(artifact) || meta.bytes !== Buffer.byteLength(artifact, "utf8")
+    || meta.bundle_count !== snapshot.bundles.length) {
+    throw new Error(`${dir}: saved snapshot metadata does not match its artifact`);
+  }
+  if (!isRecord(meta.excluded)
+    || Object.values(meta.excluded).some((count) => !Number.isSafeInteger(count) || count < 0)
+    || meta.excluded_count !== Object.values(meta.excluded).reduce((a, b) => a + b, 0)
+    || (meta.rejected_by_core !== null && (!Array.isArray(meta.rejected_by_core)
+      || meta.rejected_by_core.some((entry) => !isRecord(entry) || typeof entry.id !== "string" || typeof entry.error !== "string")))) {
+    throw new Error(`${dir}: malformed saved exclusion metadata`);
+  }
+  const bundles = snapshot.bundles.map((value, i) => checkedBundle(value, `${dir}/bundles/${i}`));
+  const ids = new Set(bundles.map(({ id }) => id));
+  if (bundles.length === 0 || ids.size !== bundles.length) {
+    throw new Error(`${dir}: saved snapshot has no bundles or duplicate bundle ids`);
+  }
+  return { bundles, meta };
+}
+
+function manifestPath(root: string, path: string): string {
+  const parts = path.split("/");
+  if (!/^manifests\/(?:[A-Za-z0-9_@.-]+\/)*[A-Za-z0-9_@.-]+\.json$/.test(path)
+    || parts.some((part) => part === "." || part === "..")) {
+    throw new Error(`manifest must be a normalized Registry-relative path under manifests/: ${path}`);
+  }
+  const base = realpathSync(join(root, "manifests"));
+  const resolved = realpathSync(join(root, path));
+  const within = relative(base, resolved);
+  if (isAbsolute(within) || within.split(sep).some((part) => part === "..")) {
+    throw new Error(`manifest escapes manifests/: ${path}`);
+  }
+  return resolved;
+}
+
+async function addManifests(
+  root: string,
+  existing: Bundle[],
+  paths: string[],
+): Promise<{ bundles: Bundle[]; selectedIds: Set<string> }> {
+  const byId = new Map(existing.map((bundle) => [bundle.id, bundle]));
+  const selectedIds = new Set<string>();
+  for (const path of paths) {
+    const bundle = checkedBundle(readJson<unknown>(manifestPath(root, path)), path);
+    const reason = exclusionReason(bundle);
+    if (reason) throw new Error(`${path}: ${reason}; only resolved manifests can be added`);
+    const previous = byId.get(bundle.id);
+    if (previous && await canonical(previous) !== await canonical(bundle)) {
+      throw new Error(`${path}: ${bundle.id} already exists with different contents`);
+    }
+    byId.set(bundle.id, previous ?? bundle);
+    selectedIds.add(bundle.id);
+  }
+  return {
+    bundles: [...byId.values()].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    selectedIds,
+  };
+}
+
 // ---- Core gate --------------------------------------------------------------
 
 interface CoreModule {
@@ -254,9 +342,10 @@ async function gateConfig(artifact: string): Promise<unknown> {
 async function coreGate(
   bundles: Bundle[],
   log: (msg: string) => void,
+  strict = false,
 ): Promise<{ bundles: Bundle[]; artifact: string; rejected: { id: string; error: string }[] }> {
   if (!existsSync(CORE_ENTRY)) {
-    throw new Error(`${CORE_ENTRY} missing — run \`npm run core:build\` or pass --no-verify`);
+    throw new Error(`${CORE_ENTRY} missing — run \`npm run core:build\`${strict ? "" : " or pass --no-verify"}`);
   }
   const { createCore } = (await import(pathToFileURL(CORE_ENTRY).href)) as CoreModule;
   const rejected: { id: string; error: string }[] = [];
@@ -267,6 +356,7 @@ async function coreGate(
       (await createCore(await gateConfig(artifact))).dispose();
       return { bundles: kept, artifact, rejected };
     } catch (error) {
+      if (strict) throw error;
       const e = error as { code?: string; message?: string };
       const at = e.code === "INVALID_DECODER_SNAPSHOT" ? /^\$\/bundles\/(\d+)(.*)$/.exec(e.message ?? "") : null;
       const index = at ? Number(at[1]) : -1;
@@ -287,14 +377,29 @@ export async function buildDecoderSnapshot(opts: BuildOptions = {}): Promise<Bui
   const name = opts.name ?? "full";
   if (!NAME_RE.test(name)) throw new Error(`name must match ${NAME_RE}: "${name}"`);
   const root = opts.registryRoot ?? REGISTRY_ROOT;
+  const dir = join(opts.outRoot ?? join(REPO_ROOT, "packages", "core", "decoder-snapshots"), name);
+  const extending = (opts.addManifests?.length ?? 0) > 0;
+  if (extending && opts.verify === false) throw new Error("--add-manifest requires the Core gate; --no-verify is not allowed");
 
-  const collected = await collectBundles(root);
-  const { excluded } = collected;
-  let { bundles } = collected;
+  let bundles: Bundle[];
+  let excluded: Record<string, number>;
+  let previousMeta: SnapshotMeta | undefined;
+  let selectedIds = new Set<string>();
+  if (extending) {
+    const saved = readSavedSnapshot(dir, name);
+    previousMeta = saved.meta;
+    excluded = saved.meta.excluded;
+    ({ bundles, selectedIds } = await addManifests(root, saved.bundles, opts.addManifests!));
+  } else {
+    ({ bundles, excluded } = await collectBundles(root));
+  }
   let artifact: string;
   let rejected: { id: string; error: string }[] | null = null;
   if (opts.verify ?? true) {
-    ({ bundles, artifact, rejected } = await coreGate(bundles, log));
+    ({ bundles, artifact, rejected } = await coreGate(bundles, log, extending));
+    if (previousMeta) {
+      rejected = (previousMeta.rejected_by_core ?? []).filter(({ id }) => !selectedIds.has(id));
+    }
     rejected.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   } else {
     artifact = await canonical({ schema_version: 1, bundles });
@@ -312,10 +417,18 @@ export async function buildDecoderSnapshot(opts: BuildOptions = {}): Promise<Bui
 
   const written: string[] = [];
   if (!opts.dryRun) {
-    const dir = join(opts.outRoot ?? join(REPO_ROOT, "packages", "core", "decoder-snapshots"), name);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "snapshot.json"), artifact, "utf8");
-    writeFileSync(join(dir, "snapshot.meta.json"), `${JSON.stringify(meta, null, 2)}\n`, "utf8");
+    // Stage both files after validation; each rename replaces one complete file.
+    // Readers check the digest, so an interrupted pair replacement fails closed.
+    const staging = mkdtempSync(join(dir, ".snapshot-"));
+    try {
+      writeFileSync(join(staging, "snapshot.json"), artifact, "utf8");
+      writeFileSync(join(staging, "snapshot.meta.json"), `${JSON.stringify(meta, null, 2)}\n`, "utf8");
+      renameSync(join(staging, "snapshot.json"), join(dir, "snapshot.json"));
+      renameSync(join(staging, "snapshot.meta.json"), join(dir, "snapshot.meta.json"));
+    } finally {
+      rmSync(staging, { recursive: true, force: true });
+    }
     written.push(join(dir, "snapshot.json"), join(dir, "snapshot.meta.json"));
   }
   log(
@@ -326,13 +439,18 @@ export async function buildDecoderSnapshot(opts: BuildOptions = {}): Promise<Bui
 
 // ---- CLI --------------------------------------------------------------------
 
-function parseArgs(argv: string[]): { name: string; dryRun: boolean; verify: boolean } {
-  const out = { name: "full", dryRun: false, verify: true };
+function parseArgs(argv: string[]): { name: string; dryRun: boolean; verify: boolean; addManifests: string[] } {
+  const out = { name: "full", dryRun: false, verify: true, addManifests: [] as string[] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--dry-run") out.dryRun = true;
     else if (a === "--no-verify") out.verify = false;
-    else if (a === "--name") out.name = argv[++i] ?? out.name;
+    else if (a === "--name" || a === "--add-manifest") {
+      const value = argv[++i];
+      if (!value || value.startsWith("--")) throw new Error(`${a} requires a value`);
+      if (a === "--name") out.name = value;
+      else out.addManifests.push(value);
+    }
     else throw new Error(`unknown argument: ${a}`);
   }
   return out;
@@ -341,7 +459,7 @@ function parseArgs(argv: string[]): { name: string; dryRun: boolean; verify: boo
 const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
   const args = parseArgs(process.argv.slice(2));
-  buildDecoderSnapshot({ name: args.name, dryRun: args.dryRun, verify: args.verify, log: (m) => console.error(m) }).catch((e) => {
+  buildDecoderSnapshot({ ...args, log: (m) => console.error(m) }).catch((e) => {
     console.error(`[build-decoder-snapshot] FAILED: ${e instanceof Error ? e.message : String(e)}`);
     process.exit(1);
   });
