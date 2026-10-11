@@ -44,6 +44,9 @@ pub(crate) fn lower(
     if let Some(recipient) = &action.recipient {
         m.insert("recipient".into(), Value::String(addr(recipient)));
     }
+    if let Some(restake) = action.restake {
+        m.insert("restake".into(), Value::Bool(restake));
+    }
 
     Ok(ctx.lowered(r#"Staking::Action::"ClaimRewards""#, Value::Object(m)))
 }
@@ -53,12 +56,12 @@ pub(crate) fn lower(
 mod tests {
     use std::str::FromStr;
 
-    use policy_state::primitives::Address;
-    use policy_transition::action::staking::{ClaimRewardsAction, StakingAction};
+    use policy_state::primitives::{Address, ChainId};
+    use policy_transition::action::staking::{ClaimRewardsAction, StakeVenue, StakingAction};
     use policy_transition::action::ActionBody;
 
     use super::super::test_support::{
-        assert_conforms, crv, gauge_venue, minter_venue, onchain_meta, other,
+        assert_conforms, crv, gauge_venue, minter_venue, onchain_meta, other, FROM, TO,
     };
 
     fn gauge() -> Address {
@@ -73,8 +76,17 @@ mod tests {
             gauges: vec![gauge()],
             on_behalf_of: None,
             recipient: None,
+            restake: None,
         }));
         assert_conforms("claim_rewards", &body, &onchain_meta());
+        // Existing manifests omit restake. Their JSON stays unchanged and
+        // deserialization must not turn absence into a false request.
+        let serialized = serde_json::to_value(&body).unwrap();
+        assert!(serialized.get("restake").is_none());
+        assert_eq!(
+            serde_json::from_value::<ActionBody>(serialized).unwrap(),
+            body
+        );
     }
 
     #[test]
@@ -85,6 +97,7 @@ mod tests {
             gauges: vec![gauge(), gauge()],
             on_behalf_of: Some(other()),
             recipient: None,
+            restake: None,
         }));
         assert_conforms("claim_rewards", &body, &onchain_meta());
     }
@@ -99,7 +112,48 @@ mod tests {
             gauges: vec![],
             on_behalf_of: Some(other()),
             recipient: Some(gauge()),
+            restake: None,
         }));
         assert_conforms("claim_rewards", &body, &onchain_meta());
+    }
+
+    #[test]
+    fn umbrella_restake_choice_and_helper_survive_lowering_and_conform() {
+        let helper = "0xce6ced23118edeb23054e06118a702797b13fc2f";
+        for restake in [false, true] {
+            let body = ActionBody::Staking(StakingAction::ClaimRewards(ClaimRewardsAction {
+                venue: StakeVenue::AaveUmbrellaBatchHelper {
+                    chain: ChainId::ethereum_mainnet(),
+                    helper: Address::from_str(helper).unwrap(),
+                },
+                reward_token: Some(crv()),
+                gauges: vec![gauge()],
+                on_behalf_of: Some(other()),
+                recipient: Some(other()),
+                restake: Some(restake),
+            }));
+            let serialized = serde_json::to_value(&body).unwrap();
+            assert_eq!(serialized["restake"], restake);
+            assert_eq!(
+                serde_json::from_value::<ActionBody>(serialized).unwrap(),
+                body
+            );
+            let meta = onchain_meta();
+            assert_conforms("claim_rewards", &body, &meta);
+            let lowered = crate::lowering_v2::lower_action(
+                &body,
+                &meta,
+                &crate::lowering_v2::TxMeta { from: FROM, to: TO },
+            )
+            .unwrap();
+            assert_eq!(lowered.context["restake"], restake);
+            assert_eq!(lowered.context["recipient"], format!("{:#x}", other()));
+            assert_eq!(
+                lowered.context["venue"]["name"],
+                "aave_umbrella_batch_helper"
+            );
+            assert_eq!(lowered.context["venue"]["helper"], helper);
+            assert!(lowered.context["venue"].get("controller").is_none());
+        }
     }
 }

@@ -1,7 +1,7 @@
 // Staking::ClaimRewards — mint accrued reward tokens for one or more gauges
-// (Curve `Minter.mint` / `mint_for` / `mint_many`).
+// (Curve `Minter.mint` / `mint_for` / `mint_many` and Aave claims).
 //
-// Rust source: `crates/simulation/reducer/src/action/staking/claim_rewards.rs`
+// Rust source: `crates/asset-model/action/src/staking/claim_rewards.rs`
 // (`ClaimRewardsAction`). No LiveInputs.
 
 namespace Staking {
@@ -10,13 +10,16 @@ namespace Staking {
     venue: StakeVenue,
     // Reward token (CRV for the Minter); omitted for a gauge's multi-reward claim_rewards.
     rewardToken?: Core::TokenRef,
-    // Gauge address(es) rewards are minted from (Minter mint/mint_many); empty for a
-    // gauge's own claim_rewards (the gauge is the venue). Each a hex address.
+    // Gauge or Umbrella stake-token address(es) whose rewards are claimed; empty
+    // for a gauge's own claim_rewards (the gauge is the venue). Each a hex address.
     gauges: Set<String>,
     // Beneficiary whose rewards are claimed (`mint_for._for` / `claim_rewards(_addr)`).
     onBehalfOf?: String,
-    // Explicit payout recipient (gauge `claim_rewards(_addr, _receiver)`).
+    // Final beneficiary of reward tokens or resulting stake shares.
     recipient?: String,
+    // Requested reinvestment of eligible rewards; not proof of execution.
+    // Aave Umbrella pays rewards without a supported staking path to the beneficiary.
+    restake?: Bool,
     custom?: ClaimRewardsCustomContext,
   };
 

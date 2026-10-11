@@ -3,7 +3,7 @@
   "id": "aave/umbrella/batch/claimRewardsPermit@1.0.0",
   "publisher": "aave.eth",
   "schema_version": "3",
-  "note": "Umbrella batch helper claim rewards permit expanded per reward token.",
+  "note": "Umbrella batch helper claim intent per reward token. restake preserves the requested preference; unsupported reward paths pay tokens directly instead. The caller is the final beneficiary. Permit validity, conversion amounts and execution success are not inferred.",
   "match": {
     "selector": "0xa5fbb680",
     "chain_to_addresses": {
@@ -68,15 +68,15 @@
   "emit": {
     "strategy": "array_emit",
     "array_source": "$args.rewards",
-    "per_item_body": {
+    "body": {
       "domain": "staking",
       "staking": {
         "action": "claim_rewards",
         "claim_rewards": {
           "venue": {
-            "name": "aave_umbrella_rewards_controller",
+            "name": "aave_umbrella_batch_helper",
             "chain": "$chain",
-            "controller": "$to"
+            "helper": "$to"
           },
           "reward_token": {
             "key": {
@@ -88,8 +88,8 @@
           "gauges": [
             "$args.stakeToken"
           ],
-          "on_behalf_of": null,
-          "recipient": null,
+          "on_behalf_of": "$tx.from",
+          "recipient": "$tx.from",
           "restake": "$args.restake"
         }
       }

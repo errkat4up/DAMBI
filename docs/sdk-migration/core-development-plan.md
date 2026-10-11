@@ -405,5 +405,5 @@ C1 결과는 [계약 README](../../contracts/core-v1/README.md#결과-기록) �
 | D4-2·D4-3 제품 범위·재현 생성 | [번들 세부 계획](bundle-development-plan.md) 작성. 범위 확정·구현은 후속이며 완료 후 어댑터 계획으로 연결 |
 | D4-3 전체 snapshot 생성기 | 고정 snapshot·패키징 구현됨. 원본부터 독립 재현은 번들 B2~B3 |
 | D4-3a Universal Router 검증기 보완 | 번들 B1-1 대표 경로 검증·편입 완료. 범위·시장 데이터 제한은 [번들 계획](bundle-development-plan.md) 참조 |
-| D4-3b Aave 원본 정합화·`restake` | 미착수 |
+| D4-3b Aave 원본 정합화·`restake` | 번들 B1-2 선언·모델·Native 사용자 검증 완료. WASM 검증·snapshot 편입 대기 |
 | D4-3c 풀별 Decoder 조립 | 미착수. D4-2 범위 확정 필요 |

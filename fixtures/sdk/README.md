@@ -26,6 +26,19 @@ node --test --test-name-pattern="packaged" packages/core/tests/runtime.test.mjs
 
 새 시험은 두 selector의 V3 self/other·V4 primary/alternative 판정을 WASM `check()`와 Native 사이에서 비교하고, 손상된 nested ABI가 digest를 다시 고정해도 거절되는지 확인한다. 이 패키지 회귀 입력은 SDK 격리 source 목록에도 추가했다. Registry 원문을 직접 포함하는 Native target과 원본부터의 snapshot 생성 격리는 B3에 남는다. B1-2 Aave로 이어간다.
 
+## 번들 B1-2 — Aave
+
+2026-10-12, `429c344` 이후 변경: Aave 3개 `array_emit.body` 선언 교정, Umbrella `restake`의 모델·Cedar 전달 및 BatchHelper venue 구분. **사용자 로그 기준 Native 5개 통과·0 실패**(Governance 3개·Umbrella 2개). 별도 모델·Cedar 단위 시험 4개의 로그는 공유되지 않았다. 저장된 801개 snapshot에는 아직 Aave를 편입하지 않았으며 WASM 검증·편입이 남는다. 아래 명령은 재현용이며 통과한 Native 시험은 관련 변경이 없으면 반복하지 않는다.
+
+```sh
+cargo test --locked -p policy-engine --lib lowering_v2::staking::claim_rewards::tests &&
+cargo test --locked -p dambi-core --test aave_governance --test aave_umbrella
+```
+
+첫 명령은 기존 Curve 호환성과 `restake`/helper 모델·Cedar 연결 4개, 다음 명령은 Governance 3개·Umbrella 2개 시험이다. 배열 순서·U256 정밀도, 단일 tuple의 reward 목록, `false/true` 정책 전달, 빈 배열·잘못된 calldata를 확인한다. 재예치 조건을 구분하는 정책은 시험 전용이며 Day-1에는 추가하지 않는다. Governance의 Day-1 `allow`는 대응 정책이 없는 경로의 판정으로, 거버넌스 안전성 검증을 뜻하지 않는다.
+
+[Aave 계약 소스](https://github.com/aave-dao/aave-umbrella/blob/main/src/contracts/helpers/UmbrellaBatchHelper.sol)의 `claimRewardsPermit`·`_claimRewardsPermit`·`_depositToStake`를 기준으로 재예치 요청과 최종 beneficiary를 표현했다. 실제 permit 유효성·재예치 가능 경로·수령 수량·실행 성공은 이 디코딩 시험의 범위가 아니다. 다음 단계는 WASM 검증·snapshot 편입이다.
+
 ## 공유 정책 입력
 
 Day-1 정책의 공유 원본은 [`policy-bundles/day1-safety/`](../../policy-bundles/day1-safety/package.json)이다. Cedar 본문과 manifest 10개는 그대로 이동했고 package의 원본 경로만 변경했다. [`policy-bundle.cjs`](../../scripts/sdk/policy-bundle.cjs)가 package 선언 순서대로 `{id, policy, manifest}`를 읽고 직렬화한다. SDK baseline과 기존 확장 asset copier가 같은 함수를 사용하며, DEC-02는 공유 Cedar/manifest를 직접 읽는다. 원본이 없으면 빈 set 또는 합성 manifest로 대체하지 않는다.

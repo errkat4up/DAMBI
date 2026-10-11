@@ -117,8 +117,8 @@ impl StakingAction {
 // Venue
 // ---------------------------------------------------------------------------
 
-/// Staking / vote-escrow venue identifier. Each variant is one Curve DAO
-/// contract; the single contract address is carried per-variant.
+/// Staking / vote-escrow venue identifier. Each variant identifies a contract
+/// and carries its address.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "name", rename_all = "snake_case")]
@@ -192,6 +192,15 @@ pub enum StakeVenue {
         #[tsify(type = "string")]
         controller: Address,
     },
+    /// Aave Umbrella batch helper — forwards reward claims and can reinvest
+    /// eligible rewards. Its address is distinct from the RewardsController.
+    AaveUmbrellaBatchHelper {
+        /// Chain hosting the deployment.
+        chain: ChainId,
+        /// `UmbrellaBatchHelper` contract address.
+        #[tsify(type = "string")]
+        helper: Address,
+    },
     /// Aave Savings GHO (sGHO) — an ERC4626 savings vault a user deposits GHO
     /// into / redeems from.
     AaveSavingsGho {
@@ -230,6 +239,7 @@ impl StakeVenue {
             Self::AaveSafetyModule { .. } => "aave_safety_module",
             Self::AaveUmbrellaStakeToken { .. } => "aave_umbrella_stake_token",
             Self::AaveUmbrellaRewardsController { .. } => "aave_umbrella_rewards_controller",
+            Self::AaveUmbrellaBatchHelper { .. } => "aave_umbrella_batch_helper",
             Self::AaveSavingsGho { .. } => "aave_savings_gho",
             Self::EthenaStakedUsde { .. } => "ethena_staked_usde",
         }
