@@ -123,6 +123,10 @@ Balancer의 `weighted` 상수·`wethIsEth` 누락, Uniswap 가격 한계 미반�
 
 2026-10-12, A2-2 변경 범위(체인·블록 조회, FactBatch·provenance, 제한 동시성, 부분 실패·취소)에 대해 사용자 실행 **11 passed / 0 failed / 0 skipped**. 알려진 실패는 없으며 실제 Core·RPC 통합은 A2-3에 남는다.
 
+## 어댑터 A2-3 — Core·실제 RPC 연결
+
+2026-10-12, A2-3 변경 범위(Core/HTTP 통합·optional/required·cache/취소·수동 RPC 검증)에 대해 사용자 실행 **7 passed / 0 failed / 0 skipped**. PublicNode mainnet USDC 실연결도 사용자 확인 기준 **passed / complete**, 같은 블록 잔고 대조와 Core 평가(`allow`)를 통과했다. 알려진 실패는 없으며 tarball Node/브라우저 소비는 A3에 남는다.
+
 ## 공유 정책 입력
 
 Day-1 정책의 공유 원본은 [`policy-bundles/day1-safety/`](../../policy-bundles/day1-safety/package.json)이다. Cedar 본문과 manifest 10개는 그대로 이동했고 package의 원본 경로만 변경했다. [`policy-bundle.cjs`](../../scripts/sdk/policy-bundle.cjs)가 package 선언 순서대로 `{id, policy, manifest}`를 읽고 직렬화한다. SDK baseline과 기존 확장 asset copier가 같은 함수를 사용하며, DEC-02는 공유 Cedar/manifest를 직접 읽는다. 원본이 없으면 빈 set 또는 합성 manifest로 대체하지 않는다.
@@ -143,7 +147,7 @@ Day-1 정책의 공유 원본은 [`policy-bundles/day1-safety/`](../../policy-bu
 
 Fact 0개는 `policy_rpc` 결과가 필요 없다는 뜻이다. 현재 Swap Action의 `live_inputs`와 Permit2 `nonce` 같은 필수 DTO 구조까지 생략할 수 있다는 뜻은 아니다. 위 D3 시험의 해당 값은 합성 입력이며 실제 시장 데이터·nonce 조회의 증거가 아니다. D3 자체는 Action부터의 검사이며, 이후 Core 실행과 UR raw swap 사례 등 현재 검증 범위는 위 B1~B3 기록 및 [B4 인계](../../contracts/core-v1/snapshot-selection.proposal.json)를 따른다.
 
-[`first-fact-contract.json`](first-fact-contract.json)은 후속 A2의 `portfolio.balance` ERC-20 경로를 선정한 인계 자료다. B4에서 현재 공개 `PlannedCall`·`FactBatch`·provenance 계약에 맞췄다. Core의 원본 Fact 검증·projection·cache는 C5/C6에서 구현됐으며 직접 RPC adapter와 실제 조회 검증은 A2에 남는다. Day-1에는 활성화하지 않고 기존 catalog의 optional 선언도 유지한다.
+[`first-fact-contract.json`](first-fact-contract.json)은 후속 A2의 `portfolio.balance` ERC-20 경로를 선정한 인계 자료다. B4에서 현재 공개 `PlannedCall`·`FactBatch`·provenance 계약에 맞췄다. Core의 원본 Fact 검증·projection·cache는 C5/C6에서, 직접 RPC adapter와 실제 조회 검증은 A2에서 완료했다. Day-1에는 활성화하지 않고 기존 catalog의 optional 선언도 유지한다.
 
 ## D3 사용자 실행
 

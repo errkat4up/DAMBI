@@ -182,8 +182,8 @@ schedule needs separate operational confirmation.
 ## Optional ERC-20 Fact adapter (development)
 
 `createEvmFactProvider` implements `FactProvider` for `portfolio.balance` calls
-whose resolved params contain an ERC-20 TokenRef. A2-2 is complete; actual
-Core/live-RPC integration follows in A2-3.
+whose resolved params contain an ERC-20 TokenRef. A2 includes Core/HTTP integration
+tests and the opt-in RPC check below. Browser consumption follows in A3.
 
 ```ts
 import { createEvmFactProvider } from "@dambi/core/adapters";
@@ -212,6 +212,43 @@ preserved. Per-chain `headers` and optional `fetch` are copied/captured at
 construction. Redirects and cookie authentication are disabled. If supplying
 `clock: { now() }`, use the same Unix-millisecond clock as Core. Direct consumers
 provide their deadline with an AbortSignal; Core already supplies its own.
+
+### Manual EVM RPC connection check
+
+Use the existing built Core package (including its packaged WASM/decoders):
+
+```sh
+npm run core:verify:evm-fact -- --config fixtures/sdk/evm-fact.mainnet.example.json
+```
+
+This explicit example uses the [PublicNode Ethereum endpoint](https://ethereum.publicnode.com/),
+[Circle's mainnet USDC contract](https://developers.circle.com/stablecoins/usdc-contract-addresses)
+and the fixed `0x000000000000000000000000000000000000dead` owner. It requires no
+API key or personal wallet address. The RPC provider receives the queried address
+and network connection as with any direct RPC read.
+
+The command signs a fresh **local test policy bundle** with the existing test-only
+fixture key, then evaluates an unsigned transfer request for 100 raw token units.
+It does not publish a policy, sign a wallet transaction or submit a transaction.
+The original catalog policy remains optional and Day-1 is unchanged.
+
+The adapter makes three reads: chain ID, block height and `balanceOf`. Two further
+direct reads check the chain and balance at that same block using separate parsing.
+Success requires one real Fact, matching provenance and the expected Core decision:
+`warn` when the observed balance is exactly 100 raw units, otherwise `allow`.
+An optional-policy `allow` with no Fact is a failed probe. The configured 15-second
+deadline covers Core initialization and RPC work; responses are bounded to 16 KiB.
+
+`status: "passed"` with `connection: "remote-rpc"` records a completed external
+connection check. Loopback regression tests report `connection: "loopback-fixture"`
+and do not establish live success. Same-block agreement checks consistency within
+one RPC service, not data authenticity or finality. Browser consumption follows in A3.
+
+For a private endpoint, put its URL and optional `headers` in
+`fixtures/sdk/evm-fact.local.json` (Git-ignored), and pass that path explicitly.
+The report omits endpoint URLs, headers, raw responses, owner/token addresses and
+key material. The live command is never run automatically by CI; CI uses only
+loopback fixtures. Missing configuration or package artifacts fail with a nonzero exit.
 
 ## Public contract and migration
 

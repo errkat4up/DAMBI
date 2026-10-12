@@ -19,6 +19,8 @@ const runtimeTests = [
   "packages/core/tests/adapters/evm-rpc.test.mjs",
   "packages/core/tests/adapters/fact-provider.test.mjs",
   "packages/core/tests/adapters/fact-provider-lifecycle.test.mjs",
+  "packages/core/tests/adapters/fact-provider-core.test.mjs",
+  "packages/core/tests/adapters/evm-fact-probe.test.mjs",
 ];
 const keep = process.argv.includes("--keep");
 const args = process.argv.slice(2);
