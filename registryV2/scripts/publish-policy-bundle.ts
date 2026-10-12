@@ -46,9 +46,11 @@ const REPO_ROOT = resolve(REGISTRY_ROOT, "..");
 interface PolicyBundleLoader {
   loadPolicyBundle(repoRoot: string, bundleName?: string): PolicyEntry[];
 }
-const { loadPolicyBundle } = createRequire(import.meta.url)(
-  resolve(REPO_ROOT, "scripts", "sdk", "policy-bundle.cjs"),
-) as PolicyBundleLoader;
+// Loaded on first use: the policy-republisher job image re-signs the live
+// payload and ships without the repo's policy source or SDK loader.
+const loadPolicyBundle: PolicyBundleLoader["loadPolicyBundle"] = (repoRoot, bundleName) =>
+  (createRequire(import.meta.url)(resolve(REPO_ROOT, "scripts", "sdk", "policy-bundle.cjs")) as PolicyBundleLoader)
+    .loadPolicyBundle(repoRoot, bundleName);
 
 export const MAX_SEQUENCE = Number.MAX_SAFE_INTEGER;
 const PROFILE_RE = /^[a-z0-9-]+$/;
