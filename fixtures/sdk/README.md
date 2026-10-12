@@ -119,6 +119,10 @@ Balancer의 `weighted` 상수·`wethIsEth` 누락, Uniswap 가격 한계 미반�
 
 2026-10-12, A2-1 변경 범위(입력 검증·ERC-20 ABI·BigInt/U256·JSON-RPC codec)에 대해 사용자 실행 **8 passed / 0 failed / 0 skipped**. 알려진 실패는 없으며 HTTP 조회·FactBatch 조립은 A2-2에 남는다.
 
+## 어댑터 A2-2 — RPC 조회·FactBatch
+
+2026-10-12, A2-2 변경 범위(체인·블록 조회, FactBatch·provenance, 제한 동시성, 부분 실패·취소)에 대해 사용자 실행 **11 passed / 0 failed / 0 skipped**. 알려진 실패는 없으며 실제 Core·RPC 통합은 A2-3에 남는다.
+
 ## 공유 정책 입력
 
 Day-1 정책의 공유 원본은 [`policy-bundles/day1-safety/`](../../policy-bundles/day1-safety/package.json)이다. Cedar 본문과 manifest 10개는 그대로 이동했고 package의 원본 경로만 변경했다. [`policy-bundle.cjs`](../../scripts/sdk/policy-bundle.cjs)가 package 선언 순서대로 `{id, policy, manifest}`를 읽고 직렬화한다. SDK baseline과 기존 확장 asset copier가 같은 함수를 사용하며, DEC-02는 공유 Cedar/manifest를 직접 읽는다. 원본이 없으면 빈 set 또는 합성 manifest로 대체하지 않는다.

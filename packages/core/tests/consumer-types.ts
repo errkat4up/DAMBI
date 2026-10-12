@@ -29,8 +29,11 @@ import { decoderSnapshot, decoderSnapshotInfo } from "@dambi/core/decoders";
 import {
   AdapterError,
   createPolicyApiSource,
+  createEvmFactProvider,
   type AdapterErrorCode,
   type PolicyApiSourceOptions,
+  type EvmFactProviderOptions,
+  type EvmRpcEndpoint,
 } from "@dambi/core/adapters";
 
 const packagedSnapshot: DecoderSnapshot = decoderSnapshot;
@@ -68,6 +71,31 @@ function consumeAdapterError(error: AdapterError): void {
   void [adapterCode, httpStatus, invalidAdapterCode];
 }
 void [policyApi, fetchedPolicy, consumeAdapterError];
+
+const rpcEndpoint: EvmRpcEndpoint = {
+  rpcUrl: "https://rpc.example/v1/host-configured",
+  headers: { authorization: "Bearer host-configured" },
+};
+const evmOptions: EvmFactProviderOptions = {
+  chains: { "eip155:1": rpcEndpoint },
+  maxResponseBytes: 16_384,
+  fetch: globalThis.fetch,
+  clock: { now: () => 1_800_000_000_000 },
+};
+const evmFact: FactProvider = createEvmFactProvider(evmOptions);
+const evmBatch: Promise<FactBatch> = evmFact.fetch([], { planId: "plan", signal: new AbortController().signal });
+const invalidFactRequest: AdapterErrorCode = "INVALID_REQUEST";
+// @ts-expect-error The host must set the HTTP response limit.
+createEvmFactProvider({ chains: evmOptions.chains });
+// @ts-expect-error RPC endpoint headers must contain string values.
+createEvmFactProvider({ ...evmOptions, chains: { "eip155:1": { rpcUrl: rpcEndpoint.rpcUrl, headers: { authorization: 42 } } } });
+// @ts-expect-error The clock follows Core's Clock port rather than a function option.
+createEvmFactProvider({ ...evmOptions, clock: Date.now });
+// @ts-expect-error Direct Fact fetches must be bound to a plan ID.
+evmFact.fetch([], { signal: new AbortController().signal });
+// @ts-expect-error The EVM adapter belongs to its optional public subpath.
+import { createEvmFactProvider as rootEvmFactProvider } from "@dambi/core";
+void [evmFact, evmBatch, invalidFactRequest];
 
 // @ts-expect-error Decoder lookup is not a public I/O port.
 import type { DecoderSource } from "@dambi/core";

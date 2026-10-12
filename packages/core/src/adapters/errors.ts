@@ -1,6 +1,7 @@
-/** Transport errors from direct adapter calls; Core applies its own port errors. */
+/** Errors from direct adapter calls; Core applies its own port errors. */
 export type AdapterErrorCode =
   | "INVALID_CONFIG"
+  | "INVALID_REQUEST"
   | "NETWORK_ERROR"
   | "HTTP_ERROR"
   | "INVALID_RESPONSE"

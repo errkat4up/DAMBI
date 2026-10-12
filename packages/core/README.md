@@ -179,6 +179,40 @@ CORS headers are observed from
 Node, while actual browser consumption remains A3. The deployment's republishing
 schedule needs separate operational confirmation.
 
+## Optional ERC-20 Fact adapter (development)
+
+`createEvmFactProvider` implements `FactProvider` for `portfolio.balance` calls
+whose resolved params contain an ERC-20 TokenRef. A2-2 is complete; actual
+Core/live-RPC integration follows in A2-3.
+
+```ts
+import { createEvmFactProvider } from "@dambi/core/adapters";
+
+const fact = createEvmFactProvider({
+  chains: { "eip155:1": { rpcUrl: "https://rpc.example/v1/host-configured" } },
+  maxResponseBytes: 16_384, // Example response limit, not an operational default
+});
+// Pass fact as CoreConfig.ports.fact. Direct callers supply planId and signal:
+// const batch = await fact.fetch(plan.calls, { planId: plan.planId, signal });
+```
+
+Each fetch checks `eth_chainId`, obtains a block height per chain, and uses that
+explicit height for `balanceOf` calls, with at most four HTTP requests in flight.
+Facts contain `{ balance: "0x64" }`, a decimal `blockNumber`, a fixed chain/method
+source label and the request-start `observedAt`. Core applies the projection.
+The provider has no Fact cache, retry or failover. Unsupported calls, explicit
+block selectors and individual RPC errors are omitted. A successful sibling
+survives; Core decides required/optional behavior. If all supported calls are
+unavailable due to chain preparation or network/HTTP failures, fetch rejects.
+Bad plan/call IDs reject with `AdapterError` code `INVALID_REQUEST`; cancellation
+rejects the whole fetch with `ABORTED` and stops queued work.
+
+Use HTTPS, or loopback HTTP for local development. Endpoint paths and queries are
+preserved. Per-chain `headers` and optional `fetch` are copied/captured at
+construction. Redirects and cookie authentication are disabled. If supplying
+`clock: { now() }`, use the same Unix-millisecond clock as Core. Direct consumers
+provide their deadline with an AbortSignal; Core already supplies its own.
+
 ## Public contract and migration
 
 - Use `await createCore(config, options?)`. The instance exposes `plan`, `evaluate`,
