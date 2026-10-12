@@ -98,8 +98,8 @@ const core = await createCore({
   },
 });
 
-// Policy bundles are re-signed regularly and are rejected once older than
-// maxBundleAgeSec (72 hours). Refresh well inside that window.
+// The publisher must issue fresh bundles within maxBundleAgeSec (72 hours).
+// Refreshing alone does not extend a previously signed bundle's lifetime.
 setInterval(() => core.refreshPolicies().catch(console.error), 60 * 60 * 1000);
 
 const verdict = await core.check({
@@ -154,6 +154,30 @@ reuse. The source bypasses the browser HTTP cache and does not retry requests.
 Direct callers can pass `policy.fetch({ signal })` for cancellation/deadlines
 and inspect `AdapterError`; Core normalizes a rejected policy source to
 `POLICY_FETCH_FAILED`.
+
+### Manual staging connection check
+
+From the repository root, use the existing built workspace package:
+
+```sh
+npm run core:verify:policy-api -- --config fixtures/sdk/policy-api.staging.json
+```
+
+The explicit staging config contains this README's public API address and pinned
+policy key. The command initializes Core, evaluates a no-Fact USDC unlimited
+approve against `unlimited-approval-deny`, refreshes, and evaluates again. It
+makes two GET requests and performs no build, signing, publishing or chain RPC.
+It is opt-in and is not part of routine CI or the published package.
+
+The JSON result reports `status: "passed"` only after both phases succeed, with
+HTTP status and verified policy sequence/issuance/expiry (Unix seconds). Refresh
+may return 200 or 304. The system clock and Core's default 72-hour maximum age
+remain in effect. `POLICY_EXPIRED` requires checking publication freshness with
+the API owner; it is not bypassed by this command. Its `policyTimeDiagnostic`
+shows the candidate's dates and local clock for diagnosis, not a passed check.
+CORS headers are observed from
+Node, while actual browser consumption remains A3. The deployment's republishing
+schedule needs separate operational confirmation.
 
 ## Public contract and migration
 

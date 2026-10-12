@@ -1,6 +1,6 @@
 # 어댑터 세부 개발 계획 — Policy API와 첫 EVM Fact
 
-작성일: 2026-10-12. 상태: **A1-1·A1-2 완료, A1-3 대기**. 기준: `feat/bundles`의 `ab6d013`과 B4 인계. 어댑터 개발은 `feat/adapters`에서 진행하며 번들 PR #11과 별도로 관리한다. main 병합·패키지 발행은 진행하지 않는다. C1~C6 완료선을 Core v0.0.1로 부르던 구분을 유지하며, 현재 저장소의 npm 패키지 버전은 0.1.0이다. 이번 계획으로 버전을 변경하지 않는다.
+작성일: 2026-10-12. 상태: **A1-1~A1-3 완료, A2-1 대기**. 기준: `feat/bundles`의 `ab6d013`과 B4 인계. 어댑터 개발은 `feat/adapters`에서 진행하며 번들 PR #11과 별도로 관리한다. main 병합·패키지 발행은 진행하지 않는다. C1~C6 완료선을 Core v0.0.1로 부르던 구분을 유지하며, 현재 저장소의 npm 패키지 버전은 0.1.0이다. 이번 계획으로 버전을 변경하지 않는다.
 
 상위 기준: [전체 계획 §6·§7](decoder-core-adapters-plan.md#6-3차-작업-featadapters) · [번들 B4 인계](bundle-development-plan.md#7-b4--어댑터-세부-계획에-넘길-완료-기준) · [제품·요청 범위](../../contracts/core-v1/snapshot-selection.proposal.json) · [첫 Fact 계약](../../fixtures/sdk/first-fact-contract.json). 이 문서는 해당 계약을 복제하지 않고 구현 순서·설계 선택·시험 연결을 구체화한다.
 
@@ -69,6 +69,8 @@
 
 API 저장소 쪽 호환 검사는 가능하면 실제 `createRegistryApiServer`와 시험용 ObjectReader를 사용한다. SDK의 필수 격리 시험에는 독립적인 로컬 HTTP fixture를 사용하여 `registry-api` 전체를 SDK 빌드 입력으로 가져오지 않는다. 실제 배포 URL의 공동 검증은 §7 조건이 준비된 뒤 별도로 완료한다.
 
+A1-3은 사용자가 선택한 README의 staging 설정을 [명시적 연결 파일](../../fixtures/sdk/policy-api.staging.json)로 두고, [수동 실연결 명령](../../packages/core/README.md#manual-staging-connection-check)을 실행한다. 실제 공개 키·packaged decoder·시스템 시각으로 init/refresh와 no-Fact approve 정책 연결을 확인한다. Node의 CORS header 관찰과 A3의 브라우저 실행은 구분하며, 이 명령을 일반 CI에 자동 연결하지 않는다.
+
 ## 4. A2 — 첫 ERC-20 FactProvider
 
 권위 있는 입력/반환 예시는 [첫 Fact 인계](../../fixtures/sdk/first-fact-contract.json)를 따른다. 아래는 기존 계약을 RPC로 구현할 때의 선택이다.
@@ -115,7 +117,7 @@ body 크기·UTF-8·JSON 오류도 발생한 요청 단계에 따라 공통 준�
 | --- | --- | --- |
 | A1-1 진입점·HTTP 기본 — 완료 | subpath export, 설정/전송 오류, bounded HTTP, wire→port mapping | 로컬 HTTP 원문·형식·크기·query 시험과 소비자 타입 검사, 새 시험 CI 연결 |
 | A1-2 상태·Core 연결 — 완료 | ETag, 동시 호출/취소, 실제 Core init/refresh | cache·timeout·서명/refresh 실패 경계를 실제 Core로 검증 |
-| A1-3 실제 API 확인 | 배포 URL·신뢰 키·인증/CORS·발행본 연결 | 실제 서명 bundle init/refresh. 환경 미확정이면 구현 완료와 별도로 대기 표시 |
+| A1-3 실제 API 확인 — 완료 | 배포 URL·신뢰 키·인증/CORS·발행본 연결 | 실제 서명 bundle init/refresh. 환경 미확정이면 구현 완료와 별도로 대기 표시 |
 | A2-1 method·ABI | params/체인/주소·U256·JSON-RPC codec | 순수 변환 및 거절 경계 시험. Node 전용 런타임 의존 없음 |
 | A2-2 RPC·FactBatch | 체인/블록 조회, 제한 동시성, 부분 실패·취소 | 로컬 RPC의 실제 HTTP 경로에서 ID·값·provenance·실패표 검증 |
 | A2-3 Core·실제 RPC | optional/required Core 연결, 지정 endpoint와 ERC-20 공동 확인 | Core 계약 시험 및 실제 조회의 체인/높이/잔고 대조. live 결과를 fixture 성공과 구분 |
@@ -139,14 +141,14 @@ A1-3의 외부 환경이 준비되지 않아도 A2-1/A2-2 구현은 진행할 �
 
 | 확인 항목 | 필요한 시점·담당 |
 | --- | --- |
-| API origin, staging/production, policy 역할 공개 키, default profile, 소비자 인증·CORS | A1-3 전: API 운영 담당 + SDK 담당. `/v1/bundle` 내부에는 현재 소비자 인증 코드가 없으므로 배포 앞단을 따로 확인 |
-| 현재 발행 sequence·issued_at·재발행 주기 | A1-3 전: publisher/API 담당. `expires_at: null`도 Core 기본 최대 나이 72시간 적용 |
+| API origin, staging/production, policy 역할 공개 키, default profile, 소비자 인증·CORS | README의 staging/default·policy 키로 익명 실연결 확인 완료. CORS header 관찰 완료, 실제 브라우저 소비는 A3 |
+| 현재 발행 sequence·issued_at·재발행 주기 | 최신 발행본으로 실연결 재검증 완료. 재발행·나이 확인 Job과 스케줄 배포 확인, 최초 일일 예약 실행 관찰은 API 운영 담당의 후속 확인. `expires_at: null`도 최대 나이 72시간 적용 |
 | chain별 RPC endpoint·자격 증명·browser 허용·실제 ERC-20/owner 사례 | A2-3 전: SDK/RPC 설정 담당. 첫 연결은 eip155:1, 다른 chain은 명시적으로 추가 |
 | browser ETag 최적화 필요 여부 | A1-3/A3: 필요할 때만 API의 Expose-Headers 보완. 미노출 200 경로 자체는 지원 |
 | 소비자 limits·Fact 허용 나이·enforcement | A3 전: SDK 소비자 설정. 예제값을 운영 권장값이나 안전 보장으로 표현하지 않음 |
 
 ## 8. 진행·기록
 
-현재 상태는 **A1-1·A1-2 완료 / A1-3~A3 미착수 / 실제 환경 미확정**이다. 개발 브랜치는 `feat/adapters`이며 번들 PR 병합은 별도 승인 대상으로 남는다.
+현재 상태는 **A1-1~A1-3 완료 / A2~A3 미착수 / staging 연결 확인·RPC 환경 미확정**이다. 개발 브랜치는 `feat/adapters`이며 번들 PR 병합은 별도 승인 대상으로 남는다.
 
 소단계마다 기능과 필요한 검증을 함께 마친다. 결과는 기존 `fixtures/sdk/README.md` 한 곳에 변경 범위·통과/실패·남은 문제만 짧게 기록하고, 이 문서에는 단계 상태만 갱신한다. 커밋은 독립적인 구현 단위에 맞춰 나누며 문서만을 위한 중복 시험·해시 기록은 만들지 않는다.
