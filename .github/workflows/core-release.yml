@@ -8,8 +8,9 @@
 #
 # Gates, in order: the tag matches packages/core/package.json, the version is not
 # already on npm, the SDK source-isolation check passes (same as CI's `core`
-# job), and the in-repo build passes types + runtime + adapter tests. The tarball that is
-# published is built in this run from the tagged commit — never a local dist.
+# job), and the in-repo build passes types + runtime + adapter tests. Node and
+# Chromium consumers check the exact tarball that is then published. It is built
+# in this run from the tagged commit — never a local dist.
 name: core-release
 
 on:
@@ -119,8 +120,32 @@ jobs:
           yarn workspace @dambi/core test:runtime
           yarn workspace @dambi/core test:adapters
 
-      - name: Publish
+      - name: Pack the release candidate
+        id: package
         working-directory: packages/core
         run: |
-          npm pack --dry-run
-          npm publish --access public
+          mkdir "$RUNNER_TEMP/core-release-package"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/core-release-package"
+          shopt -s nullglob
+          packages=("$RUNNER_TEMP/core-release-package/"*.tgz)
+          if [[ ${#packages[@]} -ne 1 ]]; then
+            echo "::error::Expected exactly one release package"
+            exit 1
+          fi
+          echo "tarball=${packages[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Install pinned consumer tooling
+        run: npm ci --prefix scripts/sdk/consumer-tools --ignore-scripts --no-audit --no-fund
+
+      - name: Install Chromium
+        run: node scripts/sdk/consumer-tools/node_modules/playwright/cli.js install --with-deps chromium
+
+      - name: Verify the release tarball (Node + types + Chromium)
+        env:
+          CORE_RELEASE_TARBALL: ${{ steps.package.outputs.tarball }}
+        run: npm run core:test:consumers -- --tarball "$CORE_RELEASE_TARBALL"
+
+      - name: Publish the verified tarball
+        env:
+          CORE_RELEASE_TARBALL: ${{ steps.package.outputs.tarball }}
+        run: npm publish "$CORE_RELEASE_TARBALL" --access public

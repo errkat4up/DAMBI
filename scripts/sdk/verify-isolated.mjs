@@ -188,7 +188,10 @@ async function verify() {
       throw new Error(`${file} must run nonempty tests without skips or failures`);
     }
   }
-  await run(process.execPath, [...yarn, "core:pack"]);
+  // Package the already verified isolated build once. The separate consumer
+  // job installs this exact tarball; it does not rebuild WASM in another job.
+  await mkdir(join(isolated, "artifacts"), { recursive: true });
+  await run("npm", ["pack", "./packages/core", "--ignore-scripts", "--pack-destination", "artifacts"]);
   await checkBoundary();
 }
 

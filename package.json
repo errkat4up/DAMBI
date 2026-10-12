@@ -12,6 +12,7 @@
     "core:test:types": "yarn workspace @dambi/core test:types",
     "core:test:runtime": "yarn workspace @dambi/core test:runtime",
     "core:test:adapters": "yarn workspace @dambi/core test:adapters",
+    "core:test:consumers": "node scripts/sdk/verify-consumers.mjs",
     "core:verify:policy-api": "node scripts/sdk/verify-policy-api.mjs",
     "core:verify:evm-fact": "node scripts/sdk/verify-evm-fact.mjs",
     "core:test:fixtures": "node scripts/sdk/test-fixtures.mjs",

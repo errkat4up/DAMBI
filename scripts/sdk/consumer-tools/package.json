@@ -1,0 +1,10 @@
+{
+  "name": "dambi-sdk-consumer-tools",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "devDependencies": {
+    "playwright": "1.64.0",
+    "typescript": "5.7.3"
+  }
+}

@@ -3,7 +3,7 @@ import { appendFile, readFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const JOBS = ["rust", "rust-server", "wasm", "extension", "registry-api", "core"];
+export const JOBS = ["rust", "rust-server", "wasm", "extension", "registry-api", "core", "core-consumers"];
 const dependencyFiles = new Set([
   "Cargo.toml", "Cargo.lock", "package.json", "package-lock.json", "yarn.lock",
   "pnpm-lock.yaml", "rust-toolchain.toml", "rust-toolchain",
@@ -30,7 +30,10 @@ export function selectJobs(changes) {
       if (status === "A" || status === "M") continue;
       return full("Documentation removed or file type changed");
     }
-    if (path.startsWith("packages/core/")) selected.add("core");
+    if (path.startsWith("packages/core/") || path.startsWith("examples/sdk-adapters/")
+        || path.startsWith("scripts/sdk/consumer-tools/")
+        || /^scripts\/sdk\/consumer-[^/]+\.mjs$/.test(path)
+        || path === "scripts/sdk/verify-consumers.mjs") selected.add("core");
     else if (path.startsWith("registry-api/")) selected.add("registry-api");
     else if (path.startsWith("browser-extension/")) selected.add("extension");
     else if (path.startsWith("crates/policy-server/")) {
@@ -45,6 +48,8 @@ export function selectJobs(changes) {
   }
   // The extension downloads the WASM artifact produced in this same run.
   if (selected.has("extension")) selected.add("wasm");
+  // Package consumers reuse the tarball produced by the isolated Core build.
+  if (selected.has("core")) selected.add("core-consumers");
   return {
     jobs: Object.fromEntries(JOBS.map((job) => [job, selected.has(job)])),
     reason: selected.size ? "Jobs affected by changed paths" : "Only documentation content or no changed files",

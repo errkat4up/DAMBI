@@ -176,14 +176,15 @@ remain in effect. `POLICY_EXPIRED` requires checking publication freshness with
 the API owner; it is not bypassed by this command. Its `policyTimeDiagnostic`
 shows the candidate's dates and local clock for diagnosis, not a passed check.
 CORS headers are observed from
-Node, while actual browser consumption remains A3. The deployment's republishing
+Node; the standalone consumer gate below checks browser behavior with local
+fixtures. Check deployed CORS for your browser origin. The deployment's republishing
 schedule needs separate operational confirmation.
 
 ## Optional ERC-20 Fact adapter (development)
 
 `createEvmFactProvider` implements `FactProvider` for `portfolio.balance` calls
 whose resolved params contain an ERC-20 TokenRef. A2 includes Core/HTTP integration
-tests and the opt-in RPC check below. Browser consumption follows in A3.
+tests and the opt-in RPC check below. Browser consumption uses the standalone consumer gate below.
 
 ```ts
 import { createEvmFactProvider } from "@dambi/core/adapters";
@@ -242,13 +243,45 @@ deadline covers Core initialization and RPC work; responses are bounded to 16 Ki
 `status: "passed"` with `connection: "remote-rpc"` records a completed external
 connection check. Loopback regression tests report `connection: "loopback-fixture"`
 and do not establish live success. Same-block agreement checks consistency within
-one RPC service, not data authenticity or finality. Browser consumption follows in A3.
+one RPC service, not data authenticity or finality. Browser consumption uses the standalone consumer gate below.
 
 For a private endpoint, put its URL and optional `headers` in
 `fixtures/sdk/evm-fact.local.json` (Git-ignored), and pass that path explicitly.
 The report omits endpoint URLs, headers, raw responses, owner/token addresses and
 key material. The live command is never run automatically by CI; CI uses only
 loopback fixtures. Missing configuration or package artifacts fail with a nonzero exit.
+
+### Standalone Node and browser consumers
+
+The [adapter example](../../examples/sdk-adapters/README.md) combines the policy
+HTTP and EVM Fact adapters using the public package exports. The consumer gate
+installs an actual tarball outside the repository and exercises Node, standalone
+TypeScript declarations and Chromium with local cross-origin HTTP/RPC services.
+It does not contact the staging API or PublicNode and does not rebuild Core.
+
+Install the pinned test tooling and its Chromium binary once:
+
+```sh
+npm ci --prefix scripts/sdk/consumer-tools --ignore-scripts --no-audit --no-fund
+node scripts/sdk/consumer-tools/node_modules/playwright/cli.js install chromium
+```
+
+Then use the existing built package, or pass an explicit release candidate:
+
+```sh
+npm run core:test:consumers
+# npm run core:test:consumers -- --tarball /absolute/path/dambi-core-0.1.0.tgz
+```
+
+After Node/types have passed, `npm run core:test:consumers -- --browser-only`
+reruns only the five Chromium groups. The default still runs all ten groups.
+The browser fixture uses CSP to restrict connections to local origins without
+intercepting requests, so actual CORS preflights reach the HTTP servers.
+
+CI's `core-consumers` job reuses the tarball from the isolated `core` build.
+The release workflow checks and publishes the same tarball. These checks cover
+local browser CORS behavior; a deployment's API/RPC CORS and access policy still
+need verification for its chosen origin.
 
 ## Public contract and migration
 
@@ -428,7 +461,8 @@ baseline, rebuilds the selected UR/Aave additions from five pinned originals,
 checks exact equality with the 804-bundle product and packages that result.
 It also generates three separate pool regression bundles for Native/WASM raw
 policy checks. This is selected-input reconstruction, not regeneration of the
-entire Registry corpus. Final tarball/browser consumer checks remain a release gate.
+entire Registry corpus. It emits an actual tarball; the separate
+`core:test:consumers` gate checks its Node and browser consumers.
 
 User verification (2026-09-28, local C6 before the review corrections):
 `sdk:verify:isolated` reached its final success marker, including Native session,

@@ -127,6 +127,10 @@ Balancer의 `weighted` 상수·`wethIsEth` 누락, Uniswap 가격 한계 미반�
 
 2026-10-12, A2-3 변경 범위(Core/HTTP 통합·optional/required·cache/취소·수동 RPC 검증)에 대해 사용자 실행 **7 passed / 0 failed / 0 skipped**. PublicNode mainnet USDC 실연결도 사용자 확인 기준 **passed / complete**, 같은 블록 잔고 대조와 Core 평가(`allow`)를 통과했다. 알려진 실패는 없으며 tarball Node/브라우저 소비는 A3에 남는다.
 
+## 어댑터 A3 — 패키지 소비
+
+2026-10-12, A3 사용자 실행: CI 선택 시험 **10 passed / 0 failed**, tarball 타입·Node **5개 그룹 통과**. Playwright의 OPTIONS 자동 응답을 유발한 요청 가로채기를 제거한 뒤 Chromium 전용 재검증 **5개 그룹 통과**로 소비 검증 총 **10개 그룹·남은 실패 0개**를 확인했다. 기존 통과 검사는 반복하지 않았다. 원격 CI와 배포 origin의 실제 API/RPC 브라우저 접근 확인은 별도다.
+
 ## 공유 정책 입력
 
 Day-1 정책의 공유 원본은 [`policy-bundles/day1-safety/`](../../policy-bundles/day1-safety/package.json)이다. Cedar 본문과 manifest 10개는 그대로 이동했고 package의 원본 경로만 변경했다. [`policy-bundle.cjs`](../../scripts/sdk/policy-bundle.cjs)가 package 선언 순서대로 `{id, policy, manifest}`를 읽고 직렬화한다. SDK baseline과 기존 확장 asset copier가 같은 함수를 사용하며, DEC-02는 공유 Cedar/manifest를 직접 읽는다. 원본이 없으면 빈 set 또는 합성 manifest로 대체하지 않는다.
