@@ -53,7 +53,7 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json && node ../../scripts/sdk/build-decoders.mjs && node ../../scripts/sdk/build-wasm.mjs",
     "test:types": "tsc -p tsconfig.consumer.json",
     "test:runtime": "node ../../scripts/sdk/verify-decoder-generation.mjs && node --test tests/runtime.test.mjs tests/check.test.mjs",
-    "test:adapters": "node --test tests/adapters/policy-api.test.mjs tests/adapters/policy-api-core.test.mjs",
+    "test:adapters": "node --test tests/adapters/policy-api.test.mjs tests/adapters/policy-api-core.test.mjs tests/adapters/evm-rpc.test.mjs",
     "pack:check": "npm pack --dry-run"
   },
   "devDependencies": {

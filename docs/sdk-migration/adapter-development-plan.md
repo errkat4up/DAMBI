@@ -1,6 +1,6 @@
 # 어댑터 세부 개발 계획 — Policy API와 첫 EVM Fact
 
-작성일: 2026-10-12. 상태: **A1-1~A1-3 완료, A2-1 대기**. 기준: `feat/bundles`의 `ab6d013`과 B4 인계. 어댑터 개발은 `feat/adapters`에서 진행하며 번들 PR #11과 별도로 관리한다. main 병합·패키지 발행은 진행하지 않는다. C1~C6 완료선을 Core v0.0.1로 부르던 구분을 유지하며, 현재 저장소의 npm 패키지 버전은 0.1.0이다. 이번 계획으로 버전을 변경하지 않는다.
+작성일: 2026-10-12. 상태: **A1-1~A2-1 완료, A2-2 대기**. 기준: `feat/bundles`의 `ab6d013`과 B4 인계. 어댑터 개발은 `feat/adapters`에서 진행하며 번들 PR #11과 별도로 관리한다. main 병합·패키지 발행은 진행하지 않는다. C1~C6 완료선을 Core v0.0.1로 부르던 구분을 유지하며, 현재 저장소의 npm 패키지 버전은 0.1.0이다. 이번 계획으로 버전을 변경하지 않는다.
 
 상위 기준: [전체 계획 §6·§7](decoder-core-adapters-plan.md#6-3차-작업-featadapters) · [번들 B4 인계](bundle-development-plan.md#7-b4--어댑터-세부-계획에-넘길-완료-기준) · [제품·요청 범위](../../contracts/core-v1/snapshot-selection.proposal.json) · [첫 Fact 계약](../../fixtures/sdk/first-fact-contract.json). 이 문서는 해당 계약을 복제하지 않고 구현 순서·설계 선택·시험 연결을 구체화한다.
 
@@ -20,7 +20,7 @@
 
 ## 2. 파일 경계와 공개 진입점
 
-같은 npm 패키지의 선택적 ESM 모듈로 구현하며 기존 Core 포트와 root export는 유지한다. A1-1의 진입점·정책 HTTP·공통 오류/전송 코드와 시험은 구현했고 FactProvider·RPC·예제는 후속 단계다.
+같은 npm 패키지의 선택적 ESM 모듈로 구현하며 기존 Core 포트와 root export는 유지한다. A1 어댑터와 A2-1 내부 RPC codec을 구현했으며, FactProvider의 HTTP 조회·FactBatch 조립과 예제는 후속 단계다.
 
 | 위치 | 책임 |
 | --- | --- |
@@ -118,7 +118,7 @@ body 크기·UTF-8·JSON 오류도 발생한 요청 단계에 따라 공통 준�
 | A1-1 진입점·HTTP 기본 — 완료 | subpath export, 설정/전송 오류, bounded HTTP, wire→port mapping | 로컬 HTTP 원문·형식·크기·query 시험과 소비자 타입 검사, 새 시험 CI 연결 |
 | A1-2 상태·Core 연결 — 완료 | ETag, 동시 호출/취소, 실제 Core init/refresh | cache·timeout·서명/refresh 실패 경계를 실제 Core로 검증 |
 | A1-3 실제 API 확인 — 완료 | 배포 URL·신뢰 키·인증/CORS·발행본 연결 | 실제 서명 bundle init/refresh. 환경 미확정이면 구현 완료와 별도로 대기 표시 |
-| A2-1 method·ABI | params/체인/주소·U256·JSON-RPC codec | 순수 변환 및 거절 경계 시험. Node 전용 런타임 의존 없음 |
+| A2-1 method·ABI — 완료 | params/체인/주소·U256·JSON-RPC codec | 순수 변환 및 거절 경계 시험. Node 전용 런타임 의존 없음 |
 | A2-2 RPC·FactBatch | 체인/블록 조회, 제한 동시성, 부분 실패·취소 | 로컬 RPC의 실제 HTTP 경로에서 ID·값·provenance·실패표 검증 |
 | A2-3 Core·실제 RPC | optional/required Core 연결, 지정 endpoint와 ERC-20 공동 확인 | Core 계약 시험 및 실제 조회의 체인/높이/잔고 대조. live 결과를 fixture 성공과 구분 |
 | A3 전체 연결·소비 | 두 포트 조합, tarball Node/브라우저 예제, 격리 CI | 아래 소비자 완료 조건과 관련 CI 통과 |
@@ -149,6 +149,6 @@ A1-3의 외부 환경이 준비되지 않아도 A2-1/A2-2 구현은 진행할 �
 
 ## 8. 진행·기록
 
-현재 상태는 **A1-1~A1-3 완료 / A2~A3 미착수 / staging 연결 확인·RPC 환경 미확정**이다. 개발 브랜치는 `feat/adapters`이며 번들 PR 병합은 별도 승인 대상으로 남는다.
+현재 상태는 **A1-1~A2-1 완료 / A2-2~A3 미착수 / staging 연결 확인·RPC 환경 미확정**이다. 개발 브랜치는 `feat/adapters`이며 번들 PR 병합은 별도 승인 대상으로 남는다.
 
 소단계마다 기능과 필요한 검증을 함께 마친다. 결과는 기존 `fixtures/sdk/README.md` 한 곳에 변경 범위·통과/실패·남은 문제만 짧게 기록하고, 이 문서에는 단계 상태만 갱신한다. 커밋은 독립적인 구현 단위에 맞춰 나누며 문서만을 위한 중복 시험·해시 기록은 만들지 않는다.

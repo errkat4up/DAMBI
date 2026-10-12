@@ -115,6 +115,10 @@ Balancer의 `weighted` 상수·`wethIsEth` 누락, Uniswap 가격 한계 미반�
 
 2026-10-12, 만료 문제 조치 후 `core:verify:policy-api` 재실행 **passed**: policy sequence 8, Core init/refresh 성공(HTTP 200→304), 두 단계 모두 unlimited approve `warn`·Fact 0개. 발행 10월 12일 14:53:34 KST, 유효기한 10월 15일 14:53:34 KST. 재발행 Job과 나이 확인 Job의 최근 실행 성공 및 스케줄 활성화(매일 03:00 / 매시간 17분, Asia/Seoul)를 조회했다. 일일 Scheduler의 첫 실행 이력은 아직 없고, Node에서 ETag CORS 노출은 관찰되지 않아 브라우저 소비는 A3에 남는다.
 
+## 어댑터 A2-1 — Fact 입력·EVM codec
+
+2026-10-12, A2-1 변경 범위(입력 검증·ERC-20 ABI·BigInt/U256·JSON-RPC codec)에 대해 사용자 실행 **8 passed / 0 failed / 0 skipped**. 알려진 실패는 없으며 HTTP 조회·FactBatch 조립은 A2-2에 남는다.
+
 ## 공유 정책 입력
 
 Day-1 정책의 공유 원본은 [`policy-bundles/day1-safety/`](../../policy-bundles/day1-safety/package.json)이다. Cedar 본문과 manifest 10개는 그대로 이동했고 package의 원본 경로만 변경했다. [`policy-bundle.cjs`](../../scripts/sdk/policy-bundle.cjs)가 package 선언 순서대로 `{id, policy, manifest}`를 읽고 직렬화한다. SDK baseline과 기존 확장 asset copier가 같은 함수를 사용하며, DEC-02는 공유 Cedar/manifest를 직접 읽는다. 원본이 없으면 빈 set 또는 합성 manifest로 대체하지 않는다.
