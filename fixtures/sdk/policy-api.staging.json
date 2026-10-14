@@ -1,0 +1,15 @@
+{
+  "baseUrl": "https://registry-api-v3-428885534408.asia-northeast1.run.app",
+  "maxResponseBytes": 2000000,
+  "trust": {
+    "env": "staging",
+    "profile": "default",
+    "keys": [
+      {
+        "keyId": "policy-local-416b1764fb8d",
+        "role": "policy",
+        "publicKeySpkiBase64": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEbuwI14qQ6EPvaUcFCLBqURMAeBBEkjip+lh313nYz0hkdJIEgwN9bD0sDvDFd0BH/abEGtN0WIsR920rVgiFyQ=="
+      }
+    ]
+  }
+}

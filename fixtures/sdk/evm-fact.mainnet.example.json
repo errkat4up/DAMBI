@@ -1,0 +1,8 @@
+{
+  "chainId": "eip155:1",
+  "rpcUrl": "https://ethereum-rpc.publicnode.com",
+  "owner": "0x000000000000000000000000000000000000dead",
+  "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+  "maxResponseBytes": 16384,
+  "timeoutMs": 15000
+}

@@ -98,8 +98,8 @@ const core = await createCore({
   },
 });
 
-// Policy bundles are re-signed regularly and are rejected once older than
-// maxBundleAgeSec (72 hours). Refresh well inside that window.
+// The publisher must issue fresh bundles within maxBundleAgeSec (72 hours).
+// Refreshing alone does not extend a previously signed bundle's lifetime.
 setInterval(() => core.refreshPolicies().catch(console.error), 60 * 60 * 1000);
 
 const verdict = await core.check({
@@ -123,6 +123,165 @@ const verdict = await core.check({
 - The limits above are a starting point for hosts, not values Core enforces as
   defaults.
 - `POST /v1/audit` (verdict reporting) requires an API key and is optional.
+
+## Optional policy HTTP adapter (development)
+
+The checkout provides `createPolicyApiSource` through the separate
+`@dambi/core/adapters` entry point. This addition has not been published yet.
+
+```ts
+import { createPolicyApiSource } from "@dambi/core/adapters";
+
+const policy = createPolicyApiSource({
+  baseUrl: "https://policies.example", // API origin from host configuration
+  maxResponseBytes: 2_000_000, // Example HTTP wrapper limit, in bytes
+});
+// Pass policy as CoreConfig.ports.policy; retain local trust and decoder settings.
+```
+
+The source requests `/v1/bundle?profile=default`, maps `key_id` to `keyId`, and
+preserves the signed payload string. Core still verifies the signature and
+bundle validity. The wrapper limit is separate from Core's `maxPolicyBytes`.
+Use an HTTPS origin; loopback HTTP is allowed for local development. Optional
+`headers` and `fetch` are captured at construction. Redirects are rejected.
+
+The source keeps an ETag and envelope together and reuses that exact envelope
+on a matching conditional request's 304 response. Each call captures its own
+cache pair; late responses cannot overwrite a newer request's cache state.
+ETags do not authenticate policies or extend their lifetime: Core rechecks the
+returned bundle. Missing, inaccessible or malformed ETags disable conditional
+reuse. The source bypasses the browser HTTP cache and does not retry requests.
+Direct callers can pass `policy.fetch({ signal })` for cancellation/deadlines
+and inspect `AdapterError`; Core normalizes a rejected policy source to
+`POLICY_FETCH_FAILED`.
+
+### Manual staging connection check
+
+From the repository root, use the existing built workspace package:
+
+```sh
+npm run core:verify:policy-api -- --config fixtures/sdk/policy-api.staging.json
+```
+
+The explicit staging config contains this README's public API address and pinned
+policy key. The command initializes Core, evaluates a no-Fact USDC unlimited
+approve against `unlimited-approval-deny`, refreshes, and evaluates again. It
+makes two GET requests and performs no build, signing, publishing or chain RPC.
+It is opt-in and is not part of routine CI or the published package.
+
+The JSON result reports `status: "passed"` only after both phases succeed, with
+HTTP status and verified policy sequence/issuance/expiry (Unix seconds). Refresh
+may return 200 or 304. The system clock and Core's default 72-hour maximum age
+remain in effect. `POLICY_EXPIRED` requires checking publication freshness with
+the API owner; it is not bypassed by this command. Its `policyTimeDiagnostic`
+shows the candidate's dates and local clock for diagnosis, not a passed check.
+CORS headers are observed from
+Node; the standalone consumer gate below checks browser behavior with local
+fixtures. Check deployed CORS for your browser origin. The deployment's republishing
+schedule needs separate operational confirmation.
+
+## Optional ERC-20 Fact adapter (development)
+
+`createEvmFactProvider` implements `FactProvider` for `portfolio.balance` calls
+whose resolved params contain an ERC-20 TokenRef. A2 includes Core/HTTP integration
+tests and the opt-in RPC check below. Browser consumption uses the standalone consumer gate below.
+
+```ts
+import { createEvmFactProvider } from "@dambi/core/adapters";
+
+const fact = createEvmFactProvider({
+  chains: { "eip155:1": { rpcUrl: "https://rpc.example/v1/host-configured" } },
+  maxResponseBytes: 16_384, // Example response limit, not an operational default
+});
+// Pass fact as CoreConfig.ports.fact. Direct callers supply planId and signal:
+// const batch = await fact.fetch(plan.calls, { planId: plan.planId, signal });
+```
+
+Each fetch checks `eth_chainId`, obtains a block height per chain, and uses that
+explicit height for `balanceOf` calls, with at most four HTTP requests in flight.
+Facts contain `{ balance: "0x64" }`, a decimal `blockNumber`, a fixed chain/method
+source label and the request-start `observedAt`. Core applies the projection.
+The provider has no Fact cache, retry or failover. Unsupported calls, explicit
+block selectors and individual RPC errors are omitted. A successful sibling
+survives; Core decides required/optional behavior. If all supported calls are
+unavailable due to chain preparation or network/HTTP failures, fetch rejects.
+Bad plan/call IDs reject with `AdapterError` code `INVALID_REQUEST`; cancellation
+rejects the whole fetch with `ABORTED` and stops queued work.
+
+Use HTTPS, or loopback HTTP for local development. Endpoint paths and queries are
+preserved. Per-chain `headers` and optional `fetch` are copied/captured at
+construction. Redirects and cookie authentication are disabled. If supplying
+`clock: { now() }`, use the same Unix-millisecond clock as Core. Direct consumers
+provide their deadline with an AbortSignal; Core already supplies its own.
+
+### Manual EVM RPC connection check
+
+Use the existing built Core package (including its packaged WASM/decoders):
+
+```sh
+npm run core:verify:evm-fact -- --config fixtures/sdk/evm-fact.mainnet.example.json
+```
+
+This explicit example uses the [PublicNode Ethereum endpoint](https://ethereum.publicnode.com/),
+[Circle's mainnet USDC contract](https://developers.circle.com/stablecoins/usdc-contract-addresses)
+and the fixed `0x000000000000000000000000000000000000dead` owner. It requires no
+API key or personal wallet address. The RPC provider receives the queried address
+and network connection as with any direct RPC read.
+
+The command signs a fresh **local test policy bundle** with the existing test-only
+fixture key, then evaluates an unsigned transfer request for 100 raw token units.
+It does not publish a policy, sign a wallet transaction or submit a transaction.
+The original catalog policy remains optional and Day-1 is unchanged.
+
+The adapter makes three reads: chain ID, block height and `balanceOf`. Two further
+direct reads check the chain and balance at that same block using separate parsing.
+Success requires one real Fact, matching provenance and the expected Core decision:
+`warn` when the observed balance is exactly 100 raw units, otherwise `allow`.
+An optional-policy `allow` with no Fact is a failed probe. The configured 15-second
+deadline covers Core initialization and RPC work; responses are bounded to 16 KiB.
+
+`status: "passed"` with `connection: "remote-rpc"` records a completed external
+connection check. Loopback regression tests report `connection: "loopback-fixture"`
+and do not establish live success. Same-block agreement checks consistency within
+one RPC service, not data authenticity or finality. Browser consumption uses the standalone consumer gate below.
+
+For a private endpoint, put its URL and optional `headers` in
+`fixtures/sdk/evm-fact.local.json` (Git-ignored), and pass that path explicitly.
+The report omits endpoint URLs, headers, raw responses, owner/token addresses and
+key material. The live command is never run automatically by CI; CI uses only
+loopback fixtures. Missing configuration or package artifacts fail with a nonzero exit.
+
+### Standalone Node and browser consumers
+
+The [adapter example](../../examples/sdk-adapters/README.md) combines the policy
+HTTP and EVM Fact adapters using the public package exports. The consumer gate
+installs an actual tarball outside the repository and exercises Node, standalone
+TypeScript declarations and Chromium with local cross-origin HTTP/RPC services.
+It does not contact the staging API or PublicNode and does not rebuild Core.
+
+Install the pinned test tooling and its Chromium binary once:
+
+```sh
+npm ci --prefix scripts/sdk/consumer-tools --ignore-scripts --no-audit --no-fund
+node scripts/sdk/consumer-tools/node_modules/playwright/cli.js install chromium
+```
+
+Then use the existing built package, or pass an explicit release candidate:
+
+```sh
+npm run core:test:consumers
+# npm run core:test:consumers -- --tarball /absolute/path/dambi-core-0.1.0.tgz
+```
+
+After Node/types have passed, `npm run core:test:consumers -- --browser-only`
+reruns only the five Chromium groups. The default still runs all ten groups.
+The browser fixture uses CSP to restrict connections to local origins without
+intercepting requests, so actual CORS preflights reach the HTTP servers.
+
+CI's `core-consumers` job reuses the tarball from the isolated `core` build.
+The release workflow checks and publishes the same tarball. These checks cover
+local browser CORS behavior; a deployment's API/RPC CORS and access policy still
+need verification for its chosen origin.
 
 ## Public contract and migration
 
@@ -281,6 +440,15 @@ against the Native session runner. They fail if artifacts are absent and never
 build them implicitly. No legacy extension WASM package is loaded.
 `npm run core:pack` separately inspects package contents without publishing.
 
+For changes confined to the adapter transport, rebuild TypeScript and run the
+adapter suite below. Its Core integration cases reuse the existing packaged
+WASM; run `core:build` first only if that artifact is absent or Rust has changed.
+
+```sh
+node node_modules/typescript/bin/tsc -p packages/core/tsconfig.build.json
+npm run core:test:adapters
+```
+
 `core:test:runtime` first prepares the selected decoder fixtures with the shared
 SDK generator. It requires the Native runner (including its `--canonicalize`
 mode) and built Core, and does not build either automatically.
@@ -293,7 +461,8 @@ baseline, rebuilds the selected UR/Aave additions from five pinned originals,
 checks exact equality with the 804-bundle product and packages that result.
 It also generates three separate pool regression bundles for Native/WASM raw
 policy checks. This is selected-input reconstruction, not regeneration of the
-entire Registry corpus. Final tarball/browser consumer checks remain a release gate.
+entire Registry corpus. It emits an actual tarball; the separate
+`core:test:consumers` gate checks its Node and browser consumers.
 
 User verification (2026-09-28, local C6 before the review corrections):
 `sdk:verify:isolated` reached its final success marker, including Native session,

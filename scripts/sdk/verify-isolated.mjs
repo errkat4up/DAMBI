@@ -11,7 +11,17 @@ const root = await realpath(fileURLToPath(new URL("../../", import.meta.url)));
 const manifest = JSON.parse(await readFile(new URL("./sdk-source-files.json", import.meta.url), "utf8"));
 const forbidden = ["browser-extension", "crates/policy-server", "crates/policy-engine-wasm", "registryV2"];
 const generated = new Set([".git", "target", "node_modules", "dist", "pkg", ".cache"]);
-const runtimeTests = ["packages/core/tests/runtime.test.mjs", "packages/core/tests/check.test.mjs"];
+const runtimeTests = [
+  "packages/core/tests/runtime.test.mjs",
+  "packages/core/tests/check.test.mjs",
+  "packages/core/tests/adapters/policy-api.test.mjs",
+  "packages/core/tests/adapters/policy-api-core.test.mjs",
+  "packages/core/tests/adapters/evm-rpc.test.mjs",
+  "packages/core/tests/adapters/fact-provider.test.mjs",
+  "packages/core/tests/adapters/fact-provider-lifecycle.test.mjs",
+  "packages/core/tests/adapters/fact-provider-core.test.mjs",
+  "packages/core/tests/adapters/evm-fact-probe.test.mjs",
+];
 const keep = process.argv.includes("--keep");
 const args = process.argv.slice(2);
 const phase = args.includes("--ci-prepare") ? "prepare" : args.includes("--ci-verify") ? "verify" : "all";
@@ -178,7 +188,10 @@ async function verify() {
       throw new Error(`${file} must run nonempty tests without skips or failures`);
     }
   }
-  await run(process.execPath, [...yarn, "core:pack"]);
+  // Package the already verified isolated build once. The separate consumer
+  // job installs this exact tarball; it does not rebuild WASM in another job.
+  await mkdir(join(isolated, "artifacts"), { recursive: true });
+  await run("npm", ["pack", "./packages/core", "--ignore-scripts", "--pack-destination", "artifacts"]);
   await checkBoundary();
 }
 
@@ -192,7 +205,7 @@ try {
     console.log("[isolated] Sources and pinned Cargo workspace prepared for dependency cache restore.");
   } else {
     await verify();
-    console.log("\n[isolated] SDK source verification passed (Native + WASM + selected decoder generation + raw pool parity + types/runtime/check).");
+    console.log("\n[isolated] SDK source verification passed (Native + WASM + selected decoder generation + raw pool parity + types/runtime/check/adapters).");
   }
   success = true;
 } finally {

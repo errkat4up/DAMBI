@@ -103,6 +103,34 @@ Balancer의 `weighted` 상수·`wethIsEth` 누락, Uniswap 가격 한계 미반�
 
 2026-10-12, B3 `cb3d52b` 기준: [제품·요청 범위](../../contracts/core-v1/snapshot-selection.proposal.json)와 [첫 Fact 계약](first-fact-contract.json)을 현재 코드에 맞춰 갱신하고 A1/A2 운영 설정의 담당·확인 시점을 연결했다. JSON 구문·참조 경로·기존 snapshot metadata 정합성을 확인했다. 런타임 변경이 없어 빌드·기능 시험은 반복하지 않았다. 남은 작업은 어댑터 세부 계획·HTTP/RPC 구현 및 실제 통합 검증이다.
 
+## 어댑터 A1-1 — 정책 HTTP 기본
+
+2026-10-12, `feat/adapters`의 A1-1 변경: `@dambi/core/adapters` 진입점, 정책 wrapper 원문 보존, URL·형식·byte 상한·오류·취소 처리와 격리/릴리스 시험 연결을 구현했다. 로컬 HTTP 시험 **8 passed / 0 failed**, TypeScript 빌드·소비자 타입 검사·릴리스 workflow actionlint·diff 검사를 통과했다. package dry-run으로 어댑터 코드/타입 포함과 시험 파일 제외를 확인했다. 전체 격리 빌드와 원격 CI는 이번 변경에서 실행하지 않았다. 다음은 A1-2의 ETag·실제 Core init/refresh 연결이며 실제 배포 API 확인은 A1-3에 남는다.
+
+## 어댑터 A1-2 — ETag·Core 연결
+
+2026-10-12, A1-2 변경 범위(ETag 재사용·동시 요청/취소·Core init/refresh 연결)에 대해 사용자 실행 `core:test:adapters` **16 passed / 0 failed / 0 skipped**. 알려진 실패는 없으며 실제 배포 API 확인(A1-3)은 남아 있다.
+
+## 어댑터 A1-3 — 실제 API 연결
+
+2026-10-12, 만료 문제 조치 후 `core:verify:policy-api` 재실행 **passed**: policy sequence 8, Core init/refresh 성공(HTTP 200→304), 두 단계 모두 unlimited approve `warn`·Fact 0개. 발행 10월 12일 14:53:34 KST, 유효기한 10월 15일 14:53:34 KST. 재발행 Job과 나이 확인 Job의 최근 실행 성공 및 스케줄 활성화(매일 03:00 / 매시간 17분, Asia/Seoul)를 조회했다. 일일 Scheduler의 첫 실행 이력은 아직 없고, Node에서 ETag CORS 노출은 관찰되지 않아 브라우저 소비는 A3에 남는다.
+
+## 어댑터 A2-1 — Fact 입력·EVM codec
+
+2026-10-12, A2-1 변경 범위(입력 검증·ERC-20 ABI·BigInt/U256·JSON-RPC codec)에 대해 사용자 실행 **8 passed / 0 failed / 0 skipped**. 알려진 실패는 없으며 HTTP 조회·FactBatch 조립은 A2-2에 남는다.
+
+## 어댑터 A2-2 — RPC 조회·FactBatch
+
+2026-10-12, A2-2 변경 범위(체인·블록 조회, FactBatch·provenance, 제한 동시성, 부분 실패·취소)에 대해 사용자 실행 **11 passed / 0 failed / 0 skipped**. 알려진 실패는 없으며 실제 Core·RPC 통합은 A2-3에 남는다.
+
+## 어댑터 A2-3 — Core·실제 RPC 연결
+
+2026-10-12, A2-3 변경 범위(Core/HTTP 통합·optional/required·cache/취소·수동 RPC 검증)에 대해 사용자 실행 **7 passed / 0 failed / 0 skipped**. PublicNode mainnet USDC 실연결도 사용자 확인 기준 **passed / complete**, 같은 블록 잔고 대조와 Core 평가(`allow`)를 통과했다. 알려진 실패는 없으며 tarball Node/브라우저 소비는 A3에 남는다.
+
+## 어댑터 A3 — 패키지 소비
+
+2026-10-12, A3 사용자 실행: CI 선택 시험 **10 passed / 0 failed**, tarball 타입·Node **5개 그룹 통과**. Playwright의 OPTIONS 자동 응답을 유발한 요청 가로채기를 제거한 뒤 Chromium 전용 재검증 **5개 그룹 통과**로 소비 검증 총 **10개 그룹·남은 실패 0개**를 확인했다. `497b364`의 [원격 전체 CI](https://github.com/errkat4up/DAMBI/actions/runs/38225781316)도 `core`·`core-consumers`를 포함한 **9개 job 성공 / 0개 실패**를 확인했다. 배포 origin의 실제 API/RPC 브라우저 접근 확인은 별도다.
+
 ## 공유 정책 입력
 
 Day-1 정책의 공유 원본은 [`policy-bundles/day1-safety/`](../../policy-bundles/day1-safety/package.json)이다. Cedar 본문과 manifest 10개는 그대로 이동했고 package의 원본 경로만 변경했다. [`policy-bundle.cjs`](../../scripts/sdk/policy-bundle.cjs)가 package 선언 순서대로 `{id, policy, manifest}`를 읽고 직렬화한다. SDK baseline과 기존 확장 asset copier가 같은 함수를 사용하며, DEC-02는 공유 Cedar/manifest를 직접 읽는다. 원본이 없으면 빈 set 또는 합성 manifest로 대체하지 않는다.
@@ -123,7 +151,7 @@ Day-1 정책의 공유 원본은 [`policy-bundles/day1-safety/`](../../policy-bu
 
 Fact 0개는 `policy_rpc` 결과가 필요 없다는 뜻이다. 현재 Swap Action의 `live_inputs`와 Permit2 `nonce` 같은 필수 DTO 구조까지 생략할 수 있다는 뜻은 아니다. 위 D3 시험의 해당 값은 합성 입력이며 실제 시장 데이터·nonce 조회의 증거가 아니다. D3 자체는 Action부터의 검사이며, 이후 Core 실행과 UR raw swap 사례 등 현재 검증 범위는 위 B1~B3 기록 및 [B4 인계](../../contracts/core-v1/snapshot-selection.proposal.json)를 따른다.
 
-[`first-fact-contract.json`](first-fact-contract.json)은 후속 A2의 `portfolio.balance` ERC-20 경로를 선정한 인계 자료다. B4에서 현재 공개 `PlannedCall`·`FactBatch`·provenance 계약에 맞췄다. Core의 원본 Fact 검증·projection·cache는 C5/C6에서 구현됐으며 직접 RPC adapter와 실제 조회 검증은 A2에 남는다. Day-1에는 활성화하지 않고 기존 catalog의 optional 선언도 유지한다.
+[`first-fact-contract.json`](first-fact-contract.json)은 후속 A2의 `portfolio.balance` ERC-20 경로를 선정한 인계 자료다. B4에서 현재 공개 `PlannedCall`·`FactBatch`·provenance 계약에 맞췄다. Core의 원본 Fact 검증·projection·cache는 C5/C6에서, 직접 RPC adapter와 실제 조회 검증은 A2에서 완료했다. Day-1에는 활성화하지 않고 기존 catalog의 optional 선언도 유지한다.
 
 ## D3 사용자 실행
 

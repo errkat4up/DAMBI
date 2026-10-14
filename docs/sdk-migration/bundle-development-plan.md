@@ -146,7 +146,7 @@ snapshot은 Core의 `maxDecoderBytes`, route 설치 개수 65,536, routing 문�
 
 ## 7. B4 — 어댑터 세부 계획에 넘길 완료 기준
 
-아래 자료를 현재 코드와 대조해 연결했다. 다음 작업은 `adapter-development-plan.md` 작성이며 이후 A1부터 구현한다(문서 경로는 예정). 제품·요청 범위는 기존 선택안 파일을 갱신한 [B4 인계](../../contracts/core-v1/snapshot-selection.proposal.json), 첫 Fact 계약은 [기존 fixture](../../fixtures/sdk/first-fact-contract.json)를 기준으로 하며 다른 계획서에 복제하지 않는다.
+아래 자료를 현재 코드와 대조해 연결했다. 후속 구현은 [어댑터 세부 계획](adapter-development-plan.md)을 따른다. 제품·요청 범위는 기존 선택안 파일을 갱신한 [B4 인계](../../contracts/core-v1/snapshot-selection.proposal.json), 첫 Fact 계약은 [기존 fixture](../../fixtures/sdk/first-fact-contract.json)를 기준으로 하며 다른 계획서에 복제하지 않는다.
 
 | 인계 항목 | 확정한 기준·남은 작업 | 어댑터 단계의 사용처 |
 | --- | --- | --- |
@@ -183,4 +183,4 @@ snapshot은 Core의 `maxDecoderBytes`, route 설치 개수 65,536, routing 문�
 | B3 raw 경로·정책·격리 검증 | 선택 범위 검증 완료. 생성 범위는 기존 799개 기준선 + UR/Aave 원본 5개 재구성, 회귀 풀 3개 원본 생성. 전체 804개 원본 재생성은 아님. [결과·제한](../../fixtures/sdk/README.md#번들-b3--원문-요청과-격리-생성) |
 | B4 어댑터 인계 확정 | 완료. 기존 선택안·첫 Fact 자료를 현재 포트에 정합화하고 A1/A2 미확정 환경의 담당·완료 시점 연결 |
 
-다음은 **어댑터 세부 계획서 작성 후 A1 구현**이다. 인계의 제외 범위는 해당 경로의 제품 편입 전에 해결하며 전체 Registry 확대나 실제 외부 연동 완료를 번들 완료로 표기하지 않는다.
+인계 이후의 진행 상태는 **[어댑터 단계별 실행 순서](adapter-development-plan.md#5-단계별-실행-순서)**를 따른다. 인계의 제외 범위는 해당 경로의 제품 편입 전에 해결하며 전체 Registry 확대나 실제 외부 연동 완료를 번들 완료로 표기하지 않는다.

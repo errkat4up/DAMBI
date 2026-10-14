@@ -56,6 +56,9 @@ target/web-server.pid
 !.env.example
 !.env.*.example
 
+# Optional private RPC URL/headers for the manual SDK Fact probe.
+/fixtures/sdk/evm-fact.local.json
+
 # wasm-pack artifacts (produced by scripts/wasm-build*.sh and copied into consumers).
 crates/*-wasm/pkg/
 crates/*-wasm/pkg-tsify-test/

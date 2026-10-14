@@ -9,6 +9,7 @@
     "core:build": "yarn workspace @dambi/core build",
     "core:test:types": "yarn workspace @dambi/core test:types",
     "core:test:runtime": "yarn workspace @dambi/core test:runtime",
+    "core:test:adapters": "yarn workspace @dambi/core test:adapters",
     "bundle:verify:generation": "node scripts/sdk/verify-decoder-generation.mjs",
     "core:pack": "yarn workspace @dambi/core pack:check"
   }

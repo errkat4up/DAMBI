@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dambi adapter consumer</title>
+    <style>
+      :root { font-family: system-ui, sans-serif; color-scheme: light dark; }
+      body { max-width: 960px; margin: 2rem auto; padding: 0 1rem; }
+      label { display: block; font-weight: 600; margin: 1rem 0 .4rem; }
+      textarea { box-sizing: border-box; width: 100%; min-height: 15rem; font: .85rem ui-monospace, monospace; padding: .7rem; }
+      button { margin: 1rem .5rem 0 0; padding: .6rem 1rem; }
+      pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1rem; border: 1px solid #888; }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "@dambi/core": "./node_modules/@dambi/core/dist/index.js",
+          "@dambi/core/decoders": "./node_modules/@dambi/core/dist/decoders.js",
+          "@dambi/core/adapters": "./node_modules/@dambi/core/dist/adapters/index.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Dambi adapter consumer</h1>
+    <p>Check an unsigned request with a signed policy and read-only RPC Facts. No transaction is signed or submitted.</p>
+    <p>Use browser-public endpoints or a host proxy. Do not paste API tokens, private keys or a Node credential file. Endpoint requests start only when you select Check.</p>
+    <label for="settings">Consumer settings (public trust keys only)</label>
+    <textarea id="settings" spellcheck="false" autocomplete="off"></textarea>
+    <label for="request">Unsigned request</label>
+    <textarea id="request" spellcheck="false" autocomplete="off"></textarea>
+    <button id="check" type="button">Check</button>
+    <button id="cancel" type="button" disabled>Cancel</button>
+    <pre id="result" role="status" aria-live="polite">Enter your settings and request.</pre>
+    <script type="module" src="./browser.mjs"></script>
+  </body>
+</html>
