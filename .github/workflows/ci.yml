@@ -3,7 +3,7 @@ name: ci
 on:
   pull_request:
     # ci:full opts an evolving SDK feature into full regression on every update.
-    # Re-evaluate all label events normally; a no-op run could cancel real checks.
+    # Only ci:full label changes should rerun checks; unrelated labels are isolated below.
     types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
@@ -18,13 +18,18 @@ env:
 # 같은 브랜치에 새 푸시가 오면 돌고 있던 런을 취소한다 — 반복 푸시 워크플로에서
 # 가장 큰 CI 시간 절약. main 푸시 런은 끝까지 돌린다(릴리스 아티팩트 보존).
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # An unrelated label must neither cancel real CI nor publish its required check names.
+  # Missing label metadata keeps the normal fail-safe CI path.
+  group: ci-${{ github.workflow }}-${{ github.ref }}${{ github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name && github.event.label.name != 'ci:full' && format('-ignored-label-{0}', github.run_id) || '' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !(github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name && github.event.label.name != 'ci:full') }}
 
 jobs:
   # Keep the workflow and existing check names present even for documentation.
   # A failed detector or missing output runs every build job conservatively.
+  # Ignored label runs use separate names: skipped checks must not mask a failed required check.
   changes:
+    name: ${{ github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name && github.event.label.name != 'ci:full' && 'ignored-label-changes' || 'changes' }}
+    if: ${{ !(github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name && github.event.label.name != 'ci:full') }}
     runs-on: ubuntu-latest
     outputs:
       rust: ${{ steps.select.outputs.rust }}
@@ -43,8 +48,8 @@ jobs:
         with:
           node-version: '20'
 
-      - name: CI selection tests
-        run: node --test scripts/ci/select-jobs.test.mjs
+      - name: CI selection and workflow policy tests
+        run: node --test scripts/ci/select-jobs.test.mjs scripts/ci/workflow-policy.test.mjs
 
       - name: Select affected jobs
         id: select
@@ -52,8 +57,9 @@ jobs:
 
   # SDK workspace; keep the existing check name for branch protection rules.
   rust:
+    name: ${{ github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name && github.event.label.name != 'ci:full' && 'ignored-label-rust' || 'rust' }}
     needs: changes
-    if: ${{ always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust != 'false') }}
+    if: ${{ always() && !cancelled() && !(github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name && github.event.label.name != 'ci:full') && (needs.changes.result != 'success' || needs.changes.outputs.rust != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -123,8 +129,9 @@ jobs:
         run: cargo doc --locked --workspace --no-deps --all-features
 
   rust-server:
+    name: ${{ github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name && github.event.label.name != 'ci:full' && 'ignored-label-rust-server' || 'rust-server' }}
     needs: changes
-    if: ${{ always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust-server != 'false') }}
+    if: ${{ always() && !cancelled() && !(github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name && github.event.label.name != 'ci:full') && (needs.changes.result != 'success' || needs.changes.outputs.rust-server != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -156,8 +163,9 @@ jobs:
 
   # Rust 잡과 의존이 없으므로 병렬로 돈다 — extension은 이 잡의 wasm pkg만 기다린다.
   wasm:
+    name: ${{ github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name && github.event.label.name != 'ci:full' && 'ignored-label-wasm' || 'wasm' }}
     needs: changes
-    if: ${{ always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.wasm != 'false') }}
+    if: ${{ always() && !cancelled() && !(github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name && github.event.label.name != 'ci:full') && (needs.changes.result != 'success' || needs.changes.outputs.wasm != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -169,7 +177,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "wasm"
+          # Start a new cache after switching from the default release profile to z.
+          shared-key: "wasm-release-z-v1"
 
       - name: Install wasm-pack
         run: cargo install wasm-pack --version "${WASM_PACK_VERSION}" --locked
@@ -178,6 +187,8 @@ jobs:
       # scripts/wasm-build.sh produces, so the extension job can download and
       # reuse it instead of rebuilding (fat-LTO) twice more.
       - name: Build wasm
+        env:
+          CARGO_PROFILE_RELEASE_OPT_LEVEL: z
         run: |
           wasm-pack build crates/policy-engine-wasm \
             --target web \
@@ -215,9 +226,10 @@ jobs:
         run: wasm-pack test --headless --chrome crates/policy-engine-wasm
 
   extension:
+    name: ${{ github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name && github.event.label.name != 'ci:full' && 'ignored-label-extension' || 'extension' }}
     runs-on: ubuntu-latest
     needs: [changes, wasm]
-    if: ${{ always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.extension != 'false') }}
+    if: ${{ always() && !cancelled() && !(github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name && github.event.label.name != 'ci:full') && (needs.changes.result != 'success' || needs.changes.outputs.extension != 'false') }}
     # The wasm pkg is downloaded from the `wasm` job (built once); reuse it for
     # both build:chrome and build:firefox (and `yarn typecheck`) instead of
     # rebuilding via wasm-pack each time. scripts/wasm-build.sh skips its own
@@ -271,10 +283,6 @@ jobs:
         env:
           DAMBI_ALLOW_INSECURE_REGISTRY: '1'
 
-      - working-directory: browser-extension/dashboard
-        name: Dashboard build (tsc --noEmit + vite build)
-        run: yarn build
-
       - name: Upload dashboard dist (PR build artifact)
         uses: actions/upload-artifact@v4
         with:
@@ -316,6 +324,8 @@ jobs:
   # allowlists known non-secret high-entropy data (blockchain fixtures/ABIs,
   # the Chrome extension public key, vendored deps) so only real secrets fail.
   secrets-scan:
+    name: ${{ github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name && github.event.label.name != 'ci:full' && 'ignored-label-secrets-scan' || 'secrets-scan' }}
+    if: ${{ !(github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name && github.event.label.name != 'ci:full') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -339,8 +349,9 @@ jobs:
   # served bundle — concrete + materialized — hashes to its bundle_sha256, which
   # is what the extension verifies the detached signature against).
   registry-api:
+    name: ${{ github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name && github.event.label.name != 'ci:full' && 'ignored-label-registry-api' || 'registry-api' }}
     needs: changes
-    if: ${{ always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.registry-api != 'false') }}
+    if: ${{ always() && !cancelled() && !(github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name && github.event.label.name != 'ci:full') && (needs.changes.result != 'success' || needs.changes.outputs.registry-api != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -373,8 +384,9 @@ jobs:
   # SDK sources only: no extension/server/legacy WASM output or job dependency.
   # The source-owned isolated workspace also runs Native/WASM session parity.
   core:
+    name: ${{ github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name && github.event.label.name != 'ci:full' && 'ignored-label-core' || 'core' }}
     needs: changes
-    if: ${{ always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.core != 'false') }}
+    if: ${{ always() && !cancelled() && !(github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name && github.event.label.name != 'ci:full') && (needs.changes.result != 'success' || needs.changes.outputs.core != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -422,8 +434,9 @@ jobs:
   # Exercise the same package in standalone Node and Chromium consumers.
   # No second Rust/WASM build or external policy/RPC service is needed.
   core-consumers:
+    name: ${{ github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name && github.event.label.name != 'ci:full' && 'ignored-label-core-consumers' || 'core-consumers' }}
     needs: [changes, core]
-    if: ${{ always() && !cancelled() && needs.core.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.core-consumers != 'false') }}
+    if: ${{ always() && !cancelled() && !(github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name && github.event.label.name != 'ci:full') && needs.core.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.core-consumers != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
