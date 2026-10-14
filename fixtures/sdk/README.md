@@ -129,7 +129,7 @@ Balancer의 `weighted` 상수·`wethIsEth` 누락, Uniswap 가격 한계 미반�
 
 ## 어댑터 A3 — 패키지 소비
 
-2026-10-12, A3 사용자 실행: CI 선택 시험 **10 passed / 0 failed**, tarball 타입·Node **5개 그룹 통과**. Playwright의 OPTIONS 자동 응답을 유발한 요청 가로채기를 제거한 뒤 Chromium 전용 재검증 **5개 그룹 통과**로 소비 검증 총 **10개 그룹·남은 실패 0개**를 확인했다. 기존 통과 검사는 반복하지 않았다. 원격 CI와 배포 origin의 실제 API/RPC 브라우저 접근 확인은 별도다.
+2026-10-12, A3 사용자 실행: CI 선택 시험 **10 passed / 0 failed**, tarball 타입·Node **5개 그룹 통과**. Playwright의 OPTIONS 자동 응답을 유발한 요청 가로채기를 제거한 뒤 Chromium 전용 재검증 **5개 그룹 통과**로 소비 검증 총 **10개 그룹·남은 실패 0개**를 확인했다. `497b364`의 [원격 전체 CI](https://github.com/errkat4up/DAMBI/actions/runs/38225781316)도 `core`·`core-consumers`를 포함한 **9개 job 성공 / 0개 실패**를 확인했다. 배포 origin의 실제 API/RPC 브라우저 접근 확인은 별도다.
 
 ## 공유 정책 입력
 
