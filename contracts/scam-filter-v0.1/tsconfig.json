@@ -1,0 +1,7 @@
+{
+  "extends": "../../packages/core/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["types.ts", "consumer-types.ts"]
+}

@@ -57,6 +57,12 @@ DAMBI_FIXTURE_BACKEND=native node --test fixtures/sdk/giwa-sf0/decoder.test.mjs
 node --test fixtures/sdk/giwa-sf0/scam-cases.test.mjs
 ```
 
+### SF1 공개·데이터·신뢰 계약
+
+2026-10-21, `feat/scam-filter`의 [contracts/scam-filter-v0.1](../../contracts/scam-filter-v0.1/README.md)에 팀원 명세 v0.2를 반영했다. 정규화 스냅샷·프로필·요청/결과 타입과 구조 스키마, Python 참조→Rust Native/WASM 동기 경계, SDK 결속·해시·자원 제한 계약, 소비자 타입 사례를 작성했다. 다중 후보 격자는 SDK 응답에서 구분하고 선택 후 하나만 전달한다. 명세 기반 새 인수 벡터 5개 묶음을 준비했으며 기존 SF0 동률 사례는 재사용한다. **알고리즘·stub·제품 SDK·Native 실행부는 미변경이고 SF2는 미착수다.**
+
+검증: **v0.2 반영 변경 범위에 대해 사용자 실행 확인 2건 통과·0건 실패 — tsc 종료 코드 0, JSON 구문 확인 2파일 OK.** 명령은 계약 README에 있다. 이는 타입·구문 검사이며 실제 스키마 검증·탐지·자원 제한 실행은 후속 단계다. 팀원 Python 참조 코드·시험 파일·Rust 구현은 아직 미인수이며 공개 명세의 참조 시험 통과 표시는 팀원 보고로만 취급한다. SF1 계약 단계는 완료, SF2는 미착수다. 에이전트는 검사·빌드·시험·RPC를 재실행하지 않았고 푸시는 하지 않는다.
+
 ## 번들 B1-1 — Universal Router
 
 2026-10-12, `main 7387536` 이후 B1-1 변경 검증: **Native 원문 2개 시험과 패키지 WASM 3개 시험 통과, 최종 WASM 로그 3 통과·0 실패.** 저장된 snapshot은 801개이며 기존 799개 내용 보존·UR 2개 추가·digest/bytes 일치를 확인했다. source-context 제외 30,484개와 Aave 거절 3개는 유지한다. 별도 `decoder_snapshot` target의 전체 결과는 공유되지 않았다. 대표 UR 경로의 편입·검증을 마쳤으며 다음은 B1-2 Aave다.
