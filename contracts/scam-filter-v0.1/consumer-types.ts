@@ -170,6 +170,12 @@ const asynchronousAlgorithm: AlgorithmPort["analyze"] = async () => ({ ok: false
 const asynchronousModule: AlgorithmModulePort["analyze"] = async () => ({ ok: true, analysis });
 
 function moduleCompatibility(module: AlgorithmModulePort, adapter: AlgorithmPort, input: AlgorithmInput): void {
+  const registeredMode: "real" | "stub" = module.analysisMode;
+  const historyCoverage: DataCoverage = input.coverage.poolHistory;
+  const { coverage: _coverage, ...withoutCoverage } = input;
+  // @ts-expect-error SDK provenance must not be reconstructed from algorithm output.
+  const missingCoverage: AlgorithmInput = withoutCoverage;
+  void [registeredMode, historyCoverage, missingCoverage];
   const support = module.supports(r2);
   if (support.supported) {
     const minimumWarmupMs: number = support.requirements.minimumWarmupMs;

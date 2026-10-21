@@ -331,6 +331,8 @@ export type AlgorithmModuleResult =
  * No network, wall clock, SDK policy calls, async service or fallback algorithm. */
 export interface AlgorithmModulePort {
   readonly identity: AlgorithmIdentity;
+  /** Registration metadata; the adapter rejects output with a different mode. */
+  readonly analysisMode: "real" | "stub";
   readonly supportedLimits: AlgorithmLimits;
   /** Nonempty description/ID of the deterministic counter, bound to identity.version. */
   readonly workUnit: string;
@@ -393,6 +395,8 @@ export interface AlgorithmCapabilities {
 export interface AlgorithmInput<TInput = AnalysisRequest> {
   readonly binding: AnalysisBinding;
   readonly payload: TInput;
+  /** Validated provider provenance, not reconstructed from the slim request. */
+  readonly coverage: { readonly poolHistory: DataCoverage; readonly tokenProfile: DataCoverage };
   readonly limits: AlgorithmLimits;
   /** The SDK owns elapsed-time checks. This value is NOT passed to the pure module. */
   readonly deadlineMs: UnixMs;

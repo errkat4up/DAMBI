@@ -59,9 +59,24 @@ node --test fixtures/sdk/giwa-sf0/scam-cases.test.mjs
 
 ### SF1 공개·데이터·신뢰 계약
 
-2026-10-21, `feat/scam-filter`의 [contracts/scam-filter-v0.1](../../contracts/scam-filter-v0.1/README.md)에 팀원 명세 v0.2를 반영했다. 정규화 스냅샷·프로필·요청/결과 타입과 구조 스키마, Python 참조→Rust Native/WASM 동기 경계, SDK 결속·해시·자원 제한 계약, 소비자 타입 사례를 작성했다. 다중 후보 격자는 SDK 응답에서 구분하고 선택 후 하나만 전달한다. 명세 기반 새 인수 벡터 5개 묶음을 준비했으며 기존 SF0 동률 사례는 재사용한다. **알고리즘·stub·제품 SDK·Native 실행부는 미변경이고 SF2는 미착수다.**
+2026-10-21, `feat/scam-filter`의 [contracts/scam-filter-v0.1](../../contracts/scam-filter-v0.1/README.md)에 팀원 명세 v0.2를 반영했다(`d5e40d2`). 정규화 스냅샷·프로필·요청/결과 타입과 구조 스키마, Python 참조→Rust Native/WASM 동기 경계, SDK 결속·해시·자원 제한 계약, 소비자 타입 사례를 작성했다. 다중 후보 격자는 SDK 응답에서 구분하고 선택 후 하나만 전달한다. 명세 기반 새 인수 벡터 5개 묶음을 준비했으며 기존 SF0 동률 사례는 재사용한다. **SF1 커밋은 알고리즘·stub·제품 SDK·Native 실행부를 변경하지 않았다.**
 
-검증: **v0.2 반영 변경 범위에 대해 사용자 실행 확인 2건 통과·0건 실패 — tsc 종료 코드 0, JSON 구문 확인 2파일 OK.** 명령은 계약 README에 있다. 이는 타입·구문 검사이며 실제 스키마 검증·탐지·자원 제한 실행은 후속 단계다. 팀원 Python 참조 코드·시험 파일·Rust 구현은 아직 미인수이며 공개 명세의 참조 시험 통과 표시는 팀원 보고로만 취급한다. SF1 계약 단계는 완료, SF2는 미착수다. 에이전트는 검사·빌드·시험·RPC를 재실행하지 않았고 푸시는 하지 않는다.
+검증: **v0.2 반영 변경 범위에 대해 사용자 실행 확인 2건 통과·0건 실패 — tsc 종료 코드 0, JSON 구문 확인 2파일 OK.** 명령은 계약 README에 있다. 이는 타입·구문 검사이며 실제 스키마 검증·탐지·자원 제한 실행은 후속 단계다. 팀원 Python 참조 코드·시험 파일·Rust 구현은 아직 미인수이며 공개 명세의 참조 시험 통과 표시는 팀원 보고로만 취급한다. SF1 계약 단계는 완료다. 에이전트는 검사·빌드·시험·RPC를 재실행하지 않았고 푸시는 하지 않는다.
+
+### SF2 알고리즘 연결부·테스트 대체 모듈
+
+2026-10-21, `d5e40d2` 이후 미커밋 변경: [dambi-core::scam](../../crates/dambi-core/src/scam/mod.rs)에 Rust 타입·명시적 모듈 주입·입출력 검증·전용 오류 변환·JCS rulesHash·자원/기한 경계를 작성했다. 원자료 coverage를 보존하도록 SDK `AlgorithmInput`을 보완하고 등록 모드와 출력 모드 일치를 명시했다. 테스트 전용 고정 응답 stub과 경계 시험 **14개**를 작성했다. 실제 탐지 알고리즘·RPC/builder·CoreSession/WASM export·최종 정책 합성은 구현하지 않았다.
+
+검증: **사용자 제공 실행 로그·화면 기준 완료 — Rust 경계 시험 14개 통과·0개 실패, WASM 대상 컴파일 검사 통과, 계약 타입 검사 종료 코드 0.** `59 filtered out`은 `scam::` 선택 범위 밖의 기존 시험이며 실패가 아니다. SF2 연결부 검증은 완료했고 SF3는 미착수다. 실제 알고리즘 인수·협력적 작업량 준수·성능은 미확인이고, 이번 기한 검사는 동기 함수의 강제 중단이나 trap/OOM 격리를 보장하지 않는다. 기록 갱신을 위해 재시험·재빌드하거나 커밋·푸시하지 않았다. 아래 명령은 재현용으로 보존한다.
+
+```sh
+cd /Users/spu/SDKdambi/DAMBI
+cargo test --locked -p dambi-core --lib scam::
+cargo check --locked -p dambi-core-wasm --target wasm32-unknown-unknown
+yarn workspace @dambi/core exec tsc -p ../../contracts/scam-filter-v0.1/tsconfig.json
+```
+
+첫 명령은 새 경계 시험, 둘째는 기존 WASM bridge 의존 경로에서의 컴파일 호환성, 셋째는 변경된 연결 계약 타입을 확인한다. WASM 실행 검증이나 제품 산출물 재생성이 아니다. `tsc`는 성공 시 출력 없이 종료하므로 바로 `echo $?`로 0을 확인한다. 수정하지 않은 SF1 JSON·SF0 RPC·전체 SDK 시험은 재실행하지 않는다.
 
 ## 번들 B1-1 — Universal Router
 

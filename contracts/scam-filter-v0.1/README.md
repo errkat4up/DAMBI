@@ -1,6 +1,6 @@
 # Scam Filter SF1 — SDK·알고리즘 연결 계약
 
-**SF1 계약 산출물이며 SDK에서 실행·공개된 API가 아니다.** [타입](types.ts)과 [스키마](contract.schema.json)는 담비와 알고리즘의 연결 경계를 정의한다. 기준은 [팀원 명세 v0.2](https://claude.ai/artifact/9FT22CC41pww8s72pxuenn)와 사용자에게 전달된 수정 합의다. 기존 Core API·정책 Fact·Cedar·제품 번들은 변경하지 않는다. 실제 알고리즘, stub, 검증기, provider, 결과 합성 구현은 SF2 이후다.
+**공개 SDK API가 아닌 SF1 연결 계약이다.** [타입](types.ts)과 [스키마](contract.schema.json)는 담비와 알고리즘의 연결 경계를 정의한다. 기준은 [팀원 명세 v0.2](https://claude.ai/artifact/9FT22CC41pww8s72pxuenn)와 사용자에게 전달된 수정 합의다. SF2의 Rust 연결부는 [dambi-core::scam](../../crates/dambi-core/src/scam/mod.rs)에 두며 기존 Core 실행 경로·정책 Fact·Cedar·제품 번들은 변경하지 않는다. 실제 알고리즘·provider·결과 합성은 후속 단계다.
 
 디렉터리·SDK envelope의 `0.1`, 명세 문서의 `v0.2`, 알고리즘 wire의 `contractVersion: 1`은 별도 버전이다. 기존 문서 v0.1의 해상도·0값·창 선택 의미는 채택하지 않는다. 최초 연결 시 구현 ID·버전과 v0.2 인수 사례를 대조하며, 이후 의미가 바뀌면 wire 호환성을 다시 정한다. 실제 패키지·알고리즘 버전은 인수 전까지 꾸며 넣지 않는다.
 
@@ -80,7 +80,11 @@ R1/R2 해상도 식은 **고정 격자·점당 사건 최대 1개**에서 필요
 | resolution_too_coarse | unsupported_resolution |
 | metric_unavailable | field_unavailable |
 
-`outcome`은 SDK `state`로 1:1 대응한다. 근거의 observed/threshold/window/events/coverageBps와 원 reason은 evidence에 보존한다. 원자료 coverage는 SDK envelope에서, 필요한 초기 상태의 충족 여부는 모듈 결과와 해당 룰 요구사항에서 가져온다. 여러 결함이 있으면 원자료·나이·신선도 사유를 추가하되 알고리즘 결과를 조용히 clear로 고치지 않는다.
+`outcome`은 SDK `state`로 1:1 대응한다. 근거의 observed/threshold/window/events/coverageBps와 원 reason은 evidence에 보존한다. SDK `AlgorithmInput.coverage`는 검증된 provider의 poolHistory/tokenProfile coverage를 보관하고, 필요한 초기 상태의 충족 여부는 모듈 결과와 해당 룰 요구사항에서 가져온다. 슬림 알고리즘 요청에 없는 `fromBlock`을 기준 블록으로 꾸며 넣지 않는다. 이 메타데이터는 알고리즘에 전달하지 않는다. 여러 결함이 있으면 원자료·나이·신선도 사유를 추가하되 알고리즘 결과를 조용히 clear로 고치지 않는다.
+
+SF2의 `AlgorithmModule`은 위 모듈 포트의 Rust 표현이고, `AlgorithmAdapter::evaluate`는 고정된 `PinnedInvocation`과 정규화 요청 JSON을 검증해 `Result<ValidatedAnalysis, FailureReason>`을 반환한다. 모듈의 등록 `analysisMode`와 출력 모드는 일치해야 하며 stub은 `cfg(test)`에서만 명시 주입한다. `PinnedInvocation`의 계획·coverage는 SF3가 소유·검증할 값이지 호스트가 제출한 판정을 신뢰하는 경로가 아니다. 원천 로그의 스냅샷 생성은 SF4, CoreSession/WASM export·최종 판정 합성은 SF3에서 연결한다. 실제 알고리즘 crate를 Core의 필수 의존성으로 추가하지 않으며, 인수 시 호출 측의 명시적 구현체 주입으로 조립한다.
+
+입력 바이트 상한을 파싱 전에, 배열 개수·격자·누락·룰/대상/기준 블록을 호출 전에 검사한다. 결과는 버전·결속·룰별 상태·근거·크기와 원자료 완전성을 검사하되 사건 생성이나 최대 창 탐색을 다시 계산하지 않는다. 벽시계 기한은 호출 전후에 확인하고 함수 내부 작업량은 모듈이 협력적으로 제한한다. 무한 실행·panic·WASM trap·OOM을 선점 차단한다는 보장은 아니다. SF2 실행 명령과 검증 상태는 [SDK 검증 기록](../../fixtures/sdk/README.md#sf2-알고리즘-연결부테스트-대체-모듈)에 둔다.
 
 ## 오류·수명주기·기한
 
