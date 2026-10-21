@@ -1,5 +1,62 @@
 # SDK 정책 입력과 Native 회귀
 
+## Scam Filter — SF0 연결 정보 확인
+
+2026-10-19, [계획서 SF0-1](../../docs/scam-filter/mvp-design-plan.md#sf0-1--연결-대상측정-근거-확인) 범위에서 전달받은 연결 정보와 대표 거래를 공개 RPC에 읽기 전용으로 대조했다. **수동 RPC 확인 6개 항목 일치·0개 불일치:** 체인 ID, pair의 factory, factory의 getPair, token0·token1 구성, 대표 거래의 블록·성공 상태, pair의 Sync→Swap 순서. 자동화 시험 통과 수나 전체 DEX 검증을 뜻하지 않는다.
+
+- 연결: GIWA Sepolia `91342`, `https://sepolia-rpc.giwa.io/`, 조회 User-Agent `curl/8.5.0`.
+- factory: `0xd51d7c2a3b9b0f6876336c165adda94468500c47`; 대표 pair: `0xcaafb95fc292c10a526f03fa480407bb438dac67`.
+- token0: `0x0274c57358c3a6b8a08b7297ba51665c303a471f`; token1·quote(WETH): `0x4200000000000000000000000000000000000006`.
+- 주소 관계의 기준 블록: `39,055,355` (`2026-10-19T09:01:11Z`), 해시 `0x80e9bde215739cc0211e75b6c77440989b687d1ea02772314aa87e17c3d3732f`. 해당 블록의 `pair.factory()`와 `factory.getPair(token0, token1)`이 위 주소와 일치했다.
+- 대표 Swap: `0x212c9856eee05e3dc92710267106842dcd44eb624668998b9079272136185cb9`, 블록 `39,044,394`, receipt `status=1`; 위 pair의 log index `14→15`에서 Sync→Swap을 확인했다. 실제 호출 대상은 `0x50d356c7793d41c8b1d2a668f880d3a87aace649`, calldata selector는 `0x7ff36ab5`이며 당시 미확인한 Decoder 연결은 아래 SF0-3에 기록한다.
+- 제공 자료 검토: [giwa_handoff.tgz](/Users/spu/SDKdambi/giwa_handoff.tgz)의 Python 스크립트 5개·`giwa_pairs.json`·`giwa_collect2_run.log` 총 7개 파일을 읽었다. 스크립트는 실행하지 않았으며 압축 내용을 작업 폴더에 풀지 않았다. JSON의 수집 head는 `39,042,771`, 중복 없는 페어 42개이며 대표 pair·토큰 주소는 위 대조 결과와 일치한다. 수집 head와 주소 검증 head를 같은 시점으로 합치지 않는다.
+- 수집 근거: 스크립트의 RPC·factory·User-Agent, V2 selector/topic과 검증 대상 주소를 확인했다. 완전한 ABI JSON·배포 소스 출처는 미포함이다. 비페어 Sync 탐색 대상은 `0xad153c844ccac3d2ea991170624200e54730be74`이며, 서비스에서는 기존 계획대로 검증된 페어 주소로 로그를 제한한다.
+- 실행 로그 범위: `giwa_collect2.py`는 기록된 `pairBlock`부터 `min(pairBlock + 259,200, head)`까지 10,000블록씩, 동시성 3으로 조회한다. 3개 페어 각각 26조각·실패 0·재시도 0, 소요 0.8/0.8/4.2초로 기록됐다. HYANGNO는 34개 이벤트 요약이다. 이는 블록을 시간으로 환산한 약 72시간 수집이며, 24시간 SDK 성능·timeout 비율을 입증하지 않는다.
+- 자료 해석 제한: `giwa_collect.py`의 생성 블록 이진 탐색은 RPC 오류·누락을 코드 없음으로 처리한다. 따라서 이 자료만으로 `pairBlock`을 검증된 생성 시점·시장 나이 A·첫 72시간의 확정 경계로 사용하지 않는다. 대표 페어의 `31,390,683`은 이후 SF0-3에서 별도 PairCreated 근거로 확인했으며 다른 페어까지 검증한 것은 아니다. `giwa_collect2.py`의 활동 조회도 실패를 빈 목록으로 바꿀 수 있고, WETH 방향을 심볼로 고르므로 서비스에 그대로 재사용하지 않는다.
+- 누락·증빙 범위: 유동성 샘플링은 2,126/2,126/1,740개 요청 중 0/3/3개 실패가 기록되어 있다. 누락을 제외한 곡선의 급감·회복 수치는 참고값이다. 최대 로그 한도·1초 간격·head−100만 블록 응답·기존 24시간 지연/재시도 비율의 원응답은 미포함이다. 원천 이벤트 JSON과 전체 reserve 시계열도 없어 이 압축파일만으로 SF0-4의 고정 replay 입력이 준비된 것은 아니다.
+- SF0-1 검토 범위: 자료 검토는 완료했지만 위 보고값을 독립 검증 완료로 승격하지 않는다. 당시 빌드·시험·RPC 재조회·커밋·푸시는 하지 않았으며, 이후 확장 Service Worker 실행 결과는 아래에 기록한다. Decoder 연결·고정 입력 준비는 별도다.
+- 후속 검증 범위: 생성 시점·RPC 한도·누락 처리 등은 기존 SF4 데이터 계약에 따라 필요한 범위만 검증하며 새 보고서·400개 표본 조사·전체 재측정을 선행 조건으로 추가하지 않는다. 전체 진행 상태는 계획서에만 표시한다.
+
+### SF0-2 확장 RPC 접근 확인
+
+2026-10-21, 사용자가 [giwa-sw-rpc-check.js](../../browser-extension/scripts/giwa-sw-rpc-check.js)를 실행해 전달한 콘솔 결과를 검토했다. **실제 Service Worker RPC 조회 3개 통과·0개 실패**, 모두 HTTP 200·`stage=result`, 최종 `passed=true`다. 실행 기준 시각은 `2026-10-20T20:25:01.821Z`(한국시간 **2026-10-21 05:25:01.821**). 에이전트의 직접 실행 결과가 아니라 사용자 실행 결과를 인수한 기록이다.
+
+- 실행 환경: Dambi `0.2.3`, extension ID `gpkbgomebnpbpoeppflafcmekjojkgdb`, `chrome-extension://gpkbgomebnpbpoeppflafcmekjojkgdb/js/background.js`, macOS Chrome `154.0.0.0` 기본 UA, GIWA 공개 endpoint. `grantedHostPermission=true`, `<all_urls>` 선언, CSP는 `script-src 'self' 'wasm-unsafe-eval'; object-src 'self'`다.
+- 조회 결과: `eth_chainId` → `91342` / **144ms**; 기준 블록 `39,055,355`의 `getReserves` → ABI 3 word 응답 / **40ms**; 블록 `39,044,394`의 대표 pair 로그 → 지정 Swap 거래의 Sync·Swap 포함, 로그 **2개 / 31ms**. reserve 수치의 정확성·전체 이력 완전성을 검증한 시험은 아니다.
+- 적용 범위: UA 변경·프록시·권한 변경 없이 해당 SW에서 순차 직접 fetch가 성공했다. 요청별 진단 timeout 8초·재시도 없음이며 설정·저장소·체인 상태를 바꾸지 않는다. 단발 요청 지연으로 24시간 이력·p95·전체 분석 시간 예산·장기적인 403/429 부재를 보장하지 않는다.
+- 이전 준비: 2026-10-19 소스·기존 빌드의 manifest 정적 확인과 구문 검사 1개 통과·0개 실패를 마쳤다. 브라우저 제어 도구의 내부 관리 페이지 접근 제한은 우회하지 않고 사용자 실행으로 확인했다. 이번 결과 인수는 문서만 갱신했으며 기존 조회·구문 검사·빌드·시험을 반복하지 않았다.
+- 남은 통합: 기존 `service-worker/chains/chain-config.ts`에는 `91342`가 없어 `rpcClient(91342)`는 아직 미지원이다. 직접 fetch 성공과 SDK/기존 클라이언트의 GIWA 지원 완료를 구분한다. 다음은 SF0-3 대표 요청의 Decoder·실제 대상 연결이며, RPC 서비스 경로 연결은 SF4에서 필요한 범위로 진행한다.
+
+### SF0-3 대표 요청의 Decoder·실제 대상 연결
+
+2026-10-21, [GIWA 고정 입력·선언·시험](giwa-sf0/)을 추가했다. 현재 소스의 Native `fixture_runner` 빌드 성공, [Decoder 회귀 시험](giwa-sf0/decoder.test.mjs) **6개 통과·0개 실패**. 첫 실행의 양성 2개 실패는 시험에서 `decoder_id` 위치를 잘못 참조한 문제였으며 실제 반환 계약에 맞춰 교정했다. 기존 Core·제품 snapshot·알고리즘은 변경하지 않았다.
+
+- 실제 Swap: 저장한 원문 요청을 현재 Core의 `DecoderRegistry.install → route_request`로 처리해 HYANGNO·대표 pool·factory를 확인했다. router의 `factory()`·`WETH()`도 Swap 기준 블록에서 대조했다. 근거는 [선별 RPC 응답](giwa-sf0/rpc-evidence.json)에 둔다.
+- 제한된 선언: GIWA의 확인한 router·selector 및 대표 페어만 허용한다. 다른 토큰·역방향·다중 경로·짧은 path는 `Unknown`, 다른 체인·router는 선언 미일치로 처리한다. 두 선언은 **시험용**이며 전체 GIWA·신규 토큰·기존 SDK의 지원 완료가 아니다. LiveField·slippage 기본값도 실측값이나 위험도 결과가 아니다.
+- LP 구분: 표준 `addLiquidityETH`는 **합성·미서명 calldata**의 토큰·수량·pool·factory 연결만 확인했다. 실제 router에서 실행되는 경로인지까지 증명하지 않는다. 관측한 실제 LP 거래 `0x55f28ca8295e4526361edfc735b3eedb69052051591c52d98fac06b278ef3578`는 다른 대상의 `0x08cb1051` 복합 호출이므로 미지원으로 유지한다.
+- 추가 근거·남은 문제: 위 실제 LP receipt의 factory `PairCreated`로 대표 페어 생성 블록 `31,390,683`을 확인했다. 실제 **표준 router LP 거래와 지원 진입점 확인**은 남아 있다. WASM·제품 배포 경로·실제 스캠 분석은 이번 검증 범위가 아니며, 온체인 거래를 생성하지 않았다.
+
+아래는 통과한 검증의 재현 명령이다. 관련 변경이 없으면 반복하지 않는다.
+
+```sh
+cargo build --locked -p dambi-core --example fixture_runner
+DAMBI_FIXTURE_BACKEND=native node --test fixtures/sdk/giwa-sf0/decoder.test.mjs
+```
+
+### SF0-4 시험 사례·고정 입력 준비
+
+2026-10-21, [scam-cases.json](giwa-sf0/scam-cases.json)과 [자료 무결성 시험](giwa-sf0/scam-cases.test.mjs)을 추가했다. **합성 스냅샷 4개·수작업 기대 사례 12개 준비, 무결성 시험 4개 통과·0개 실패.** 제품 코드·알고리즘·stub은 구현하지 않았으며 RPC 조회·빌드·기존 SF0-2/3 시험을 반복하지 않았다.
+
+- 스냅샷: 무변화·단방향 계단·반복 반전·조회 구간 누락. reserve는 정수 문자열이고 누락은 0으로 채우지 않는다. 주소 식별 근거만 SF0-3 자료를 재사용하며 수치·상대 시각·decimals는 합성 설정이지 실제 GIWA 관측값이 아니다.
+- 기대 사례: R1 횟수 등호, R2 과거 밀집·정확히 X2 간격·B/T 경계·최신 동률·생성 직후 짧은 창, 부분 이력의 발동 유지/판정 불가, 초기 상태 미확정, 미지원 요청·미해결 풀, 신규 풀의 미발동을 포함한다. 사건 배열은 조건 충족이 이미 주어진 수작업 입력이며 스냅샷에서 계산하지 않았다.
+- 확인 범위·남은 연결: 시험은 시각·격자·명시적 누락·정수 정밀도·자료 참조·형식 및 손상 입력 거절만 확인한다. **12개 탐지 사례의 실행 통과가 아니다.** SF1에서 버킷·사건 생성·warm-up·입출력 계약과 연결 기대값을 합의하고 실제 탐지 및 원천 로그 재생 연결은 이후 구현·인수 단계에서 확인한다. SF0-3 실제 LP 연결은 사용자 결정대로 미완·보류한다.
+
+재현 명령(관련 변경이 없으면 반복하지 않음):
+
+```sh
+node --test fixtures/sdk/giwa-sf0/scam-cases.test.mjs
+```
+
 ## 번들 B1-1 — Universal Router
 
 2026-10-12, `main 7387536` 이후 B1-1 변경 검증: **Native 원문 2개 시험과 패키지 WASM 3개 시험 통과, 최종 WASM 로그 3 통과·0 실패.** 저장된 snapshot은 801개이며 기존 799개 내용 보존·UR 2개 추가·digest/bytes 일치를 확인했다. source-context 제외 30,484개와 Aave 거절 3개는 유지한다. 별도 `decoder_snapshot` target의 전체 결과는 공유되지 않았다. 대표 UR 경로의 편입·검증을 마쳤으며 다음은 B1-2 Aave다.

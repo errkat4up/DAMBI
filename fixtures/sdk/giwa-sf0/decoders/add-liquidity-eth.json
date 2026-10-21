@@ -1,0 +1,86 @@
+{
+  "type": "adapter_action",
+  "id": "dambi/sf0-giwa/hyangno-add-liquidity-eth@1.0.0",
+  "publisher": "dambi.dev",
+  "schema_version": "3",
+  "_note": "SF0-3 synthetic standard-router request fixture only, not a packaged decoder or general GIWA/new-token support. Reuses the standard V2 addLiquidityETH ABI. ../rpc-evidence.json grounds the router factory/WETH and HYANGNO/WETH pool identities, but the observed liquidity transaction targets a nonstandard launchpad (selector 0x08cb1051), not addLiquidityETH. This fixture neither decodes that historical launchpad request nor proves this router entrypoint executes. Only token=HYANGNO is modeled; native ETH is the wallet-side second input. amountTokenDesired and tx.value are requested amounts, not executed deposits. min_lp_out=0 is a compatibility default because this ABI has no LP-output floor; token/ETH minimum constraints and deadline are not represented in this coarse action. Live-input zero skeletons are unobserved compatibility defaults, not measured reserves or prices. No live values are fetched by this fixture.",
+  "match": {
+    "selector": "0xf305d719",
+    "chain_to_addresses": {
+      "91342": ["0x50d356c7793d41c8b1d2a668f880d3a87aace649"]
+    }
+  },
+  "abi_fragment": {
+    "function_name": "addLiquidityETH",
+    "abi": {
+      "name": "addLiquidityETH",
+      "type": "function",
+      "stateMutability": "payable",
+      "inputs": [
+        { "name": "token", "type": "address" },
+        { "name": "amountTokenDesired", "type": "uint256" },
+        { "name": "amountTokenMin", "type": "uint256" },
+        { "name": "amountETHMin", "type": "uint256" },
+        { "name": "to", "type": "address" },
+        { "name": "deadline", "type": "uint256" }
+      ]
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "$match": "$args.token",
+      "$cases": {
+        "0x0274c57358c3a6b8a08b7297ba51665c303a471f": {
+          "domain": "amm",
+          "amm": {
+            "action": "add_liquidity",
+            "add_liquidity": {
+              "venue": {
+                "name": "uniswap_v2",
+                "chain": "$chain",
+                "pool": "0xcaafb95fc292c10a526f03fa480407bb438dac67",
+                "factory": "0xd51d7c2a3b9b0f6876336c165adda94468500c47"
+              },
+              "params": {
+                "kind": "pooled",
+                "tokens": [
+                  [{ "key": { "standard": "erc20", "chain": "$chain", "address": "$args.token" } }, "$args.amountTokenDesired"],
+                  [{ "key": { "standard": "native", "chain": "$chain" } }, "$tx.value"]
+                ],
+                "min_lp_out": "0",
+                "recipient": "$args.to"
+              }
+            }
+          }
+        }
+      },
+      "$default": {
+        "domain": "unknown",
+        "unknown": { "target": "$to", "chain": "$chain", "calldata": "$calldata", "value": "$tx.value" }
+      }
+    },
+    "live_inputs": {
+      "pool_state": {
+        "source": {
+          "kind": "onchain_view",
+          "chain": "$chain",
+          "contract": "0xcaafb95fc292c10a526f03fa480407bb438dac67",
+          "function": "getReserves()",
+          "decoder_id": "uniswap_v2_get_reserves"
+        },
+        "ttl_s": 12
+      },
+      "current_price": {
+        "source": { "kind": "derived_from", "inputs": [], "calc_id": "sf0_fixture_unobserved_current_price" },
+        "ttl_s": 12
+      }
+    }
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": [],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}

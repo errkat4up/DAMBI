@@ -1,0 +1,112 @@
+{
+  "type": "adapter_action",
+  "id": "dambi/sf0-giwa/hyangno-swap-exact-eth-for-tokens@1.0.0",
+  "publisher": "dambi.dev",
+  "schema_version": "3",
+  "_note": "SF0-3 regression fixture only, not a packaged decoder or general GIWA/new-token support. Reuses the standard V2 swapExactETHForTokens ABI for the observed transaction in ../rpc-evidence.json. Router factory()/WETH() at block 39044394 and the recorded pool events ground the constants; they do not prove complete router bytecode equivalence. Only the exact two-token WETH -> HYANGNO path is modeled. The wallet spends native ETH; WETH identifies the pool-side wrapped asset. slippage_bp=0 and the live-input zero skeletons are decoder compatibility defaults, not observed prices, zero risk, executable quotes or measured slippage. No live values are fetched by this fixture.",
+  "match": {
+    "selector": "0x7ff36ab5",
+    "chain_to_addresses": {
+      "91342": ["0x50d356c7793d41c8b1d2a668f880d3a87aace649"]
+    }
+  },
+  "abi_fragment": {
+    "function_name": "swapExactETHForTokens",
+    "abi": {
+      "name": "swapExactETHForTokens",
+      "type": "function",
+      "stateMutability": "payable",
+      "inputs": [
+        { "name": "amountOutMin", "type": "uint256" },
+        { "name": "path", "type": "address[]" },
+        { "name": "to", "type": "address" },
+        { "name": "deadline", "type": "uint256" }
+      ]
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "$match": { "$fn": "array_len", "$args": ["$args.path"] },
+      "$cases": {
+        "2": {
+          "$match": "$args.path[0]",
+          "$cases": {
+            "0x4200000000000000000000000000000000000006": {
+              "$match": "$args.path[1]",
+              "$cases": {
+                "0x0274c57358c3a6b8a08b7297ba51665c303a471f": {
+                  "domain": "amm",
+                  "amm": {
+                    "action": "swap",
+                    "swap": {
+                      "venue": {
+                        "name": "uniswap_v2",
+                        "chain": "$chain",
+                        "pool": "0xcaafb95fc292c10a526f03fa480407bb438dac67",
+                        "factory": "0xd51d7c2a3b9b0f6876336c165adda94468500c47"
+                      },
+                      "params": {
+                        "token_in": { "key": { "standard": "native", "chain": "$chain" } },
+                        "token_out": { "key": { "standard": "erc20", "chain": "$chain", "address": "$args.path[1]" } },
+                        "direction": {
+                          "kind": "exact_input",
+                          "amount_in": "$tx.value",
+                          "min_amount_out": "$args.amountOutMin"
+                        },
+                        "recipient": "$args.to",
+                        "slippage_bp": 0
+                      }
+                    }
+                  }
+                }
+              },
+              "$default": {
+                "domain": "unknown",
+                "unknown": { "target": "$to", "chain": "$chain", "calldata": "$calldata", "value": "$tx.value" }
+              }
+            }
+          },
+          "$default": {
+            "domain": "unknown",
+            "unknown": { "target": "$to", "chain": "$chain", "calldata": "$calldata", "value": "$tx.value" }
+          }
+        }
+      },
+      "$default": {
+        "domain": "unknown",
+        "unknown": { "target": "$to", "chain": "$chain", "calldata": "$calldata", "value": "$tx.value" }
+      }
+    },
+    "live_inputs": {
+      "route": {
+        "source": {
+          "kind": "onchain_view",
+          "chain": "$chain",
+          "contract": "0xcaafb95fc292c10a526f03fa480407bb438dac67",
+          "function": "getReserves()",
+          "decoder_id": "uniswap_v2_get_reserves"
+        },
+        "ttl_s": 12
+      },
+      "expected_amount_out": {
+        "source": { "kind": "derived_from", "inputs": [], "calc_id": "sf0_fixture_unobserved_expected_amount_out" },
+        "ttl_s": 12
+      },
+      "price_impact_bp": {
+        "source": { "kind": "derived_from", "inputs": [], "calc_id": "sf0_fixture_unobserved_price_impact_bp" },
+        "ttl_s": 12
+      },
+      "gas_estimate": {
+        "source": { "kind": "derived_from", "inputs": [], "calc_id": "sf0_fixture_unobserved_gas_estimate" },
+        "ttl_s": 12
+      }
+    }
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": [],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}
