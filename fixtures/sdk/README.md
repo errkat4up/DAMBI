@@ -106,6 +106,18 @@ wasm-pack build crates/dambi-core-wasm --target web --release --out-dir pkg-scam
 node --test packages/core/tests/scam.test.mjs
 ```
 
+### SF4-2 공통 RPC 기반과 기준 블록
+
+2026-10-25, SF4-1 `193698f` 이후 신규 `scam-rpc.ts`·`scam-rpc-codec.ts`와 대응 시험 변경: 기존 HTTP 경계를 재사용하는 내부 raw 조회 배치를 추가했다. 체인·허용 factory·토큰 구성·`getPair` 검증, 하나의 기준 블록 공유, 명시적 과거 상태 조회, 로그 분할·동시성·제한된 재시도·시간/요청/바이트/로그 예산, 취소·늦은 응답 격리, head·기준·과거 근거 해시 재확인을 포함한다. 성공한 빈 로그와 실패한 블록 구간을 구분한다. **사용자 제공 실행 로그 기준 codec 5개·조회 배치 8개로 총 13개 통과·0개 실패, 취소·건너뜀 0개.** 실제 RPC는 조회하지 않았으며 정규화·관리자 이벤트 해석·SDK provider 조립·성능 확인은 SF4-3~SF4-5에 남긴다. 알고리즘이나 기존 정책 조회 경로는 변경하지 않았고 기록·커밋을 위한 재시험은 하지 않았다.
+
+아래는 검증 범위의 재현 명령이며 관련 변경이 없으면 반복하지 않는다. 새 TypeScript 코드를 출력한 뒤 해당 시험 두 파일만 실행하며 Rust/WASM 재빌드는 필요 없다. 실패 구간은 아직 raw 블록 범위이며 실제 시각·coverage 변환은 다음 builder 단계에서 처리한다.
+
+```sh
+cd /Users/spu/SDKdambi/DAMBI &&
+yarn workspace @dambi/core exec tsc -p tsconfig.build.json &&
+node --test packages/core/tests/adapters/scam-rpc-codec.test.mjs packages/core/tests/adapters/scam-rpc.test.mjs
+```
+
 ## 번들 B1-1 — Universal Router
 
 2026-10-12, `main 7387536` 이후 B1-1 변경 검증: **Native 원문 2개 시험과 패키지 WASM 3개 시험 통과, 최종 WASM 로그 3 통과·0 실패.** 저장된 snapshot은 801개이며 기존 799개 내용 보존·UR 2개 추가·digest/bytes 일치를 확인했다. source-context 제외 30,484개와 Aave 거절 3개는 유지한다. 별도 `decoder_snapshot` target의 전체 결과는 공유되지 않았다. 대표 UR 경로의 편입·검증을 마쳤으며 다음은 B1-2 Aave다.
