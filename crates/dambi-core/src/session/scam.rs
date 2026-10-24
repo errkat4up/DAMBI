@@ -893,9 +893,12 @@ impl Plan {
         let analysis = adapter.evaluate(&invocation, Some(&encoded), &algorithm_limits(&self.config.limits), deadline, clock)?;
         let fired = analysis.rules.iter().any(|r| r.state == RuleState::Fired);
         let age_unknown = selection_reason == "age_unknown";
-        let complete = !age_unknown && analysis.rules.iter().all(|r| r.state == RuleState::Clear);
+        // Clear rules do not establish sufficient market age. Only a verified
+        // mature selection can claim quiet; observed warnings still take priority.
+        let complete = selected == "established" && analysis.rules.iter().all(|r| r.state == RuleState::Clear);
         let mut reasons = Vec::new();
         if age_unknown { reasons.push(json!(FailureReason::AgeUnknown)); }
+        if selection_reason == "exact_young" { reasons.push(json!(FailureReason::MarketTooYoung)); }
         for rule in &analysis.rules {
             for reason in &rule.reasons { let value = json!(reason); if !reasons.contains(&value) { reasons.push(value); } }
         }

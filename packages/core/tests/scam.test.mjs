@@ -376,7 +376,7 @@ test("an issued plan pins settings, bundle and algorithm despite later fixture/s
   assert.equal(latest.scam.targets[0].binding.algorithm.version, "2");
 });
 
-test("one frozen plan supports both candidate grids and unknown age cannot claim quiet", options, async (t) => {
+test("one frozen plan supports both candidate grids and young or unknown age cannot claim quiet", options, async (t) => {
   const selectedFixture = fixture("clear");
   const established = selectedFixture.bundle.presets[0].established;
   established.bucketMs = 2_000;
@@ -385,15 +385,15 @@ test("one frozen plan supports both candidate grids and unknown age cannot claim
   const setup = harness();
   const { core } = await open(t, setup, selectedFixture);
   const scenarios = [
-    [exactAge(30), "newMarket", "exact_young", 1_000, "quiet"],
-    [exactAge(1_000), "established", "exact_mature", 2_000, "quiet"],
+    [exactAge(59), "newMarket", "exact_young", 1_000, "insufficient", "market_too_young"],
+    [exactAge(60), "established", "exact_mature", 2_000, "quiet", undefined],
     [{ kind: "lower_bound", ageLowerBoundSec: 60, evidence: { kind: "historical_code_presence",
       checkedAt: { number: "940", hash: HASH, timestampMs: T - 60_000 },
       identityVerified: true, nonRecreationSupportId: "sf3-known-v2-fixture" } },
-    "established", "lower_bound_mature", 2_000, "quiet"],
-    [{ kind: "unknown", reasons: ["fixture-no-creation-evidence"] }, "newMarket", "age_unknown", 1_000, "insufficient"],
+    "established", "lower_bound_mature", 2_000, "quiet", undefined],
+    [{ kind: "unknown", reasons: ["fixture-no-creation-evidence"] }, "newMarket", "age_unknown", 1_000, "insufficient", "age_unknown"],
   ];
-  for (const [age, selectedPreset, selectionReason, bucketMs, status] of scenarios) {
+  for (const [age, selectedPreset, selectionReason, bucketMs, status, expectedReason] of scenarios) {
     setup.setAge(age);
     const plan = await core.plan(swap);
     const history = plan.scamCalls.find(({ method }) => method === "scam.pool_history");
@@ -402,12 +402,31 @@ test("one frozen plan supports both candidate grids and unknown age cannot claim
     assert.deepEqual(history.params.candidateResolutions.map(({ bucketMs }) => bucketMs).sort((a, b) => a - b), [1_000, 2_000]);
     const verdict = core.evaluate(plan, policyBatch(plan.calls, plan), scamBatch(plan.scamCalls, plan, age));
     assert.equal(verdict.scam.status, status);
+    assert.equal(verdict.decision, "allow");
+    assert.equal(verdict.source, "evaluated");
+    assert.deepEqual(verdict.scam.reasons, expectedReason ? [expectedReason] : []);
+    assert.deepEqual(verdict.scam.targets[0].reasons, expectedReason ? [expectedReason] : []);
     const binding = verdict.scam.targets[0].binding;
     assert.equal(binding.selectedPreset, selectedPreset);
     assert.equal(binding.selectionReason, selectionReason);
     assert.equal(binding.bucketMs, bucketMs);
-    if (status === "insufficient") assert.ok(reasons(verdict).includes("age_unknown"));
+    if (selectionReason === "exact_young") {
+      const checked = await core.check(swap);
+      assert.equal(checked.decision, "allow");
+      assert.deepEqual(comparable(checked.scam), comparable(verdict.scam));
+    }
   }
+
+  // Age limits quiet, not an observed warning from the same young market.
+  const warningSetup = harness();
+  warningSetup.setAge(exactAge(59));
+  const { core: warningCore } = await open(t, warningSetup, fixture("fired"));
+  const warning = await warningCore.check(swap);
+  assert.equal(warning.decision, "warn");
+  assert.equal(warning.scam.status, "warn");
+  assert.equal(warning.scam.targets[0].binding.selectionReason, "exact_young");
+  assert.deepEqual(warning.scam.targets[0].reasons, ["market_too_young"]);
+  assert.ok(warning.scam.targets[0].rules.every((rule) => rule.state === "fired"));
 });
 
 test("policy Fact and snapshot expiry tighten scam waiting without converting policy success to deny", options, async (t) => {

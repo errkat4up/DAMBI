@@ -84,6 +84,14 @@ yarn workspace @dambi/core exec tsc -p ../../contracts/scam-filter-v0.1/tsconfig
 
 남은 제한: SF0 실제 ETH→HYANGNO 요청은 Decoder가 풀 측 WETH 경로를 전달하지 않아 `subject_unresolved`이며, 이를 안전하거나 검사 완료로 표시하지 않는다. 연결 시험의 양성 경로는 명시적 합성·미서명 WETH→HYANGNO `swapExactTokensForTokens` 요청이다. 실제 ETH 경로는 SF4 실연결 전 Decoder 대상 정보 전달을 보완해야 한다. SF3 검증과 해당 지원 확대를 구분하며, 실제 탐지 정확도는 팀원 모듈 인수 후 확인한다.
 
+2026-10-25 SF3 후속 보완(`0b3efb1` 이후 신규 풀 판정·관련 시험 변경): 나이 기준 미만의 풀은 룰이 모두 clear여도 `insufficient + market_too_young`을 반환하도록 Native 합성을 수정했다. **사용자 실행 결과 기준 테스트용 WASM release 빌드 성공, 대상 시험 1개 통과·0개 실패.** 기존 candidate-grid 시험에서 신규 풀의 수동/자동 평가 일치, 정확한 나이와 검증된 하한의 등호 경계, 나이 미상, 신규 풀 경고 유지를 확인했다. 위 29개는 보완 전 별도 결과이며 이번에 재실행하지 않았다. 실제 알고리즘·RPC와 ETH 경로의 남은 제한은 그대로다. 아래는 통과한 변경 범위의 재현 명령이며 관련 변경이 없으면 반복하지 않는다.
+
+```sh
+cd /Users/spu/SDKdambi/DAMBI
+wasm-pack build crates/dambi-core-wasm --target web --release --out-dir pkg-scam-test --out-name dambi_core --features scam-test-fixtures --locked &&
+node --test --test-name-pattern="one frozen plan" packages/core/tests/scam.test.mjs
+```
+
 ## 번들 B1-1 — Universal Router
 
 2026-10-12, `main 7387536` 이후 B1-1 변경 검증: **Native 원문 2개 시험과 패키지 WASM 3개 시험 통과, 최종 WASM 로그 3 통과·0 실패.** 저장된 snapshot은 801개이며 기존 799개 내용 보존·UR 2개 추가·digest/bytes 일치를 확인했다. source-context 제외 30,484개와 Aave 거절 3개는 유지한다. 별도 `decoder_snapshot` target의 전체 결과는 공유되지 않았다. 대표 UR 경로의 편입·검증을 마쳤으며 다음은 B1-2 Aave다.
