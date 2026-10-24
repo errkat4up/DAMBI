@@ -5,6 +5,7 @@
 
 import type { FactResult } from "../ports/fact.js";
 import type { CoreDiagnostic } from "./errors.js";
+import type { ScamReport } from "./scam.js";
 
 /** Complete API audit fields, or an explicit reason they cannot be supplied. */
 export type VerdictMetadata =
@@ -84,6 +85,8 @@ export interface Verdict {
 
   /** Missing audit fields are never replaced with invented digests/versions. */
   metadata: VerdictMetadata;
+  /** Independent advisory result; insufficient never implies safe. */
+  scam?: ScamReport;
 }
 
 /**
@@ -114,12 +117,13 @@ export interface MatchedPolicy {
   severity: "warn" | "deny";
 
   /**
-   * 값 집합: `"action" | "tx" | "engine_error"` — `wasm-bridge.types.ts:5`
+   * 기존 정책 값: `"action" | "tx" | "engine_error"` — `wasm-bridge.types.ts:5`
    * `POLICY_REQUEST_ORIGINS`. Rust `PolicyRequestOrigin`은 `Action`/`Tx`뿐이지만
    * (verdict.rs:94-99) WASM 경계가 합성 fail에 `"engine_error"`를 추가로 emit
    * 한다 (action_eval_exports.rs:716). `formatAuditMatched`가 이 값으로 합성
    * 항목을 식별한다 (policy-rpc.ts:535-538). (A단계 초안의 `origin: string`은
    * 과하게 열려 있었고, 초안 verdict.ts에는 필드 자체가 빠져 있었다.)
+   * `"scam"`은 독립 스캠 분석이 추가한 advisory 경고 근거이며 Cedar 거부가 아니다.
    */
-  origin: "action" | "tx" | "engine_error";
+  origin: "action" | "tx" | "engine_error" | "scam";
 }

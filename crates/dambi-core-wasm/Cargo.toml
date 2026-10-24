@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+scam-test-fixtures = ["dambi-core/scam-test-fixtures"]
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
@@ -13,6 +16,7 @@ wasm-opt = ["-Oz", "--strip-debug", "--enable-bulk-memory", "--enable-mutable-gl
 
 [dependencies]
 dambi-core.workspace = true
+js-sys.workspace = true
 serde_json.workspace = true
 wasm-bindgen.workspace = true
 

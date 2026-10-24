@@ -9,6 +9,7 @@ import { initializeCore } from "./runtime/core-runtime.js";
 import type { PolicySource } from "./ports/policy.js";
 import type { FactProvider } from "./ports/fact.js";
 import type { Clock } from "./ports/clock.js";
+import type { ScamConfig, ScamFactBatch, ScamSettings } from "./types/scam.js";
 
 /** External I/O only. Core owns its snapshots, plans and in-memory cache. */
 export interface Ports {
@@ -38,6 +39,8 @@ export interface CoreConfig {
   readonly hooks?: CoreHooks;
   /** Host deployment declaration; Core does not submit or block transactions. */
   readonly enforcement: "advisory" | "enforcing";
+  /** Independent advisory analysis. Absence retains the original policy path. */
+  readonly scam?: ScamConfig;
 }
 
 export interface DambiCore {
@@ -54,7 +57,9 @@ export interface DambiCore {
    * foreign, reused or TTL-expired handles throw CoreError. A valid handle with bad
    * Facts or expired trust returns deny + fail_closed. Retry with a new plan.
    */
-  evaluate(plan: CorePlan, facts: FactBatch): Verdict;
+  evaluate(plan: CorePlan, facts: FactBatch, scamFacts?: ScamFactBatch): Verdict;
+  /** Validates atomically; new settings affect only subsequently issued plans. */
+  setScamSettings(settings: ScamSettings): void;
   /** Validates fully before atomic replacement; failure preserves current state. */
   refreshPolicies(options?: CallOptions): Promise<void>;
   /** Idempotent; cancels I/O and releases plans, cache and WASM resources. */

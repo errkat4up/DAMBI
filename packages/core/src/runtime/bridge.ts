@@ -1,12 +1,18 @@
 import { CoreError, type CoreErrorCode } from "../types/errors.js";
 import type { PlannedCall } from "../types/plan.js";
 import type { VerdictMetadata } from "../types/verdict.js";
+import type { PlannedScamCall } from "../types/scam.js";
 
 /** Internal generated-WASM boundary; never exposed as a host injection option. */
 export interface NativeCore {
   plan(requestJson: string, nowMs: number): string;
   evaluate(planId: string, factsJson: string, nowMs: number): string;
   evaluate_check(planId: string, factsJson: string, nowMs: number, failure: string): string;
+  evaluate_scam(planId: string, factsJson: string, scamInputJson: string, nowMs: number, clock: () => number): string;
+  evaluate_check_scam(planId: string, factsJson: string, scamInputJson: string, nowMs: number, failure: string, clock: () => number): string;
+  set_scam_settings(settingsJson: string): string;
+  /** Exists only in explicitly built, non-default test-fixture WASM. */
+  install_scam_fixture?(fixtureJson: string, nowMs: number): string;
   begin_refresh(): string;
   commit_refresh(ticket: number, policyJson: string, nowMs: number): string;
   cancel_refresh(ticket: number): string;
@@ -21,6 +27,9 @@ export interface NativeCoreConstructor {
 export interface NativePlan {
   planId: string;
   calls: readonly PlannedCall[];
+  scamCalls?: readonly PlannedScamCall[];
+  /** Pinned policy/plan deadline; never copied to the public plan handle. */
+  policyPlanDeadlineMs?: number;
   expiresAt: number;
   metadata: Extract<VerdictMetadata, { status: "available" }>;
 }

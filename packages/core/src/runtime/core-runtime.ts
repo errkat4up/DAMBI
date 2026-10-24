@@ -5,14 +5,16 @@ import type { CallOptions } from "../types/options.js";
 import type { CorePlan, FactBatch, PlannedCall } from "../types/plan.js";
 import type { CheckRequest, UnsupportedRequest } from "../types/request.js";
 import type { Verdict, VerdictMetadata } from "../types/verdict.js";
+import type { ScamConfig, ScamFactBatch, ScamSettings, NativeScamInputDraft } from "../types/scam.js";
 import type { SignedPolicyBundle } from "../ports/policy.js";
 import type { FactResult } from "../ports/fact.js";
 import { invoke, nativeError, release, type NativeCore, type NativePlan } from "./bridge.js";
 import { checkAbort, signalFrom, startOperation, type PendingOperation } from "./io.js";
 import { copyJson, field, freezeTree, record, requestJson, textBytes } from "./json.js";
-import { loadWasm } from "./wasm-loader.js";
+import { loadWasm, type WasmModule } from "./wasm-loader.js";
 import { FactCache } from "./fact-cache.js";
 import { captureHooks, type HookDispatcher } from "./hooks.js";
+import { beginScamOperation, copyScamFacts, type ScamOperation } from "./scam-runtime.js";
 
 interface OwnedConfig {
   readonly nativeJson: string;
@@ -22,6 +24,7 @@ interface OwnedConfig {
   readonly fetchFacts: (calls: readonly PlannedCall[], options: CallOptions & { planId: string }) => Promise<FactBatch>;
   readonly hooks: HookDispatcher;
   readonly enforcement: Verdict["enforcement"];
+  readonly scam?: ScamConfig;
 }
 
 class FactFetchFailure extends CoreError {
@@ -32,6 +35,11 @@ const limitNames = [
   "allowedClockSkewMs", "maxPolicyBytes", "maxDecoderBytes", "maxRequestBytes",
   "maxFactBytes", "maxPlanCalls", "planTtlMs", "maxPendingPlans",
   "maxFactAgeMs", "factTimeoutMs", "policyTimeoutMs",
+] as const;
+
+const scamLimitNames = [
+  "scamTimeoutMs", "scamEvalReserveMs", "maxBundleBytes", "maxResultBytes",
+  "maxCalls", "maxTargets", "maxRules", "maxLogs", "maxPoints", "maxAlgorithmWorkUnits",
 ] as const;
 
 /** Capture port/clock methods once while preserving their original receiver. */
@@ -73,6 +81,21 @@ function ownConfig(input: CoreConfig): OwnedConfig {
     const artifact = field(decoder, "artifact", true, "INVALID_CONFIG");
     if (typeof artifact !== "string") throw new CoreError("INVALID_CONFIG", "Decoder artifact must be a string.");
     textBytes(artifact, "INVALID_DECODER_SNAPSHOT", limits.maxDecoderBytes);
+    const rawScam = field(source, "scam", false, "INVALID_CONFIG");
+    let scam: ScamConfig | undefined;
+    if (rawScam !== undefined) {
+      const scamObject = record(rawScam, "INVALID_CONFIG");
+      const scamLimits = record(field(scamObject, "limits", true, "INVALID_CONFIG"), "INVALID_CONFIG");
+      let maxScamConfigBytes = 0;
+      for (const name of scamLimitNames) {
+        const value = field(scamLimits, name, true, "INVALID_CONFIG");
+        if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+          throw new CoreError("INVALID_CONFIG", "Scam limits require positive safe integers.");
+        }
+        if (name === "maxBundleBytes") maxScamConfigBytes = value;
+      }
+      scam = freezeTree(copyJson(rawScam, "INVALID_CONFIG", maxScamConfigBytes)) as ScamConfig;
+    }
     const nativeConfig = {
       decoderSnapshot: {
         artifact,
@@ -81,6 +104,7 @@ function ownConfig(input: CoreConfig): OwnedConfig {
       trust: field(source, "trust", true, "INVALID_CONFIG"),
       limits: selectedLimits,
       enforcement: field(source, "enforcement", true, "INVALID_CONFIG"),
+      ...(scam === undefined ? {} : { scam }),
     };
     const nativeJson = JSON.stringify(copyJson(nativeConfig, "INVALID_CONFIG", Number.MAX_SAFE_INTEGER));
     const ports = record(field(source, "ports", true, "INVALID_CONFIG"), "INVALID_CONFIG");
@@ -91,6 +115,7 @@ function ownConfig(input: CoreConfig): OwnedConfig {
     return {
       nativeJson,
       limits: Object.freeze(limits),
+      scam,
       hooks: captureHooks(field(source, "hooks", false, "INVALID_CONFIG")),
       enforcement: nativeConfig.enforcement as Verdict["enforcement"],
       now: () => {
@@ -140,6 +165,7 @@ interface HandleState {
   readonly expiresAt: number;
   readonly createdAt: number;
   readonly metadata: NativePlan["metadata"];
+  readonly policyPlanDeadlineMs?: number;
   status: "active" | "consumed" | "expired";
 }
 
@@ -208,6 +234,7 @@ function failedVerdict(error: unknown, enforcement: Verdict["enforcement"], meta
 
 class CoreRuntime implements DambiCore {
   #disposed = false;
+  #evaluationDepth = 0;
   readonly #handles = new WeakMap<object, HandleState>();
   #refresh: PendingOperation<string> | undefined;
   readonly #checks = new Set<PendingOperation<unknown>>();
@@ -248,15 +275,24 @@ class CoreRuntime implements DambiCore {
         || typeof data.metadata.policyVersion !== "string" || typeof data.metadata.engineVersion !== "string") {
       throw new CoreError("ENGINE_ERROR", "The Core engine returned an invalid plan.");
     }
-    const handle = freezeTree({ planId: data.planId, calls: data.calls, expiresAt: data.expiresAt }) as unknown as CorePlan;
+    if (data.scamCalls !== undefined && !Array.isArray(data.scamCalls)) {
+      throw new CoreError("ENGINE_ERROR", "The Core engine returned invalid scam calls.");
+    }
+    if (data.policyPlanDeadlineMs !== undefined
+        && (!Number.isSafeInteger(data.policyPlanDeadlineMs) || data.policyPlanDeadlineMs < 0)) {
+      throw new CoreError("ENGINE_ERROR", "The Core engine returned an invalid policy deadline.");
+    }
+    const handle = freezeTree({ planId: data.planId, calls: data.calls, expiresAt: data.expiresAt,
+      ...(data.scamCalls === undefined ? {} : { scamCalls: data.scamCalls }),
+    }) as unknown as CorePlan;
     // Keep only the engine-issued audit fields after Native evicts an expired
     // plan. They are private and can only annotate a fail-closed check result.
     this.#handles.set(handle, { planId: data.planId, expiresAt: data.expiresAt, createdAt: now,
-      metadata: freezeTree(data.metadata), status: "active" });
+      metadata: freezeTree(data.metadata), policyPlanDeadlineMs: data.policyPlanDeadlineMs, status: "active" });
     return handle;
   }
 
-  evaluate(plan: CorePlan, facts: FactBatch): Verdict {
+  evaluate(plan: CorePlan, facts: FactBatch, scamFacts?: ScamFactBatch): Verdict {
     this.#live();
     const handle = typeof plan === "object" && plan !== null ? this.#handles.get(plan) : undefined;
     if (!handle) throw new CoreError("INVALID_PLAN", "This instance did not issue that plan object.");
@@ -281,7 +317,12 @@ class CoreRuntime implements DambiCore {
     this.#live();
     // Native consumes its authoritative handle before validating this sentinel,
     // preserving pinned audit metadata even for non-JSON host Facts.
-    const verdict = invoke<Verdict>(() => this.#native.evaluate(handle.planId, copied, now));
+    const scam = copyScamFacts(scamFacts, this.#config.scam?.limits);
+    const evaluatedAt = this.#config.now();
+    this.#live();
+    const verdict = this.#nativeEvaluation(() => this.#config.scam === undefined
+      ? this.#native.evaluate(handle.planId, copied, evaluatedAt)
+      : this.#native.evaluate_scam(handle.planId, copied, JSON.stringify(scam), evaluatedAt, this.#clock));
     if (copyFailure && (verdict.source !== "fail_closed" || verdict.decision !== "deny")) {
       throw new CoreError("ENGINE_ERROR", "The Core engine did not reject invalid Facts.");
     }
@@ -293,6 +334,32 @@ class CoreRuntime implements DambiCore {
       ];
     }
     return this.#publish(verdict);
+  }
+
+  readonly #clock = (): number => {
+    this.#live();
+    const now = this.#config.now();
+    this.#live();
+    return now;
+  };
+
+  /** Clock callbacks may dispose reentrantly; release only after WASM returns. */
+  #nativeEvaluation(operation: () => string): Verdict {
+    this.#evaluationDepth++;
+    try { return invoke<Verdict>(operation); }
+    finally {
+      this.#evaluationDepth--;
+      if (this.#disposed && this.#evaluationDepth === 0) release(this.#native);
+      this.#live();
+    }
+  }
+
+  setScamSettings(settings: ScamSettings): void {
+    this.#live();
+    if (!this.#config.scam) throw new CoreError("INVALID_CONFIG", "Scam Filter is not configured.");
+    const copied = JSON.stringify(copyJson(settings, "INVALID_CONFIG", this.#config.scam.limits.maxBundleBytes));
+    this.#live();
+    invoke<unknown>(() => this.#native.set_scam_settings(copied));
   }
 
   async refreshPolicies(options?: CallOptions): Promise<void> {
@@ -335,6 +402,9 @@ class CoreRuntime implements DambiCore {
     this.#live();
     let plan: CorePlan | undefined;
     let batch: unknown;
+    let scamOperation: ScamOperation | undefined;
+    let scamInput: NativeScamInputDraft = this.#config.scam === undefined
+      ? { status: "not_configured" } : { status: "unavailable", reason: "scam_results_missing" };
     let verdict: Verdict;
     try {
       const signal = signalFrom(options);
@@ -359,6 +429,16 @@ class CoreRuntime implements DambiCore {
         else missing.push(call);
       }
       batch = { planId: plan.planId, results };
+      if (this.#config.scam) {
+        scamOperation = beginScamOperation(plan, this.#handles.get(plan)?.policyPlanDeadlineMs,
+          this.#config.scam.limits, this.#config.limits.maxFactAgeMs, this.#clock,
+          this.#config.fetchFacts, batch as FactBatch, signal);
+        const pending = scamOperation.operation;
+        if (pending) {
+          this.#checks.add(pending);
+          void scamOperation.promise.then(() => this.#checks.delete(pending));
+        }
+      }
       if (missing.length) {
         const planId = plan.planId;
         const operation = startOperation(async (internal) => {
@@ -375,16 +455,24 @@ class CoreRuntime implements DambiCore {
         batch = mergeFacts(plan, missing, results, received);
       }
       checkAbort(signal);
-      const evaluatedAt = this.#config.now();
-      this.#live();
-      checkAbort(signal);
       // Enforce the combined batch limit too, including cache hits.
       batch = copyJson(batch, "INVALID_REQUEST", this.#config.limits.maxFactBytes);
-      verdict = this.#evaluateCheck(plan, batch, evaluatedAt, "");
+      if (scamOperation) {
+        scamOperation.policyReady(batch);
+        scamInput = await scamOperation.promise;
+      }
+      const evaluatedAt = this.#clock();
+      checkAbort(signal);
+      verdict = this.#evaluateCheck(plan, batch, evaluatedAt, "", scamInput);
+      // A synchronous WASM clock callback can cancel after the pre-call check.
+      // The consumed handle still supplies metadata for the existing abort path.
+      checkAbort(signal);
       if (verdict.source === "evaluated" && epoch === this.#cacheEpoch) {
         this.#cache.put(chain, plan.calls, batch as FactBatch, evaluatedAt);
       }
     } catch (error) {
+      scamOperation?.cancel("scam_results_missing");
+      scamInput = scamOperation?.result ?? scamInput;
       this.#live(); // A disposed instance rejects, including in-flight checks.
       const handle = plan && this.#handles.get(plan);
       if (plan && handle?.status === "active") {
@@ -392,7 +480,7 @@ class CoreRuntime implements DambiCore {
         try { now = this.#config.now(); } catch { /* Fail closed using pinned audit data. */ }
         this.#live();
         try {
-          verdict = this.#evaluateCheck(plan, batch ?? { planId: plan.planId, results: {} }, now, checkFailure(error));
+          verdict = this.#evaluateCheck(plan, batch ?? { planId: plan.planId, results: {} }, now, checkFailure(error), scamInput);
         } catch (finishError) {
           this.#live();
           verdict = failedVerdict(finishError, this.#config.enforcement, handle.metadata);
@@ -404,12 +492,15 @@ class CoreRuntime implements DambiCore {
     return this.#publish(verdict);
   }
 
-  #evaluateCheck(plan: CorePlan, batch: unknown, now: number, failure: string): Verdict {
+  #evaluateCheck(plan: CorePlan, batch: unknown, now: number, failure: string, scam: NativeScamInputDraft): Verdict {
     const handle = this.#handles.get(plan);
     if (!handle || handle.status !== "active") throw new CoreError("INVALID_PLAN", "Check plan is no longer active.");
     handle.status = "consumed";
     try {
-      return invoke<Verdict>(() => this.#native.evaluate_check(handle.planId, JSON.stringify(batch), now, failure));
+      return this.#nativeEvaluation(() => this.#config.scam === undefined
+        ? this.#native.evaluate_check(handle.planId, JSON.stringify(batch), now, failure)
+        : this.#native.evaluate_check_scam(handle.planId, JSON.stringify(batch),
+          JSON.stringify(scam), now, failure, this.#clock));
     } catch (error) {
       // Native's bounded tombstones may already have aged out as other plans
       // begin. The private handle still proves this check's original deadline.
@@ -437,17 +528,25 @@ class CoreRuntime implements DambiCore {
     for (const operation of this.#checks) operation.cancel(new CoreError("DISPOSED", "The Core instance has been disposed."));
     this.#checks.clear();
     this.#cache.clear();
-    release(this.#native);
+    if (this.#evaluationDepth === 0) release(this.#native);
   }
 }
 
 export async function initializeCore(input: CoreConfig, options?: CallOptions): Promise<DambiCore> {
   const config = ownConfig(input);
+  return (await initializeOwnedCore(config, options, loadWasm)).core;
+}
+
+async function initializeOwnedCore(
+  config: OwnedConfig,
+  options: CallOptions | undefined,
+  moduleSource: () => Promise<WasmModule>,
+): Promise<{ core: DambiCore; native: NativeCore }> {
   const signal = signalFrom(options);
   checkAbort(signal);
   const operation = startOperation(async (internal) => {
     const [module, policy] = await Promise.all([
-      loadWasm(),
+      moduleSource(),
       config.fetchPolicy({ signal: internal })
         .then((bundle) => {
           checkAbort(internal);
@@ -462,9 +561,37 @@ export async function initializeCore(input: CoreConfig, options?: CallOptions): 
   try {
     native = new ready.module.WasmCore(config.nativeJson, ready.policy, config.now());
     checkAbort(signal);
-    return new CoreRuntime(native, config);
+    return { core: new CoreRuntime(native, config), native };
   } catch (error) {
     if (native) release(native);
     throw nativeError(error);
   }
+}
+
+/**
+ * Non-public test harness. The explicit module must be a separately built real
+ * WASM with scam-test-fixtures; standard binaries do not expose the installer.
+ * Never exported by the package entry points or accepted by createCore config.
+ */
+export async function initializeCoreForScamTest(
+  input: CoreConfig,
+  fixture: unknown,
+  module: WasmModule,
+): Promise<{ core: DambiCore; installFixture(nextFixture: unknown): void }> {
+  const config = ownConfig(input);
+  const { core, native } = await initializeOwnedCore(config, undefined, async () => module);
+  if (typeof native.install_scam_fixture !== "function") {
+    core.dispose();
+    throw new CoreError("NOT_IMPLEMENTED", "This WASM was not built with explicit scam test fixtures.");
+  }
+  const installFixture = (nextFixture: unknown): void => {
+    if (!config.scam || typeof native.install_scam_fixture !== "function") {
+      throw new CoreError("NOT_IMPLEMENTED", "This WASM was not built with explicit scam test fixtures.");
+    }
+    const copied = JSON.stringify(copyJson(nextFixture, "INVALID_CONFIG", config.scam.limits.maxBundleBytes));
+    invoke<unknown>(() => native.install_scam_fixture!(copied, config.now()));
+  };
+  try { if (config.scam) installFixture(fixture); }
+  catch (error) { core.dispose(); throw error; }
+  return { core, installFixture };
 }

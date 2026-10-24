@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+# Explicit integration-test build only; never a default detector or fallback.
+scam-test-fixtures = []
+
 [dependencies]
 abi-resolver.workspace = true
 alloy-json-abi.workspace = true

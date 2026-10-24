@@ -1,6 +1,6 @@
 /**
- * SF1 source-contract compile cases. No runtime/algorithm invocation and
- * no package export claim. `noEmit` is required; do not execute this file.
+ * Shared SF1/SF3 contract compile cases. No runtime/algorithm invocation.
+ * `noEmit` is required; do not execute this file.
  * @ts-expect-error must be consumed, or the user's typecheck must fail.
  */
 import type { CoreConfig, DambiCore } from "../../packages/core/src/core.js";
@@ -203,13 +203,14 @@ function compatibility(
   const noScam: VerdictScamDraft = futureEvaluate(plan, policyFacts); // Preserve synchronous evaluation.
   const withScam: VerdictScamDraft = futureEvaluate(futurePlan, policyFacts, scamFacts);
   const providerReuse: Promise<FactBatch> = provider.fetch(compatibleCalls, { planId: futurePlan.planId });
-  // @ts-expect-error This draft has NOT added methods to the currently exported implementation.
+  // @ts-expect-error Settings updates require a complete validated settings object.
   legacy.setScamSettings({ enabled: false });
-  // @ts-expect-error Current public plans do not yet expose the proposed scam channel.
-  const notYetPublished = plan.scamCalls;
-  // @ts-expect-error Do not claim current CoreConfig accepts the proposed scam settings.
+  const publicScamCalls: readonly PlannedScamCall[] | undefined = plan.scamCalls;
+  const publicScamVerdict: Verdict = legacy.evaluate(plan, policyFacts, scamFacts);
+  legacy.setScamSettings({ enabled: false, presetId: "demo", overrides: [], additionalRules: [], locale: "ko" });
+  // @ts-expect-error Scam config requires settings, trust and bounded limits.
   const notYetEnabled: CoreConfig = { ...legacyConfig, scam: { enabled: true } };
-  void [unchangedConfig, unchangedCore, unchangedPlan, oldVerdict, noScam, withScam, providerReuse, notYetPublished, notYetEnabled];
+  void [unchangedConfig, unchangedCore, unchangedPlan, oldVerdict, noScam, withScam, providerReuse, publicScamCalls, publicScamVerdict, notYetEnabled];
 }
 void [r1, r2, auxiliary, missingWindow, policyRule, textDuration, wrongThreshold, eventWindow, inventedEvent, wrongMethod, projected, requiredFact,
   numericReserve, removedSwapCounts, ambiguousGrid, missingWorkLimit, mixedVersion, rawSdkState, leakedSdkBinding,

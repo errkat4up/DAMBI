@@ -567,3 +567,49 @@ fn strict_permit_routes_and_malformed_known_requests_never_become_success() {
         "UNSUPPORTED_REQUEST",
     );
 }
+
+#[test]
+fn configured_scam_without_a_bundle_never_weakens_policy_or_installs_a_stub() {
+    let req = request(&"f".repeat(64)).to_string();
+    let mut original = session();
+    let original_plan = original.plan(&req, NOW).unwrap();
+    let baseline = evaluate(&mut original, &original_plan, &empty_facts(&original_plan), NOW);
+    assert!(baseline.get("scam").is_none());
+
+    let mut local = config(vec![approve_bundle()]);
+    let settings = json!({
+        "enabled": true, "presetId": "fixture", "overrides": [],
+        "additionalRules": [], "locale": "ko"
+    });
+    let mut scam_key = local["trust"]["keys"][0].clone();
+    scam_key["role"] = json!("scam");
+    local["scam"] = json!({
+        "settings": settings,
+        "trust": {"env":"staging", "profile":"default", "keys":[scam_key]},
+        "limits": {
+            "scamTimeoutMs":2500, "scamEvalReserveMs":200,
+            "maxBundleBytes":1000000, "maxResultBytes":1000000,
+            "maxCalls":4, "maxTargets":2, "maxRules":16,
+            "maxLogs":20000, "maxPoints":20000, "maxAlgorithmWorkUnits":100000
+        }
+    });
+    let mut core = CoreSession::new(&local.to_string(), &wire(day1()), NOW).unwrap();
+    error_code(core.set_scam_settings("{\"enabled\":\"false\"}"), "INVALID_CONFIG");
+    let pinned = core.plan(&req, NOW).unwrap();
+    let mut disabled = settings;
+    disabled["enabled"] = json!(false);
+    core.set_scam_settings(&disabled.to_string()).unwrap();
+
+    let result = evaluate(&mut core, &pinned, &empty_facts(&pinned), NOW);
+    assert_eq!(result["decision"], baseline["decision"]);
+    assert_eq!(result["source"], baseline["source"]);
+    assert_eq!(result["reasons"], baseline["reasons"]);
+    assert_eq!(result["scam"]["status"], "insufficient");
+    assert_eq!(result["scam"]["reasons"], json!(["bundle_unavailable"]));
+    assert!(result["scam"].get("analysisMode").is_none());
+
+    let next = core.plan(&req, NOW).unwrap();
+    let result = evaluate(&mut core, &next, &empty_facts(&next), NOW);
+    assert_eq!(result["decision"], baseline["decision"]);
+    assert_eq!(result["scam"]["status"], "disabled");
+}

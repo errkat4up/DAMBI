@@ -66,8 +66,8 @@ impl<'a> AlgorithmAdapter<'a> {
 
     /// Tests must explicitly opt in. This constructor does not exist in a
     /// normal Native/WASM library build; stubs cannot become product defaults.
-    #[cfg(test)]
-    fn with_test_stub(module: &'a dyn AlgorithmModule) -> Self {
+    #[cfg(any(test, feature = "scam-test-fixtures"))]
+    pub(crate) fn with_test_stub(module: &'a dyn AlgorithmModule) -> Self {
         Self { module: Some(module), allow_stub: true }
     }
 

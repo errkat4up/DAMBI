@@ -62,6 +62,7 @@ target/web-server.pid
 # wasm-pack artifacts (produced by scripts/wasm-build*.sh and copied into consumers).
 crates/*-wasm/pkg/
 crates/*-wasm/pkg-tsify-test/
+/crates/dambi-core-wasm/pkg-scam-test/
 browser-extension/backend/wasm/
 browser-extension/public/wasm/
 

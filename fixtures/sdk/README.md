@@ -65,9 +65,9 @@ node --test fixtures/sdk/giwa-sf0/scam-cases.test.mjs
 
 ### SF2 알고리즘 연결부·테스트 대체 모듈
 
-2026-10-21, `d5e40d2` 이후 미커밋 변경: [dambi-core::scam](../../crates/dambi-core/src/scam/mod.rs)에 Rust 타입·명시적 모듈 주입·입출력 검증·전용 오류 변환·JCS rulesHash·자원/기한 경계를 작성했다. 원자료 coverage를 보존하도록 SDK `AlgorithmInput`을 보완하고 등록 모드와 출력 모드 일치를 명시했다. 테스트 전용 고정 응답 stub과 경계 시험 **14개**를 작성했다. 실제 탐지 알고리즘·RPC/builder·CoreSession/WASM export·최종 정책 합성은 구현하지 않았다.
+2026-10-21, `feat/scam-filter`의 로컬 커밋 `70227b2`: [dambi-core::scam](../../crates/dambi-core/src/scam/mod.rs)에 Rust 타입·명시적 모듈 주입·입출력 검증·전용 오류 변환·JCS rulesHash·자원/기한 경계를 작성했다. 원자료 coverage를 보존하도록 SDK `AlgorithmInput`을 보완하고 등록 모드와 출력 모드 일치를 명시했다. 테스트 전용 고정 응답 stub과 경계 시험 **14개**를 작성했다. 실제 탐지 알고리즘·RPC/builder·CoreSession/WASM export·최종 정책 합성은 SF2에 포함하지 않았다. 푸시는 하지 않았다.
 
-검증: **사용자 제공 실행 로그·화면 기준 완료 — Rust 경계 시험 14개 통과·0개 실패, WASM 대상 컴파일 검사 통과, 계약 타입 검사 종료 코드 0.** `59 filtered out`은 `scam::` 선택 범위 밖의 기존 시험이며 실패가 아니다. SF2 연결부 검증은 완료했고 SF3는 미착수다. 실제 알고리즘 인수·협력적 작업량 준수·성능은 미확인이고, 이번 기한 검사는 동기 함수의 강제 중단이나 trap/OOM 격리를 보장하지 않는다. 기록 갱신을 위해 재시험·재빌드하거나 커밋·푸시하지 않았다. 아래 명령은 재현용으로 보존한다.
+검증: **사용자 제공 실행 로그·화면 기준 완료 — Rust 경계 시험 14개 통과·0개 실패, WASM 대상 컴파일 검사 통과, 계약 타입 검사 종료 코드 0.** `59 filtered out`은 `scam::` 선택 범위 밖의 기존 시험이며 실패가 아니다. 실제 알고리즘 인수·협력적 작업량 준수·성능은 미확인이고, 이번 기한 검사는 동기 함수의 강제 중단이나 trap/OOM 격리를 보장하지 않는다. 기록 갱신·로컬 커밋을 위해 재시험·재빌드하지 않았다. 아래 명령은 재현용으로 보존한다.
 
 ```sh
 cd /Users/spu/SDKdambi/DAMBI
@@ -77,6 +77,12 @@ yarn workspace @dambi/core exec tsc -p ../../contracts/scam-filter-v0.1/tsconfig
 ```
 
 첫 명령은 새 경계 시험, 둘째는 기존 WASM bridge 의존 경로에서의 컴파일 호환성, 셋째는 변경된 연결 계약 타입을 확인한다. WASM 실행 검증이나 제품 산출물 재생성이 아니다. `tsc`는 성공 시 출력 없이 종료하므로 바로 `echo $?`로 0을 확인한다. 수정하지 않은 SF1 JSON·SF0 RPC·전체 SDK 시험은 재실행하지 않는다.
+
+### SF3 Core 단일 실행 경로
+
+2026-10-24, SF2 `70227b2` 이후 SF3 변경: Native·WASM·SDK에 `scamCalls`/별도 입력, 단일 평가·정책 합성, 계획별 설정·모듈 고정, 후보 선택, 기한·취소·늦은 응답 처리를 연결했다. 실제 알고리즘·RPC·서명 번들 수신은 포함하지 않는다. 정상 빌드는 고정 응답 모듈을 설치할 수 없으며, 회귀 시험만 별도 `scam-test-fixtures` WASM을 사용한다. **사용자 제공 실행 로그 기준 검증 완료 — Native session 12개, 기존 SDK check 8개, [SF3 통합 시험](../../packages/core/tests/scam.test.mjs) 9개로 총 29개 통과·0개 실패. 일반·테스트용 WASM 빌드 모두 성공.** 일반 빌드의 테스트 전용 별칭 `unused import` 경고는 남아 있으나 실패는 아니다. 검증된 기능 코드는 그대로 유지했고 기록·커밋을 위해 빌드·시험·RPC를 재실행하지 않았다.
+
+남은 제한: SF0 실제 ETH→HYANGNO 요청은 Decoder가 풀 측 WETH 경로를 전달하지 않아 `subject_unresolved`이며, 이를 안전하거나 검사 완료로 표시하지 않는다. 연결 시험의 양성 경로는 명시적 합성·미서명 WETH→HYANGNO `swapExactTokensForTokens` 요청이다. 실제 ETH 경로는 SF4 실연결 전 Decoder 대상 정보 전달을 보완해야 한다. SF3 검증과 해당 지원 확대를 구분하며, 실제 탐지 정확도는 팀원 모듈 인수 후 확인한다.
 
 ## 번들 B1-1 — Universal Router
 

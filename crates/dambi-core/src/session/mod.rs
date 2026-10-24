@@ -8,6 +8,7 @@
 mod config;
 mod facts;
 mod request;
+mod scam;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{
@@ -75,6 +76,7 @@ pub struct CoreSession {
     // Bounded tombstones retain useful immediate reuse/expiry errors without
     // retaining request/snapshot data or accumulating an unbounded history.
     retired: VecDeque<(String, &'static str)>,
+    scam: Option<scam::State>,
 }
 
 struct PendingPlan {
@@ -84,6 +86,7 @@ struct PendingPlan {
     expires_at: u64,
     nodes: Vec<Node>,
     partial: bool,
+    scam: Option<scam::Plan>,
 }
 
 struct Node {
@@ -131,6 +134,7 @@ impl CoreSession {
             refresh: None,
             plans: BTreeMap::new(),
             retired: VecDeque::new(),
+            scam: config.scam.map(scam::State::new),
         })
     }
 
@@ -190,6 +194,9 @@ impl CoreSession {
             }
         }
         let metadata = plan_metadata(&request.digest, &snapshot);
+        let scam = self.scam.as_ref().map(|state| state.pin(&nodes, &plan_id, now_ms));
+        let scam_calls = scam.as_ref().map(|plan| plan.calls.clone());
+        let policy_plan_deadline = expires_at.min(snapshot.policy().valid_until_ms());
         self.plans.insert(
             plan_id.clone(),
             PendingPlan {
@@ -199,12 +206,18 @@ impl CoreSession {
                 expires_at,
                 nodes,
                 partial: request.partial,
+                scam,
             },
         );
         self.next_plan = number;
-        Ok(
-            json!({ "planId": plan_id, "calls": calls, "expiresAt": expires_at, "metadata": metadata }),
-        )
+        let mut result = json!({ "planId": plan_id, "calls": calls, "expiresAt": expires_at, "metadata": metadata });
+        if let Some(calls) = scam_calls {
+            result["scamCalls"] = json!(calls);
+            // Native-owned private orchestration hint; the SDK does not expose
+            // this as editable authority on the public CorePlan.
+            result["policyPlanDeadlineMs"] = json!(policy_plan_deadline);
+        }
+        Ok(result)
     }
 
     pub fn evaluate(
@@ -213,7 +226,7 @@ impl CoreSession {
         facts_json: &str,
         now_ms: u64,
     ) -> Result<Value, SessionError> {
-        self.evaluate_inner(plan_id, facts_json, now_ms, None)
+        self.evaluate_inner(plan_id, facts_json, now_ms, None, None, None)
     }
 
     /// SDK check orchestration can report a failed external operation, but it
@@ -239,7 +252,41 @@ impl CoreSession {
                 "invalid check failure category",
             ));
         }
-        self.evaluate_inner(plan_id, facts_json, now_ms, Some(failure))
+        self.evaluate_inner(plan_id, facts_json, now_ms, Some(failure), None, None)
+    }
+
+    /// Additive scam data channel. Caller data cannot replace pinned settings,
+    /// policy facts, or the module owned by the native plan.
+    pub fn evaluate_scam(
+        &mut self, plan_id: &str, facts_json: &str, scam_input_json: &str, now_ms: u64,
+        now: &mut dyn FnMut() -> u64,
+    ) -> Result<Value, SessionError> {
+        self.evaluate_inner(plan_id, facts_json, now_ms, None, Some(scam_input_json), Some(now))
+    }
+
+    pub fn evaluate_check_scam(
+        &mut self, plan_id: &str, facts_json: &str, scam_input_json: &str, now_ms: u64,
+        failure: &str, now: &mut dyn FnMut() -> u64,
+    ) -> Result<Value, SessionError> {
+        if !matches!(failure, "" | "aborted" | "timeout" | "fact_fetch_failed" | "invalid_fact" | "limit_exceeded" | "engine_error") {
+            return Err(SessionError::new("ENGINE_ERROR", "invalid check failure category"));
+        }
+        self.evaluate_inner(plan_id, facts_json, now_ms, Some(failure), Some(scam_input_json), Some(now))
+    }
+
+    pub fn set_scam_settings(&mut self, settings_json: &str) -> Result<(), SessionError> {
+        self.live()?;
+        self.scam.as_mut().ok_or_else(|| SessionError::new("INVALID_CONFIG", "scam is not configured"))?
+            .set_settings(settings_json)
+    }
+
+    /// Explicit test fixture capability; absent from normal Native/WASM builds.
+    #[cfg(feature = "scam-test-fixtures")]
+    pub fn install_scam_fixture(&mut self, fixture_json: &str, now_ms: u64) -> Result<(), SessionError> {
+        self.live()?;
+        clock(now_ms)?;
+        self.scam.as_mut().ok_or_else(|| SessionError::new("INVALID_CONFIG", "scam is not configured"))?
+            .install_fixture(fixture_json, now_ms)
     }
 
     fn evaluate_inner(
@@ -248,6 +295,8 @@ impl CoreSession {
         facts_json: &str,
         now_ms: u64,
         check_failure: Option<&str>,
+        scam_input: Option<&str>,
+        mut current_time: Option<&mut dyn FnMut() -> u64>,
     ) -> Result<Value, SessionError> {
         self.live()?;
         clock(now_ms)?;
@@ -273,12 +322,35 @@ impl CoreSession {
                 {
                     report.fail(code, "check could not complete", None, None);
                 }
-                return Ok(report.finish(&self.enforcement, &plan));
+                let scam = plan.scam.as_ref().map(|scam| scam.failed(crate::scam::FailureReason::NoTimeBudget));
+                return Ok(scam::compose(report.finish(&self.enforcement, &plan), scam));
             }
             return Err(SessionError::new("PLAN_EXPIRED", "plan TTL has expired"));
         }
         // Consume before inspecting any caller Fact or pinned trust state.
         self.retire(plan_id.to_owned(), "PLAN_CONSUMED");
+        let mut previous_time = now_ms;
+        let mut clock_invalid = false;
+        let mut read_clock = || {
+            let value = current_time.as_deref_mut().map(|clock| clock()).unwrap_or(now_ms);
+            if value > MAX_SAFE_INTEGER || value < previous_time {
+                clock_invalid = true;
+                MAX_SAFE_INTEGER + 1
+            } else {
+                previous_time = value;
+                value
+            }
+        };
+        let scam_result = plan.scam.as_ref().map(|scam| {
+            let deadline = scam::policy_fact_deadline(facts_json, self.limits.max_fact_bytes, self.limits.max_fact_age_ms)
+                .map(|facts| facts.min(plan.expires_at).min(plan.snapshot.policy().valid_until_ms()));
+            if check_failure.is_some_and(|failure| !failure.is_empty()) {
+                return scam.failed(crate::scam::FailureReason::NoTimeBudget);
+            }
+            scam.evaluate(plan_id, scam_input, now_ms, deadline, self.limits.allowed_clock_skew_ms, &mut read_clock)
+        });
+        let evaluated_at = read_clock();
+        drop(read_clock);
         let mut report = Report::default();
         if let Some(code) = check_failure.filter(|code| !code.is_empty()) {
             let message = match code {
@@ -291,16 +363,24 @@ impl CoreSession {
             };
             report.fail(code, message, None, None);
         }
-        if let Err(error) = plan.snapshot.ensure_usable(now_ms) {
+        if clock_invalid {
+            report.fail("engine_error", "evaluation clock is invalid or moved backwards", None, None);
+            return Ok(scam::compose(report.finish(&self.enforcement, &plan), scam_result));
+        }
+        if evaluated_at >= plan.expires_at {
+            report.fail("timeout", "plan expired during evaluation", None, None);
+            return Ok(scam::compose(report.finish(&self.enforcement, &plan), scam_result));
+        }
+        if let Err(error) = plan.snapshot.ensure_usable(evaluated_at) {
             report.fail("trust_expired", error.message, None, None);
-            return Ok(report.finish(&self.enforcement, &plan));
+            return Ok(scam::compose(report.finish(&self.enforcement, &plan), scam_result));
         }
         let accepted = facts::validate(
             facts_json,
             plan_id,
             &plan,
             &self.limits,
-            now_ms,
+            evaluated_at,
             &mut report,
         );
         if plan.partial {
@@ -357,7 +437,7 @@ impl CoreSession {
                 Err(error) => report.fail("engine_error", error.message, None, Some(&node.path)),
             }
         }
-        Ok(report.finish(&self.enforcement, &plan))
+        Ok(scam::compose(report.finish(&self.enforcement, &plan), scam_result))
     }
 
     pub fn begin_refresh(&mut self) -> Result<u64, SessionError> {
@@ -428,6 +508,7 @@ impl CoreSession {
         self.plans.clear();
         self.retired.clear();
         self.refresh = None;
+        self.scam = None;
     }
 
     fn live(&self) -> Result<(), SessionError> {

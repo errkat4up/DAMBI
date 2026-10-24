@@ -26,6 +26,17 @@ fn envelope(result: Result<Value, SessionError>) -> String {
     .to_string()
 }
 
+// Use the instance's captured SDK clock, not Date.now or a frozen now_ms.
+// A failed/invalid callback is an invalid time sentinel, never a stale success.
+fn read_clock(clock: &js_sys::Function) -> u64 {
+    clock
+        .call0(&JsValue::UNDEFINED)
+        .ok()
+        .and_then(|value| value.as_f64())
+        .and_then(|value| integer(value, "clock").ok())
+        .unwrap_or(MAX_SAFE_INTEGER + 1)
+}
+
 #[wasm_bindgen]
 pub struct WasmCore {
     session: CoreSession,
@@ -63,6 +74,51 @@ impl WasmCore {
         envelope(integer(now_ms, "nowMs").and_then(|now| {
             self.session
                 .evaluate_check(plan_id, facts_json, now, failure)
+        }))
+    }
+
+    /// Additive scam channel; original evaluation entry points remain intact.
+    pub fn evaluate_scam(
+        &mut self,
+        plan_id: &str,
+        facts_json: &str,
+        scam_input_json: &str,
+        now_ms: f64,
+        clock: &js_sys::Function,
+    ) -> String {
+        envelope(integer(now_ms, "nowMs").and_then(|now| {
+            self.session.evaluate_scam(
+                plan_id, facts_json, scam_input_json, now, &mut || read_clock(clock),
+            )
+        }))
+    }
+
+    pub fn evaluate_check_scam(
+        &mut self,
+        plan_id: &str,
+        facts_json: &str,
+        scam_input_json: &str,
+        now_ms: f64,
+        failure: &str,
+        clock: &js_sys::Function,
+    ) -> String {
+        envelope(integer(now_ms, "nowMs").and_then(|now| {
+            self.session.evaluate_check_scam(
+                plan_id, facts_json, scam_input_json, now, failure, &mut || read_clock(clock),
+            )
+        }))
+    }
+
+    pub fn set_scam_settings(&mut self, settings_json: &str) -> String {
+        envelope(self.session.set_scam_settings(settings_json).map(|()| Value::Null))
+    }
+
+    /// Deliberately absent from default production WASM builds.
+    #[cfg(feature = "scam-test-fixtures")]
+    pub fn install_scam_fixture(&mut self, fixture_json: &str, now_ms: f64) -> String {
+        envelope(integer(now_ms, "nowMs").and_then(|now| {
+            self.session.install_scam_fixture(fixture_json, now)?;
+            Ok(Value::Null)
         }))
     }
 
