@@ -130,6 +130,20 @@ yarn workspace @dambi/core exec tsc -p tsconfig.build.json &&
 node --test packages/core/tests/adapters/scam-block-time.test.mjs packages/core/tests/adapters/scam-pool-history.test.mjs
 ```
 
+### SF4-4 풀 나이·관리자 이벤트
+
+2026-10-25, SF4-3 `0f92f2e` 이후 신규 `scam-profile-codec.ts`·`scam-token-profile.ts`와 대응 시험 변경: 검증된 factory의 `PairCreated`와 실제 헤더로 풀 생성 나이를 구성하고, 재생성 불가가 확인된 설정이 있을 때만 과거 코드 존재로 나이 하한을 인정한다. 첫 Mint를 생성 시점으로 쓰지 않는다. 나이 검색의 로컬 한도는 `age_unknown`, 배치 전체 자원 한도·취소·timeout·reorg는 실패로 유지한다. `maxAgeSearchCalls`는 논리적 헤더·코드·로그 검색 횟수이며 분할 조회·재시도 등 실제 요청은 기존 `maxRequests`로 제한한다.
+
+관리자 이벤트 5종은 신뢰된 대상·ABI·지원 종류·블록 구간 설정이 있을 때만 정규화한다. 성공한 빈 로그, 부분 누락, 미지원 범위를 구분하고 별개 로그의 같은 시각·종류는 보존한다. 현재 계약은 종류별 coverage가 없으므로 요청한 종류 중 미지원이 있으면 전체 이벤트 창을 missing/unavailable로 남긴다. **TS7053 타입 추론 오류 수정 후 사용자 재실행 결과 기준 codec 5개·profile 10개로 총 15개 통과·0개 실패, 취소·건너뜀 0개.** 저장된 GIWA `PairCreated` 한 건은 원문 재생하며 주변 헤더·코드·대상 검증 응답·지원 설정은 합성임을 명시했다. 실제 RPC·알고리즘은 실행하지 않았고 GIWA 관리자 이벤트·재생성 불가 지원을 확정하지 않았다. 공개 provider 연결·배포별 지원 설정·실측은 SF4-5에 남긴다. 기록·커밋을 위한 재시험은 하지 않았다.
+
+아래는 통과한 변경 범위의 재현 명령이며 관련 변경이 없으면 반복하지 않는다. 해당 TypeScript 출력과 시험 두 파일만 확인하고 기존 SF4-2~SF4-3 시험이나 Rust/WASM 재빌드는 요구하지 않는다.
+
+```sh
+cd /Users/spu/SDKdambi/DAMBI &&
+yarn workspace @dambi/core exec tsc -p tsconfig.build.json &&
+node --test packages/core/tests/adapters/scam-profile-codec.test.mjs packages/core/tests/adapters/scam-token-profile.test.mjs
+```
+
 ## 번들 B1-1 — Universal Router
 
 2026-10-12, `main 7387536` 이후 B1-1 변경 검증: **Native 원문 2개 시험과 패키지 WASM 3개 시험 통과, 최종 WASM 로그 3 통과·0 실패.** 저장된 snapshot은 801개이며 기존 799개 내용 보존·UR 2개 추가·digest/bytes 일치를 확인했다. source-context 제외 30,484개와 Aave 거절 3개는 유지한다. 별도 `decoder_snapshot` target의 전체 결과는 공유되지 않았다. 대표 UR 경로의 편입·검증을 마쳤으며 다음은 B1-2 Aave다.
