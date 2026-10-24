@@ -177,13 +177,13 @@ function policyBatch(calls, { planId }, observedAt = NOW) {
   }])) };
 }
 
-function harness({ configured = true, enabled = true, policy = initialPolicy, scamLimits = {}, limits = {} } = {}) {
+function harness({ configured = true, enabled = true, policy = initialPolicy, scamLimits = {}, limits = {}, ethDecoder = decoder } = {}) {
   let now = NOW;
   let age = exactAge();
   const fetches = [];
   let fetchScam = async (calls, context) => scamBatch(calls, context, age);
   let fetchPolicyFacts = async (calls, context) => policyBatch(calls, context);
-  const artifact = JSON.stringify({ schema_version: 1, bundles: [decoder, syntheticDecoder, approveDecoder] });
+  const artifact = JSON.stringify({ schema_version: 1, bundles: [ethDecoder, syntheticDecoder, approveDecoder] });
   const config = {
     decoderSnapshot: { artifact, expectedDigest: `0x${createHash("sha256").update(artifact).digest("hex")}` },
     trust: { env: "staging", profile: "default", keys: [{ keyId: keys.policy.key_id,
@@ -258,19 +258,52 @@ test("unconfigured, disabled and missing-module paths never silently install the
   assert.equal(verdict.decision, "allow");
   assert.equal(verdict.scam.status, "insufficient");
   assert.ok(reasons(verdict).includes("algorithm_unavailable"));
+});
 
-  // SF0's actual ETH request remains unchanged. Its decoded route currently
-  // omits the pool-side wrapped input, so SF3 must not guess WETH or schedule
-  // analysis against an invented subject. Decoder handoff is a separate task.
-  const ethSetup = harness();
-  const { core: ethCore } = await open(t, ethSetup);
-  const ethPlan = await ethCore.plan(observedEthSwap);
-  assert.deepEqual(ethPlan.scamCalls, []);
-  const ethVerdict = ethCore.evaluate(ethPlan, policyBatch(ethPlan.calls, ethPlan));
-  assert.equal(ethVerdict.decision, "allow");
-  assert.equal(ethVerdict.scam.status, "insufficient");
-  assert.ok(reasons(ethVerdict).includes("subject_unresolved"));
-  assert.equal(ethSetup.fetches.length, 0);
+test("observed ETH swap resolves its pool-side WETH and preserves manual/check stub evidence", options, async (t) => {
+  // The raw transaction is recorded; the history, age and algorithm remain
+  // explicit synthetic fixtures. This is not a real RPC/scam detection test.
+  const setup = harness();
+  const { core } = await open(t, setup);
+  const plan = await core.plan(observedEthSwap);
+  assert.deepEqual(plan.scamCalls.map(({ method }) => method), ["scam.pool_history", "scam.token_profile"]);
+  const subject = plan.scamCalls[0].params.subject;
+  assert.equal(subject.chainId, CHAIN);
+  assert.equal(subject.pool, POOL);
+  assert.equal(subject.token, TOKEN);
+  assert.equal(subject.factory, FACTORY);
+  assert.equal(subject.quoteToken, WETH);
+  assert.deepEqual(plan.scamCalls[1].params.subject, subject);
+  const manual = core.evaluate(plan, policyBatch(plan.calls, plan), scamBatch(plan.scamCalls, plan));
+  const checked = await core.check(observedEthSwap);
+  assert.equal(manual.decision, "warn");
+  assert.equal(manual.source, "evaluated");
+  assert.equal(manual.scam.status, "warn");
+  assert.equal(manual.scam.targets[0].analysisMode, "stub");
+  assert.deepEqual(manual.scam.targets[0].rules.map(({ ruleId, state }) => [ruleId, state]), [["r1", "fired"], ["r2", "fired"]]);
+  assert.deepEqual(comparable(checked.scam), comparable(manual.scam));
+  assert.equal(setup.fetches.filter(({ scam }) => scam).length, 1);
+});
+
+test("missing or inconsistent ETH routes stay unresolved without a quote fallback", options, async (t) => {
+  const missing = structuredClone(decoder);
+  delete missing.emit.live_inputs.route.value;
+  const wrongPool = structuredClone(decoder);
+  wrongPool.emit.live_inputs.route.value.paths[0].hops[0].venue.pool = OTHER;
+  const wrongQuote = structuredClone(decoder);
+  wrongQuote.emit.live_inputs.route.value.paths[0].hops[0].token_in.key.address = OTHER;
+  for (const [label, ethDecoder] of [["missing", missing], ["wrong-pool", wrongPool], ["wrong-quote", wrongQuote]]) {
+    const setup = harness({ ethDecoder });
+    const { core } = await open(t, setup);
+    const plan = await core.plan(observedEthSwap);
+    assert.deepEqual(plan.scamCalls, [], label);
+    const verdict = core.evaluate(plan, policyBatch(plan.calls, plan));
+    assert.equal(verdict.decision, "allow", label);
+    assert.equal(verdict.source, "evaluated", label);
+    assert.equal(verdict.scam.status, "insufficient", label);
+    assert.ok(reasons(verdict).includes("subject_unresolved"), label);
+    assert.equal(setup.fetches.length, 0, label);
+  }
 });
 
 test("synthetic unsigned WETH swap crosses real Decoder/Core/WASM and keeps manual/check R1/R2 evidence equal", options, async (t) => {

@@ -3,7 +3,7 @@
   "id": "dambi/sf0-giwa/hyangno-swap-exact-eth-for-tokens@1.0.0",
   "publisher": "dambi.dev",
   "schema_version": "3",
-  "_note": "SF0-3 regression fixture only, not a packaged decoder or general GIWA/new-token support. Reuses the standard V2 swapExactETHForTokens ABI for the observed transaction in ../rpc-evidence.json. Router factory()/WETH() at block 39044394 and the recorded pool events ground the constants; they do not prove complete router bytecode equivalence. Only the exact two-token WETH -> HYANGNO path is modeled. The wallet spends native ETH; WETH identifies the pool-side wrapped asset. slippage_bp=0 and the live-input zero skeletons are decoder compatibility defaults, not observed prices, zero risk, executable quotes or measured slippage. No live values are fetched by this fixture.",
+  "_note": "SF0-3/SF4-1 regression fixture only, not a packaged decoder or general GIWA/new-token support. Reuses the standard V2 swapExactETHForTokens ABI for the observed transaction in ../rpc-evidence.json. Router factory()/WETH() at block 39044394 and the recorded pool events ground the constants; they do not prove complete router bytecode equivalence. Only the exact two-token WETH -> HYANGNO path is modeled. The wallet spends native ETH; the explicit calldata-derived route identifies the pool-side wrapped asset, not a simulated execution. slippage_bp=0, route pool_state/fees/estimated_out and other live-input zero skeletons are decoder compatibility defaults, not observed reserves, prices, zero risk, executable quotes or measured slippage. No live values are fetched by this fixture.",
   "match": {
     "selector": "0x7ff36ab5",
     "chain_to_addresses": {
@@ -80,12 +80,29 @@
     },
     "live_inputs": {
       "route": {
+        "value": {
+          "paths": [{
+            "share_bp": 10000,
+            "hops": [{
+              "token_in": { "key": { "standard": "erc20", "chain": "$chain", "address": "$args.path[0]" } },
+              "token_out": { "key": { "standard": "erc20", "chain": "$chain", "address": "$args.path[1]" } },
+              "venue": {
+                "name": "uniswap_v2",
+                "chain": "$chain",
+                "pool": "0xcaafb95fc292c10a526f03fa480407bb438dac67",
+                "factory": "0xd51d7c2a3b9b0f6876336c165adda94468500c47"
+              },
+              "pool_state": { "kind": "xy_constant", "reserve_in": "0", "reserve_out": "0", "fee_bp": 0 },
+              "effective_fee_bp": 0,
+              "estimated_out": "0"
+            }],
+            "estimated_out": "0"
+          }]
+        },
         "source": {
-          "kind": "onchain_view",
-          "chain": "$chain",
-          "contract": "0xcaafb95fc292c10a526f03fa480407bb438dac67",
-          "function": "getReserves()",
-          "decoder_id": "uniswap_v2_get_reserves"
+          "kind": "derived_from",
+          "inputs": [],
+          "calc_id": "sf0_fixture_calldata_single_hop_route"
         },
         "ttl_s": 12
       },

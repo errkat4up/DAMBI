@@ -620,6 +620,8 @@ fn parse_segment<'a>(segment: &'a str, full_path: &str) -> Result<(&'a str, Vec<
 /// `<domain>.<action>` payload (this is the v3 opcode-stream convention).
 /// In that case the inline block is extracted before flattening and merged
 /// with `live_inputs_template`.
+/// An explicit `amm.swap` route `value` is preserved and type-checked; other
+/// nested live values still use their unobserved defaults.
 ///
 /// # Errors
 ///
@@ -664,13 +666,25 @@ pub fn build_action_body(
                 LiveInputLayout::Nested => {
                     let mut live_obj = JsonMap::with_capacity(map.len());
                     for (field_name, src_payload) in map {
+                        // A trusted swap Decoder may explicitly describe the
+                        // calldata route (e.g. native ETH's pool-side WETH).
+                        // Do not seed other live values or infer missing paths.
+                        // Invalid explicit routes reach the typed serde check.
+                        let route_value = match (
+                            domain.as_deref(),
+                            action.as_deref(),
+                            field_name.as_str(),
+                        ) {
+                            (Some("amm"), Some("swap"), "route") => src_payload.get("value"),
+                            _ => None,
+                        };
                         let wrapped = wrap_live_field(
                             ctx,
                             domain.as_deref(),
                             action.as_deref(),
                             field_name,
                             src_payload,
-                            None,
+                            route_value,
                         );
                         live_obj.insert(field_name.clone(), wrapped);
                     }

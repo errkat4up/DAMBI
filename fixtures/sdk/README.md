@@ -82,7 +82,7 @@ yarn workspace @dambi/core exec tsc -p ../../contracts/scam-filter-v0.1/tsconfig
 
 2026-10-24, SF2 `70227b2` 이후 SF3 변경: Native·WASM·SDK에 `scamCalls`/별도 입력, 단일 평가·정책 합성, 계획별 설정·모듈 고정, 후보 선택, 기한·취소·늦은 응답 처리를 연결했다. 실제 알고리즘·RPC·서명 번들 수신은 포함하지 않는다. 정상 빌드는 고정 응답 모듈을 설치할 수 없으며, 회귀 시험만 별도 `scam-test-fixtures` WASM을 사용한다. **사용자 제공 실행 로그 기준 검증 완료 — Native session 12개, 기존 SDK check 8개, [SF3 통합 시험](../../packages/core/tests/scam.test.mjs) 9개로 총 29개 통과·0개 실패. 일반·테스트용 WASM 빌드 모두 성공.** 일반 빌드의 테스트 전용 별칭 `unused import` 경고는 남아 있으나 실패는 아니다. 검증된 기능 코드는 그대로 유지했고 기록·커밋을 위해 빌드·시험·RPC를 재실행하지 않았다.
 
-남은 제한: SF0 실제 ETH→HYANGNO 요청은 Decoder가 풀 측 WETH 경로를 전달하지 않아 `subject_unresolved`이며, 이를 안전하거나 검사 완료로 표시하지 않는다. 연결 시험의 양성 경로는 명시적 합성·미서명 WETH→HYANGNO `swapExactTokensForTokens` 요청이다. 실제 ETH 경로는 SF4 실연결 전 Decoder 대상 정보 전달을 보완해야 한다. SF3 검증과 해당 지원 확대를 구분하며, 실제 탐지 정확도는 팀원 모듈 인수 후 확인한다.
+SF3 시점의 제한: SF0 실제 ETH→HYANGNO 요청은 Decoder가 풀 측 WETH 경로를 전달하지 않아 `subject_unresolved`였다. 당시 연결 시험의 양성 경로는 명시적 합성·미서명 WETH→HYANGNO `swapExactTokensForTokens` 요청이다. 후속 대상 정보 전달 보완은 아래 SF4-1에서 별도로 추적하며, 실제 탐지 정확도는 팀원 모듈 인수 후 확인한다.
 
 2026-10-25 SF3 후속 보완(`0b3efb1` 이후 신규 풀 판정·관련 시험 변경): 나이 기준 미만의 풀은 룰이 모두 clear여도 `insufficient + market_too_young`을 반환하도록 Native 합성을 수정했다. **사용자 실행 결과 기준 테스트용 WASM release 빌드 성공, 대상 시험 1개 통과·0개 실패.** 기존 candidate-grid 시험에서 신규 풀의 수동/자동 평가 일치, 정확한 나이와 검증된 하한의 등호 경계, 나이 미상, 신규 풀 경고 유지를 확인했다. 위 29개는 보완 전 별도 결과이며 이번에 재실행하지 않았다. 실제 알고리즘·RPC와 ETH 경로의 남은 제한은 그대로다. 아래는 통과한 변경 범위의 재현 명령이며 관련 변경이 없으면 반복하지 않는다.
 
@@ -90,6 +90,20 @@ yarn workspace @dambi/core exec tsc -p ../../contracts/scam-filter-v0.1/tsconfig
 cd /Users/spu/SDKdambi/DAMBI
 wasm-pack build crates/dambi-core-wasm --target web --release --out-dir pkg-scam-test --out-name dambi_core --features scam-test-fixtures --locked &&
 node --test --test-name-pattern="one frozen plan" packages/core/tests/scam.test.mjs
+```
+
+### SF4-1 실제 거래 대상 연결 보완
+
+2026-10-25, `18ebbca` 이후 변경: Mapper가 신뢰된 `amm.swap.route`의 명시 값만 전달하도록 보완하고, GIWA 시험 Decoder에 calldata 기반 WETH→HYANGNO 단일 hop을 추가했다. 원래 native ETH 지출과 Core 대상 검증은 유지한다. 실제 원문 요청의 수동/자동 평가 일치, 경로 누락·풀/quote 불일치 거절, 잘못된 route 타입 거절·다른 live 값 기본값 보존을 관련 시험에 반영했다. **사용자 실행 로그 기준 Native runner·테스트용 WASM release 빌드 성공, Decoder 7개·SDK 스캠 회귀 11개로 총 18개 통과·0개 실패.** 기존 Native 테스트 전용 별칭의 `unused import` 경고는 남아 있으나 실패는 아니다. 실제 RPC·알고리즘·제품 Decoder 배포·LP 실연결은 미포함이다.
+
+아래는 통과한 변경 범위의 재현 명령이며 관련 변경이 없으면 반복하지 않는다. 공통 Decoder 입력 변경의 영향 범위만 확인했고 기존 Core 전체 시험·SF0 RPC 확인은 반복하지 않았다.
+
+```sh
+cd /Users/spu/SDKdambi/DAMBI &&
+cargo build --locked -p dambi-core --example fixture_runner &&
+DAMBI_FIXTURE_BACKEND=native node --test fixtures/sdk/giwa-sf0/decoder.test.mjs &&
+wasm-pack build crates/dambi-core-wasm --target web --release --out-dir pkg-scam-test --out-name dambi_core --features scam-test-fixtures --locked &&
+node --test packages/core/tests/scam.test.mjs
 ```
 
 ## 번들 B1-1 — Universal Router
