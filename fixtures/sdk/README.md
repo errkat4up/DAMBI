@@ -118,6 +118,18 @@ yarn workspace @dambi/core exec tsc -p tsconfig.build.json &&
 node --test packages/core/tests/adapters/scam-rpc-codec.test.mjs packages/core/tests/adapters/scam-rpc.test.mjs
 ```
 
+### SF4-3 풀 이력 정규화
+
+2026-10-25, SF4-2 `d5973c7` 이후 신규 `scam-block-time.ts`·`scam-pool-history.ts`와 대응 시험 변경: 실제 인접 블록 헤더로 관측 시작 경계를 확인하고 과거 `getReserves` + 이후 Sync로 reserve 스냅샷을 구성한다. 블록 간격은 탐색 힌트로만 쓰고 헤더 조회 예산을 제한한다. 두 후보 격자는 한 원천 조회에서 만들며 정수 reserve·0을 보존하고 비격자 끝점을 추가하지 않는다. 결측은 다음 확인 Sync 직전까지 이어지고 두 history와 coverage에 같은 구간으로 남는다. decimals 조회 불가는 임의 값 없이 missing/unavailable이다. **사용자 제공 실행 결과 기준 시각 경계 5개·이력 정규화 8개로 총 13개 통과·0개 실패, 취소·건너뜀 0개.** 원천 RPC·실제 알고리즘은 실행하지 않았다. 저장 GIWA Sync 한 건은 원문 재생하고 주변 seed·헤더는 합성 응답임을 시험에 명시했다. 기록·커밋을 위한 재시험은 하지 않았다.
+
+역산용 Swap/Mint/Burn 조회는 추가하지 않았다. 과거 시작 상태를 얻지 못하면 첫 확인 Sync 전까지 누락이며, 정확한 생성 근거 없이 warm-up 완료로 승격하지 않는다. 풀 생성 나이·관리자 이벤트는 SF4-4, 공개 provider 연결·실측은 SF4-5에 남는다. 다음은 검증 범위의 재현 명령이며 관련 변경이 없으면 반복하지 않는다. 해당 TypeScript 출력과 시험 두 파일만 실행하고 Rust/WASM 재빌드는 필요 없다.
+
+```sh
+cd /Users/spu/SDKdambi/DAMBI &&
+yarn workspace @dambi/core exec tsc -p tsconfig.build.json &&
+node --test packages/core/tests/adapters/scam-block-time.test.mjs packages/core/tests/adapters/scam-pool-history.test.mjs
+```
+
 ## 번들 B1-1 — Universal Router
 
 2026-10-12, `main 7387536` 이후 B1-1 변경 검증: **Native 원문 2개 시험과 패키지 WASM 3개 시험 통과, 최종 WASM 로그 3 통과·0 실패.** 저장된 snapshot은 801개이며 기존 799개 내용 보존·UR 2개 추가·digest/bytes 일치를 확인했다. source-context 제외 30,484개와 Aave 거절 3개는 유지한다. 별도 `decoder_snapshot` target의 전체 결과는 공유되지 않았다. 대표 UR 경로의 편입·검증을 마쳤으며 다음은 B1-2 Aave다.
