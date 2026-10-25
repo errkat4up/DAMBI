@@ -30,6 +30,12 @@ import {
   AdapterError,
   createPolicyApiSource,
   createEvmFactProvider,
+  createScamFactProvider,
+  ScamDataError,
+  type ScamFactProviderOptions,
+  type ScamProviderMetrics,
+  type ScamProviderDiagnostic,
+  type ScamRpcDiagnostic,
   type AdapterErrorCode,
   type PolicyApiSourceOptions,
   type EvmFactProviderOptions,
@@ -96,6 +102,47 @@ evmFact.fetch([], { signal: new AbortController().signal });
 // @ts-expect-error The EVM adapter belongs to its optional public subpath.
 import { createEvmFactProvider as rootEvmFactProvider } from "@dambi/core";
 void [evmFact, evmBatch, invalidFactRequest];
+
+function scamAdapter(options: ScamFactProviderOptions): FactProvider {
+  return createScamFactProvider({ ...options, policy: evmFact,
+    rpc: { ...options.rpc, limits: { ...options.rpc.limits, minRequestIntervalMs: 75,
+      maxRetryDelayMs: Math.max(30_000, options.rpc.limits.retryDelayMs) } },
+    onMetrics(metrics: ScamProviderMetrics) {
+      const outcome: "success" | "partial" | "failed" = metrics.outcome;
+      // @ts-expect-error Diagnostic snapshots are read-only.
+      metrics.requests = 0;
+      if (metrics.preflight) {
+        const minimumRequests: number = metrics.preflight.minimumRemainingRequests;
+        const group: number | undefined = metrics.preflightGroup;
+        // @ts-expect-error Preflight snapshots cannot be edited by observers.
+        metrics.preflight.remainingRequestBudget = 0;
+        void [minimumRequests, group];
+      }
+      const failure: ScamProviderDiagnostic | undefined = metrics.failure;
+      if (failure) {
+        const raw: ScamRpcDiagnostic = failure;
+        const operation: "request" | "reference" | "pool_identity" | "pool_history" | "token_profile" | "result" | "final_recheck" | undefined = failure.operation;
+        // @ts-expect-error Failure details are immutable snapshots too.
+        failure.stage = "provider";
+        // @ts-expect-error Remote messages and endpoint URLs are never diagnostic fields.
+        const message = failure.message;
+        void [raw, operation, message];
+      }
+      void outcome;
+    } });
+}
+function invalidScamPacing(options: ScamFactProviderOptions): void {
+  // @ts-expect-error Request pacing is a numeric duration, never an RPC provider label.
+  createScamFactProvider({ ...options, rpc: { ...options.rpc, limits: { ...options.rpc.limits, minRequestIntervalMs: "75" } } });
+  // @ts-expect-error Retry backoff caps are numeric durations too.
+  createScamFactProvider({ ...options, rpc: { ...options.rpc, limits: { ...options.rpc.limits, maxRetryDelayMs: "30000" } } });
+}
+const scamDataFailure = new ScamDataError("reorg");
+// @ts-expect-error Only sanitized advisory failure categories may cross the port.
+new ScamDataError("arbitrary_remote_error");
+// @ts-expect-error Provider failure reasons are immutable.
+scamDataFailure.reason = "timeout";
+void [scamAdapter, invalidScamPacing, scamDataFailure];
 
 // @ts-expect-error Decoder lookup is not a public I/O port.
 import type { DecoderSource } from "@dambi/core";

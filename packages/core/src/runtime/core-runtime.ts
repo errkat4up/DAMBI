@@ -6,6 +6,7 @@ import type { CorePlan, FactBatch, PlannedCall } from "../types/plan.js";
 import type { CheckRequest, UnsupportedRequest } from "../types/request.js";
 import type { Verdict, VerdictMetadata } from "../types/verdict.js";
 import type { ScamConfig, ScamFactBatch, ScamSettings, NativeScamInputDraft } from "../types/scam.js";
+import { ScamDataError } from "../types/scam-error.js";
 import type { SignedPolicyBundle } from "../ports/policy.js";
 import type { FactResult } from "../ports/fact.js";
 import { invoke, nativeError, release, type NativeCore, type NativePlan } from "./bridge.js";
@@ -22,6 +23,7 @@ interface OwnedConfig {
   readonly now: () => number;
   readonly fetchPolicy: (options: CallOptions) => Promise<SignedPolicyBundle>;
   readonly fetchFacts: (calls: readonly PlannedCall[], options: CallOptions & { planId: string }) => Promise<FactBatch>;
+  readonly fetchScamFacts: (calls: readonly PlannedCall[], options: CallOptions & { planId: string }) => Promise<FactBatch>;
   readonly hooks: HookDispatcher;
   readonly enforcement: Verdict["enforcement"];
   readonly scam?: ScamConfig;
@@ -133,6 +135,15 @@ function ownConfig(input: CoreConfig): OwnedConfig {
       fetchFacts: async (calls, options) => {
         try { return await fetchFacts(calls, options) as FactBatch; }
         catch { throw new FactFetchFailure(); }
+      },
+      fetchScamFacts: async (calls, options) => {
+        try { return await fetchFacts(calls, options) as FactBatch; }
+        catch (error) {
+          // Only this explicit advisory type crosses the provider boundary.
+          // Policy fetch failures keep their existing fail-closed semantics.
+          if (error instanceof ScamDataError) throw error;
+          throw new FactFetchFailure();
+        }
       },
     };
   } catch (error) {
@@ -432,7 +443,7 @@ class CoreRuntime implements DambiCore {
       if (this.#config.scam) {
         scamOperation = beginScamOperation(plan, this.#handles.get(plan)?.policyPlanDeadlineMs,
           this.#config.scam.limits, this.#config.limits.maxFactAgeMs, this.#clock,
-          this.#config.fetchFacts, batch as FactBatch, signal);
+          this.#config.fetchScamFacts, batch as FactBatch, signal);
         const pending = scamOperation.operation;
         if (pending) {
           this.#checks.add(pending);

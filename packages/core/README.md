@@ -251,7 +251,84 @@ The report omits endpoint URLs, headers, raw responses, owner/token addresses an
 key material. The live command is never run automatically by CI; CI uses only
 loopback fixtures. Missing configuration or package artifacts fail with a nonzero exit.
 
-### Standalone Node and browser consumers
+## Optional Scam Filter data adapter (development)
+
+`createScamFactProvider` from `@dambi/core/adapters` wraps an existing
+`FactProvider` through its `policy` option. Assign the wrapper to `ports.fact`;
+ordinary policy batches are delegated unchanged and `scam.*` batches use the
+dedicated data path. Do not combine the two channels into one batch. Manual
+evaluation fetches `plan.calls` and `plan.scamCalls` separately and passes the
+second batch as the third argument of `core.evaluate()`.
+
+Configure one chain through `rpc`, explicit `history`/`profile` builder limits,
+and whole-fetch `limits` (`timeoutMs`, `maxCalls`, `maxTargets`, `maxRequestBytes`,
+`maxResultBytes`). Share Core's clock if overriding it. RPC request/byte/log caps
+apply per reference group; the deadline and output-size cap cover all groups.
+Each history/profile pair shares a fixed reference and is withheld until the
+final block-hash checks pass. There is no cross-fetch cache.
+
+`rpc.limits.minRequestIntervalMs` sets minimum request-start spacing (default 0
+for compatibility). Spacing and rate-limit cooldown are shared across batches
+and retries of the same provider/source, not across separate instances or
+processes. `retryDelayMs` is the exponential backoff base; optional
+`maxRetryDelayMs` defaults to the greater of 30,000ms and the base. HTTP 429 and
+RPC -32005 also pause sibling requests, including when retries are exhausted.
+A valid 429 `Retry-After` (seconds or IMF-fixdate) is honored even if longer than
+the backoff cap. All waits consume the existing deadline and are cancellable;
+late replies cannot extend cooldown. Request counts include actual starts only.
+
+Factory and administrator capabilities are optional trusted configuration,
+not assumptions inferred from a matching topic. Missing configuration leaves
+age unknown and requested administrator events unavailable. `ScamDataError`
+preserves sanitized advisory failure reasons without changing policy failure
+semantics. `onMetrics` reports data-path success/partial/failure, requests,
+retries, completed response-body bytes, latency and result size. It excludes
+algorithm execution and Core evaluation; observer failures do not affect results.
+Failed runs also include an immutable `failure` diagnostic: provider operation,
+RPC stage/method, error kind and available numeric HTTP status/RPC code/attempt.
+No endpoint, headers, arguments or remote error text are exposed. Recovered
+errors are not terminal causes, and success/partial runs omit this field.
+
+Pool history can use optional RPC log timestamps to form an unpublished draft.
+Missing timestamps retain the original header lookup; malformed or inconsistent
+times are not substituted. Before publication, every evidence block still needs
+an actual canonical header with the matching hash and any recorded timestamp.
+This avoids the first of two event-header reads where log times are available;
+it does not remove final verification or guarantee cold-history completion.
+
+After collecting history logs, `onMetrics.preflight` records the last known-work
+budget check in `preflightGroup` (one-based reference group). It counts unique
+log blocks, timestamped blocks, uncached header reads and final rechecks, plus
+remaining request/time budgets and the minimum pacing delay. This is a lower
+bound at that checkpoint, excluding later profile/target work, retries and
+network latency. Impossible request or pacing budgets fail with
+`resource_limit` at stage `preflight`, before individual event-header reads.
+The separate builder header-lookup cap and all existing deadlines still apply.
+
+This adapter neither installs a scam bundle nor provides an algorithm. Production
+bundle/module integration remains separate. For manual read-only RPC measurement,
+after building TypeScript from the repository root:
+
+```sh
+node scripts/sdk/scam-data-probe.mjs
+```
+
+The probe defaults to GIWA Sepolia, one known pool, a 24-hour window plus one-hour
+warm-up, a 2,500 ms budget and one uncached attempt. Defaults are diagnostic inputs,
+not calibrated risk policy. Probe request spacing is explicitly 100ms, with
+1,000ms retry base, 8,000ms backoff cap and one retry. Override these diagnostic
+settings using `SCAM_RPC_MIN_INTERVAL_MS`, `SCAM_RPC_RETRY_BASE_MS` and
+`SCAM_RPC_RETRY_MAX_MS` (0–60,000, cap >= base). Pacing may exhaust the unchanged
+budget; it does not guarantee completion of a cold 24-hour scan.
+Unknown age/unsupported admin coverage is expected
+without deployment capabilities. Use `SCAM_RPC_URL`, `SCAM_REPEATS` (1–20),
+`SCAM_TIMEOUT_MS`, or `SCAM_TARGETS_JSON` (up to four explicit
+`{pool, token, quoteToken, factory}` objects) when needed. Never add private
+endpoint credentials to tracked files. Reports omit endpoints and headers;
+failures remain in the denominator and small-sample percentiles are not production
+performance claims. Node reachability does not establish extension reachability.
+
+## Standalone Node and browser consumers
 
 The [adapter example](../../examples/sdk-adapters/README.md) combines the policy
 HTTP and EVM Fact adapters using the public package exports. The consumer gate

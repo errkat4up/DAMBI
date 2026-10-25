@@ -117,3 +117,26 @@ test("block time callers share cached and in-flight headers without retrying fai
   await assert.rejects(index.block("0"), /unavailable/);
   assert.equal(calls, 3);
 });
+
+test("block time draft log evidence neither invents headers nor bypasses time consistency and lookup budgets", async () => {
+  const log = (n, timestampMs) => ({ blockNumber: String(n), blockHash: hash(BigInt(n) + 1n), timestampMs });
+  const f = fixture([1_000, 2_000, 3_000, 4_000, 5_000], { maxBlocks: 2 });
+  assert.equal(f.index.logTime(log(2, 3_000)), 3_000);
+  assert.deepEqual(f.requested, [], "Draft time evidence is not a header lookup");
+  assert.doesNotThrow(() => f.index.preflight(["2", "2", "4"]));
+  const actual = await f.index.block("2");
+  assert.equal(actual.parentHash, hash(2), "The real parent hash still comes from a header");
+  assert.deepEqual(f.requested, ["2"]);
+  assert.throws(() => f.index.preflight(["1", "4"]), reason("resource_limit"));
+  assert.deepEqual(f.requested, ["2"], "Preflight does not spend a partial header budget");
+
+  const conflict = fixture([1_000, 2_000, 3_000, 4_000]);
+  await conflict.index.block("1");
+  assert.throws(() => conflict.index.logTime(log(1, 2_001)), reason("invalid_response"));
+  const inverted = fixture([1_000, 2_000, 3_000, 4_000]);
+  await inverted.index.block("1");
+  assert.throws(() => inverted.index.logTime(log(2, 1_500)), reason("invalid_response"));
+  const laterHeader = fixture([1_000, 2_000, 3_000, 4_000]);
+  laterHeader.index.logTime(log(2, 2_500));
+  await assert.rejects(laterHeader.index.block("2"), reason("invalid_response"));
+});

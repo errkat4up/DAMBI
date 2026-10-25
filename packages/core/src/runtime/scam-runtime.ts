@@ -2,6 +2,7 @@ import { CoreError } from "../types/errors.js";
 import type { CorePlan, FactBatch, PlannedCall } from "../types/plan.js";
 import type { CallOptions } from "../types/options.js";
 import type { NativeScamInputDraft, ScamFailureReason, ScamLimits } from "../types/scam.js";
+import { ScamDataError } from "../types/scam-error.js";
 import { checkAbort, startOperation, type PendingOperation } from "./io.js";
 import { copyJson, field, freezeTree, record } from "./json.js";
 
@@ -80,9 +81,18 @@ export function beginScamOperation(
   let settled = false;
   let tightenedTimer: ReturnType<typeof setTimeout> | undefined;
   const operation = startOperation(async (internal) => {
-    const received = await fetchFacts(freezeTree(calls), { planId: plan.planId, signal: internal });
-    checkAbort(internal);
-    const copied = copyScamFacts(received, limits);
+    let copied: NativeScamInputDraft;
+    try {
+      const received = await fetchFacts(freezeTree(calls), { planId: plan.planId, signal: internal });
+      checkAbort(internal);
+      copied = copyScamFacts(received, limits);
+    } catch (error) {
+      // Cancellation wins over a provider's late failure. Convert only the
+      // explicit advisory type before the common operation sanitizes errors.
+      checkAbort(internal);
+      if (error instanceof ScamDataError) copied = unavailable(error.reason);
+      else throw error;
+    }
     checkAbort(internal);
     const completed = now();
     if (completed < started || completed >= deadline) return unavailable(failureReason);

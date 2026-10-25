@@ -28,11 +28,12 @@ const params = (target, overrides = {}) => ({ subject: target, referenceGroupId:
 const sync = (n, index, reserve0, reserve1) => ({ address: POOL, blockNumber: q(n), blockHash: blockHash(n),
   transactionHash: `0x${word(BigInt(n) + 1_000_000n)}`, transactionIndex: "0x0", logIndex: q(index),
   topics: [V2_SYNC_TOPIC], data: `0x${word(reserve0)}${word(reserve1)}`, removed: false });
+const withTimestamp = (log) => ({ ...log, blockTimestamp: q(BigInt(log.blockNumber) + 1_000n) });
 
 function fixture({ head = 20, target = subject(), token0 = target.token, token1 = target.quoteToken,
   seed = [100n, 200n], decimals = [18, 6], logs = [], maxBlocksPerQuery = 10_000,
   headerFor = header, handle } = {}) {
-  const calls = [];
+  const calls = [], preflights = [];
   const source = createScamRpcSource({ chainId: 91342, endpoint: { rpcUrl: "https://rpc.invalid/history" },
     factories: [target.factory], quoteTokens: [target.quoteToken], clock: { now: () => NOW },
     limits: { maxRequests: 300, maxResponseBytes: 65_536, maxTotalResponseBytes: 1_000_000,
@@ -62,10 +63,13 @@ function fixture({ head = 20, target = subject(), token0 = target.token, token1 
       }
       throw new Error(`Unexpected fake RPC method: ${rpc.method}`);
     } });
-  return { calls, build: async (overrides = {}, budget = {}) => source.withBatch({ planId: "plan:history",
+  return { calls, preflights, build: async (overrides = {}, budget = {}) => source.withBatch({ planId: "plan:history",
     referenceGroupId: "history:test", confirmDepth: 0, deadlineMs: NOW + 5_000, subjects: [target] }, async (batch) => {
     const pool = await batch.pool(0);
-    return buildPoolHistory(batch, pool, params(pool.subject, overrides), { ...limits, ...budget });
+    return buildPoolHistory({ ...batch, preflightHeaders(numbers) {
+      preflights.push([...numbers]);
+      batch.preflightHeaders(numbers);
+    } }, pool, params(pool.subject, overrides), { ...limits, ...budget });
   }) };
 }
 
@@ -134,15 +138,40 @@ test("pool history maps reversed token order without rounding raw integers or dr
   assert.deepEqual(value.coverage.missing, []);
 });
 
+test("pool history uses optional log times for identical grids while keeping actual final header checks", async () => {
+  const logs = [sync(12, 0, 120, 240), sync(17, 0, 170, 340)];
+  const fallback = fixture({ logs }), timed = fixture({ logs: logs.map(withTimestamp) });
+  const grids = { candidateResolutions: [{ bucketMs: 2_000, gridOriginMs: 0 }, { bucketMs: 3_000, gridOriginMs: 500 }] };
+  const expected = await fallback.build(grids);
+  // Three boundary/reference lookups consume this local budget. The supplied
+  // log times are draft evidence, not fake headers or extra header lookups.
+  const actual = await timed.build(grids, { maxBlockLookups: 3 });
+  assert.deepEqual(actual.value, expected.value);
+  assert.deepEqual(timed.preflights, [[]]);
+  assert.deepEqual(fallback.preflights, [["12", "17"]]);
+  for (const n of [12, 17]) {
+    const reads = (f) => f.calls.filter((rpc) => rpc.method === "eth_getBlockByNumber" && rpc.params[0] === q(n)).length;
+    assert.equal(reads(timed), 1, "Timestamped logs still require an actual final header");
+    assert.equal(reads(fallback), 2, "Missing timestamps retain the original lookup and final check");
+  }
+  const mixed = fixture({ logs: [withTimestamp(logs[0]), logs[1]] });
+  assert.deepEqual((await mixed.build(grids)).value, expected.value);
+  assert.deepEqual(mixed.preflights, [["17"]]);
+});
+
 test("pool history carries raw chunk gaps through the millisecond before a later Sync on every candidate", async () => {
-  const make = (unavailableGapHeader = false) => fixture({ maxBlocksPerQuery: 4,
-    logs: [sync(12, 0, 120, 240), sync(19, 0, 190, 380)], handle: (rpc) => {
+  const make = (unavailableGapHeader = false, timestamped = false) => fixture({ maxBlocksPerQuery: 4,
+    logs: [sync(12, 0, 120, 240), sync(19, 0, 190, 380)].map((log) => timestamped ? withTimestamp(log) : log), handle: (rpc) => {
       if (rpc.method === "eth_getLogs" && rpc.params[0].fromBlock === q(15)) return new Response("unavailable", { status: 500 });
       if (unavailableGapHeader && rpc.method === "eth_getBlockByNumber" && rpc.params[0] === q(15)) return new Response("no header", { status: 500 });
       return undefined;
     } });
-  const { value } = await make().build({ lookbackSec: 8, warmupSec: 2,
-    candidateResolutions: [{ bucketMs: 1_000, gridOriginMs: 0 }, { bucketMs: 2_000, gridOriginMs: 0 }] });
+  const settings = { lookbackSec: 8, warmupSec: 2,
+    candidateResolutions: [{ bucketMs: 1_000, gridOriginMs: 0 }, { bucketMs: 2_000, gridOriginMs: 0 }] };
+  const { value } = await make().build(settings);
+  const timed = make(false, true);
+  assert.deepEqual((await timed.build(settings)).value, value);
+  assert.deepEqual(timed.preflights, [["15"]], "Missing-range boundaries always use actual headers");
   const interval = { fromMs: time(15) - 1, toMs: time(19) - 1 };
   assert.deepEqual(value.coverage.missing, [{ ...interval, reason: "rpc_error" }]);
   assert.deepEqual(value.histories.map(({ history }) => history.missing), [[interval], [interval]]);
@@ -178,7 +207,9 @@ test("pool history distinguishes complete empty logs from failed seed history an
 
 test("pool history treats malformed Sync blocks as unavailable instead of accepting their later same-block values", async () => {
   const malformed = { ...sync(14, 0, 140, 280), data: `0x${word(1n << 112n)}${word(280)}` };
-  const { value } = await fixture({ logs: [sync(14, 1, 141, 282), malformed, sync(17, 0, 170, 340)] }).build();
+  const logs = [sync(14, 1, 141, 282), malformed, sync(17, 0, 170, 340)];
+  const { value } = await fixture({ logs }).build();
+  assert.deepEqual((await fixture({ logs: logs.map(withTimestamp) }).build()).value, value);
   assert.deepEqual(value.coverage.missing, [{ fromMs: time(14) - 1, toMs: time(17) - 1, reason: "unavailable_history" }]);
   assert.deepEqual(value.histories[0].history.points.map((point) => point.tMs), [10, 11, 12, 13, 17, 18, 19, 20].map(time));
   assert.equal(value.histories[0].history.points.find((point) => point.tMs === time(17)).reserveToken, "170");
@@ -202,7 +233,8 @@ test("pool history rejects incompatible requests and impossible budgets before d
   const pool = { subject: subject(), token0: TOKEN, token1: QUOTE };
   const batch = { referenceGroupId: "history:test", reference: {
     block: { number: "20", hash: blockHash(20), timestampMs: time(20) }, requiredConfirmDepth: 0,
-  }, block: noData, reserves: noData, decimals: noData, logs: noData };
+  }, block: noData, reserves: noData, decimals: noData, logs: noData,
+  preflightHeaders: () => { throw new Error("Preflight must not start for invalid input"); } };
   for (const override of [
     { builderVersion: "unknown/99" }, { dataSchema: "scam.pool_history/99" }, { referenceGroupId: "other" },
     { confirmDepth: 1 }, { subject: { ...subject(), token: QUOTE } }, { lookbackSec: 86_401 },
@@ -212,4 +244,9 @@ test("pool history rejects incompatible requests and impossible budgets before d
   await assert.rejects(buildPoolHistory(batch, pool, params(pool.subject), { ...limits, blockTimeHintMs: 0 }), failure("invalid_config"));
   assert.equal(dataCalls, 0);
   await assert.rejects(fixture({ logs: [sync(12, 0, 120, 240), sync(13, 0, 130, 260)] }).build({}, { maxLogs: 1 }), failure("resource_limit"));
+  const limited = fixture({ logs: [sync(12, 0, 120, 240), sync(13, 0, 130, 260)] });
+  await assert.rejects(limited.build({}, { maxBlockLookups: 4 }), failure("resource_limit"));
+  assert.deepEqual(limited.preflights, [["12", "13"]]);
+  assert.equal(limited.calls.some((rpc) => rpc.method === "eth_getBlockByNumber" && [q(12), q(13)].includes(rpc.params[0])), false,
+    "Known excess time-index work fails before the first event header, not midway through it");
 });

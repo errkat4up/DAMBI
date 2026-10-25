@@ -1,10 +1,10 @@
-import { hash, type RpcBlock } from "./scam-rpc-codec.js";
+import { hash, type RpcBlock, type RpcLog } from "./scam-rpc-codec.js";
 import { ScamRpcError, type ScamRpcBatch, type ScamRpcFailure } from "./scam-rpc.js";
 
 export interface BlockTimeOptions {
   /** Unique requested headers, including the reference header when requested. */
   readonly maxBlocks: number;
-  /** Search hint only. Returned times always come from actual block headers. */
+  /** Search hint only; never supplies timestamp evidence. */
   readonly blockTimeHintMs: number;
 }
 export interface BlockTimeBoundary {
@@ -31,12 +31,59 @@ export function createBlockTimeIndex(batch: ScamRpcBatch, options: BlockTimeOpti
   const baseTime = reference.timestampMs;
   if (!integer(baseTime) || !hash(baseHash)) return fail("invalid_request");
   const pending = new Map<string, Promise<RpcBlock>>();
-  const observed: RpcBlock[] = [];
+  // Log timestamps are draft evidence, not fabricated headers or cached block
+  // lookups. The raw batch must compare them with actual headers before publish.
+  const observed: Pick<RpcBlock, "number" | "hash" | "timestampMs">[] = [];
   let terminal: ScamRpcError | undefined;
   const reject = (reason: "invalid_response" | "reorg" | "resource_limit"): never => {
     terminal ??= new ScamRpcError(reason);
     throw terminal;
   };
+
+  function observeTime(value: Pick<RpcBlock, "number" | "hash" | "timestampMs">): void {
+    const n = height(value.number);
+    if (n > baseHeight || !hash(value.hash) || !integer(value.timestampMs)
+        || value.timestampMs > baseTime) return reject("invalid_response");
+    if (n === baseHeight) {
+      if (value.hash.toLowerCase() !== baseHash.toLowerCase()) return reject("reorg");
+      if (value.timestampMs !== baseTime) return reject("invalid_response");
+    }
+    let low = 0;
+    let high = observed.length;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (BigInt(observed[middle].number) < n) low = middle + 1;
+      else high = middle;
+    }
+    const previous = observed[low - 1];
+    const next = observed[low];
+    if (next?.number === value.number) {
+      if (next.hash !== value.hash.toLowerCase()) return reject("reorg");
+      if (next.timestampMs !== value.timestampMs) return reject("invalid_response");
+      return;
+    }
+    if ((previous && previous.timestampMs > value.timestampMs)
+        || (next && next.timestampMs < value.timestampMs)) return reject("invalid_response");
+    observed.splice(low, 0, { number: value.number, hash: value.hash.toLowerCase() as RpcBlock["hash"], timestampMs: value.timestampMs });
+  }
+
+  /** Known remaining header work only; does not reserve capacity or start I/O. */
+  function preflight(numbers: readonly string[]): void {
+    if (terminal) throw terminal;
+    const required = new Set(pending.keys());
+    for (const number of numbers) {
+      if (height(number) > baseHeight) return fail("invalid_request");
+      required.add(number);
+    }
+    if (required.size > maxBlocks) return reject("resource_limit");
+  }
+
+  function logTime(log: RpcLog): number {
+    if (terminal) throw terminal;
+    if (log.timestampMs === undefined) return fail("invalid_request");
+    observeTime({ number: log.blockNumber, hash: log.blockHash, timestampMs: log.timestampMs });
+    return log.timestampMs;
+  }
 
   function block(number: string): Promise<RpcBlock> {
     if (terminal) throw terminal;
@@ -58,22 +105,7 @@ export function createBlockTimeIndex(batch: ScamRpcBatch, options: BlockTimeOpti
         number, hash: value.hash.toLowerCase() as RpcBlock["hash"],
         timestampMs: value.timestampMs, parentHash: value.parentHash.toLowerCase() as RpcBlock["parentHash"],
       });
-      let low = 0;
-      let high = observed.length;
-      while (low < high) {
-        const middle = Math.floor((low + high) / 2);
-        if (BigInt(observed[middle].number) < n) low = middle + 1;
-        else high = middle;
-      }
-      const previous = observed[low - 1];
-      const next = observed[low];
-      if ((previous && previous.timestampMs > result.timestampMs)
-          || (next && next.timestampMs < result.timestampMs)) return reject("invalid_response");
-      if (next?.number === number) {
-        if (next.hash !== result.hash) return reject("reorg");
-        return next;
-      }
-      observed.splice(low, 0, result);
+      observeTime(result);
       return result;
     })();
     // Keep failures as well: one unavailable height must not cause unbounded retries.
@@ -120,5 +152,5 @@ export function createBlockTimeIndex(batch: ScamRpcBatch, options: BlockTimeOpti
     return Object.freeze({ before: lower, after: upper });
   }
 
-  return Object.freeze({ block, atOrBefore });
+  return Object.freeze({ block, atOrBefore, preflight, logTime });
 }

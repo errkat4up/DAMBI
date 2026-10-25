@@ -3,7 +3,9 @@ import { createHash, sign } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { before, test } from "node:test";
 import { CoreError } from "@dambi/core";
+import { createScamFactProvider } from "@dambi/core/adapters";
 import { initializeCoreForScamTest } from "../dist/runtime/core-runtime.js";
+import { scamProviderRpcFixture } from "./adapters/helpers/scam-provider-fixture.mjs";
 
 // Explicit, separately built feature artifact. This suite never builds, fetches
 // RPC, falls back to an engine mock, or installs its stub in the product WASM.
@@ -239,6 +241,35 @@ const tick = () => new Promise((resolve) => setImmediate(resolve));
 const code = (expected) => (error) => error instanceof CoreError && error.code === expected;
 const reasons = (verdict) => [...verdict.scam.reasons, ...verdict.scam.targets.flatMap((target) => target.reasons)];
 const options = { timeout: 10_000 };
+
+function sf45Fixture(outcome = "fired", withAdminRule = false) {
+  const selected = fixture(outcome);
+  selected.builderVersion = "dambi-v2/1";
+  if (withAdminRule) {
+    const rule = { id: "admin", enabled: true, kind: "event_count", lookbackSec: 10,
+      eventKinds: ["paused"], count: 1 };
+    for (const candidate of ["newMarket", "established"]) {
+      selected.bundle.presets[0][candidate].rules.push(structuredClone(rule));
+    }
+    selected.algorithm.results.push({ ruleId: "admin", outcome: "clear", observed: 0,
+      threshold: 1, coverageBps: 10_000, warmupComplete: true });
+  }
+  return selected;
+}
+
+function sf45Provider(setup, failure) {
+  const raw = scamProviderRpcFixture({ now: NOW, chainId: CHAIN, factory: FACTORY,
+    pool: POOL, token: TOKEN, quoteToken: WETH, failure });
+  const policyCalls = [];
+  const provider = createScamFactProvider({ rpc: raw.rpc, history: raw.history, profile: raw.profile,
+    factorySupport: raw.factorySupport,
+    policy: { fetch(calls, context) { policyCalls.push({ calls, context }); return Promise.resolve(policyBatch(calls, context)); } },
+    limits: { timeoutMs: failure === "timeout" ? 20 : 500, maxCalls: 16, maxTargets: 8,
+      maxRequestBytes: 100_000, maxResultBytes: 100_000 } });
+  setup.setScamFetch((calls, context) => provider.fetch(calls, context));
+  setup.setPolicyFetch((calls, context) => provider.fetch(calls, context));
+  return { provider, raw, policyCalls };
+}
 
 test("unconfigured, disabled and missing-module paths never silently install the fixed algorithm", options, async (t) => {
   for (const [configured, enabled, expected] of [[false, true, undefined], [true, false, "disabled"]]) {
@@ -554,4 +585,98 @@ test("caller abort and disposal retain existing lifecycle semantics during scam 
     assert.equal(verdict.metadata.status, "available");
     assert.ok(verdict.diagnostics.some(({ code }) => code === "aborted"));
   } finally { prototype.evaluate_check_scam = original; }
+});
+
+test("SF4-5 raw RPC provider reaches manual evaluate and check with identical pinned builder evidence", options, async (t) => {
+  const setup = harness({ policy: policyWithFact() });
+  const { provider, raw, policyCalls } = sf45Provider(setup);
+  const { core } = await open(t, setup, sf45Fixture());
+  const plan = await core.plan(observedEthSwap);
+  const context = { planId: plan.planId };
+  const policyFacts = await provider.fetch(plan.calls, context);
+  const scamFacts = await provider.fetch(plan.scamCalls, context);
+  const byMethod = Object.fromEntries(plan.scamCalls.map((call) => [call.method, scamFacts.results[call.callId].value]));
+  const history = byMethod["scam.pool_history"];
+  const profile = byMethod["scam.token_profile"];
+  assert.equal(history.builderVersion, "dambi-v2/1");
+  assert.deepEqual(history.reference, profile.reference);
+  assert.equal(history.reference.block.number, "1000");
+  assert.equal(history.reference.block.timestampMs, T);
+  assert.equal(profile.age.kind, "lower_bound");
+  assert.equal(profile.age.ageLowerBoundSec, 60);
+  assert.equal(history.histories[0].history.points.find((point) => point.tMs === T - 4_000).reserveQuote, "1200",
+    "The exposed history is constructed from a raw Sync, not the old synthetic FactBatch helper");
+  assert.equal(raw.calls.filter((call) => call.method === "eth_chainId").length, 1,
+    "A history/profile pair shares a single raw batch");
+  const manual = core.evaluate(plan, policyFacts, scamFacts);
+  const checked = await core.check(observedEthSwap);
+  assert.equal(manual.decision, "warn");
+  assert.equal(manual.source, "evaluated");
+  assert.equal(manual.scam.status, "warn");
+  assert.equal(manual.scam.targets[0].analysisMode, "stub", "The actual algorithm is still an explicit test fixture");
+  assert.equal(manual.scam.targets[0].binding.builderVersion, "dambi-v2/1");
+  assert.equal(manual.scam.targets[0].binding.selectionReason, "lower_bound_mature");
+  assert.deepEqual(comparable(checked.scam), comparable(manual.scam));
+  assert.equal(policyCalls.length, 2);
+  assert.ok(policyCalls.every(({ calls }) => calls.length === 1 && calls[0].method === "sf3.policy-marker"));
+  assert.equal(raw.calls.filter((call) => call.method === "eth_chainId").length, 2,
+    "A later check receives its own reference instead of reusing an unqualified cache");
+});
+
+test("SF4-5 raw history gaps and unsupported administrator coverage cannot become quiet from a clear stub", options, async (t) => {
+  for (const scenario of ["missing_history", "unsupported_admin"]) {
+    const setup = harness();
+    const { provider, raw } = sf45Provider(setup, scenario);
+    const { core } = await open(t, setup, sf45Fixture("clear", scenario === "unsupported_admin"));
+    const plan = await core.plan(swap);
+    const batch = await provider.fetch(plan.scamCalls, { planId: plan.planId });
+    const values = Object.values(batch.results).map(({ value }) => value);
+    const history = values.find((value) => value.method === "scam.pool_history");
+    const profile = values.find((value) => value.method === "scam.token_profile");
+    assert.equal(profile.age.kind, "lower_bound", "Age evidence is independent of event/history availability");
+    if (scenario === "missing_history") {
+      assert.equal(raw.failureObserved, true);
+      assert.ok(history.coverage.missing.length > 0);
+      assert.ok(history.histories[0].history.missing.length > 0);
+    } else {
+      assert.deepEqual(profile.events, []);
+      assert.ok(profile.coverage.missing.length > 0);
+      assert.ok(profile.coverage.unavailable.some(({ field }) => field === "adminEvents"));
+      assert.equal(raw.calls.some((call) => call.method === "eth_getLogs" && call.params[0].address === TOKEN), false,
+        "An unverified event ABI is not made supported by receiving an empty log response");
+    }
+    // Deliberately inaccurate fixed 'clear' output exercises the Core boundary:
+    // unavailable source data cannot be rescued by a module's optimistic claim.
+    const manual = core.evaluate(plan, policyBatch(plan.calls, plan), batch);
+    const checked = await core.check(swap);
+    assert.equal(manual.decision, "allow", scenario);
+    assert.equal(manual.source, "evaluated", scenario);
+    assert.equal(manual.scam.status, "insufficient", scenario);
+    assert.ok(reasons(manual).includes("invalid_algorithm_output"), scenario);
+    assert.deepEqual(comparable(checked.scam), comparable(manual.scam), scenario);
+  }
+});
+
+test("SF4-5 provider reorg and timeout preserve explicit scam failure and the original Cedar deny or warn", options, async (t) => {
+  const warnId = "sf4-5-existing-warning";
+  const warningPolicy = signedPolicy({ extra: [{ id: warnId,
+    policy: `@id("${warnId}") @severity("warn") forbid(principal, action == Amm::Action::"Swap", resource);`,
+    manifest: { id: warnId, schema_version: 2, trigger: { where: { "action.tag": { eq: "swap" } } } } }] });
+  for (const [failure, policy, request, decision, policyId] of [
+    ["reorg", initialPolicy, redirectedSwap(), "deny", "swap-recipient-not-self-deny"],
+    ["timeout", warningPolicy, swap, "warn", warnId],
+  ]) {
+    const setup = harness({ policy });
+    const { raw } = sf45Provider(setup, failure);
+    const { core } = await open(t, setup, sf45Fixture());
+    const verdict = await core.check(request);
+    assert.equal(raw.failureObserved, true, failure);
+    assert.equal(verdict.decision, decision, failure);
+    assert.equal(verdict.source, "evaluated", failure);
+    assert.ok(verdict.reasons.some((reason) => reason.policyId === policyId), failure);
+    assert.equal(verdict.scam.status, "insufficient", failure);
+    assert.ok(reasons(verdict).includes(failure), failure);
+    assert.equal(verdict.reasons.some((reason) => reason.policyId === "__scam::risk"), false,
+      "A provider failure is not a detected scam or a replacement policy verdict");
+  }
 });

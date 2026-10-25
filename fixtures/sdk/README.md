@@ -144,6 +144,36 @@ yarn workspace @dambi/core exec tsc -p tsconfig.build.json &&
 node --test packages/core/tests/adapters/scam-profile-codec.test.mjs packages/core/tests/adapters/scam-token-profile.test.mjs
 ```
 
+### SF4-5 SDK 통합·데이터 경로 측정
+
+SF4-4 `b832caa` 이후 변경: 공개 `createScamFactProvider`가 기존 정책 provider를 감싸 별도 스캠 batch만 실제 RPC·두 builder로 처리한다. 대상별 history/profile은 같은 기준 블록을 쓰고 최종 해시 검증 후 공개한다. 다중 그룹의 전체 기한·입출력 크기를 제한하며 캐시는 넣지 않았다. 명시적인 `ScamDataError`만 스캠 경로에서 사유를 보존하고 정책 조회와 일반 오류·취소 처리는 유지한다. 성공·부분 완료·실패 모두 계측하며 콜백 오류와 늦은 응답이 결과를 바꾸지 않는다. `receivedBytes`는 완료된 응답 본문 기준이며 네트워크 전체 전송량이 아니다.
+
+**요청 속도 제어·로그 시각·비용 사전 계산 보완까지 사용자 실행 결과: 아래 어댑터 시험 64개 통과·0개 실패, 취소·건너뜀 0개.** SDK 통합·수명주기 6개는 앞선 연결 단계에서 통과했으며 이번에 재실행하지 않았다. 시험 원천 응답은 합성이며 실제 정규화 경로를 실행하고, 해당 SDK 통합 시험의 Core 분석은 명시적 stub을 사용한다. 에이전트는 RPC·빌드·시험을 실행하지 않았으며 기록을 위한 재시험도 하지 않는다. 이번 단계에서 실제 탐지 정확도, 제품 번들·GIWA 관리자 지원·재생성 불가를 검증했다고 표시하지 않는다.
+
+아래는 요청 간격·재시도 및 로그 시각·비용 사전 계산 보완의 검증 명령이다. 공유 시간 인덱스의 profile 회귀를 포함하며 Rust/WASM은 재빌드하지 않는다.
+
+```sh
+cd /Users/spu/SDKdambi/DAMBI &&
+yarn workspace @dambi/core exec tsc -p tsconfig.build.json &&
+yarn workspace @dambi/core exec tsc -p tsconfig.consumer.json &&
+node --test \
+  packages/core/tests/adapters/scam-rpc-codec.test.mjs \
+  packages/core/tests/adapters/scam-rpc.test.mjs \
+  packages/core/tests/adapters/scam-block-time.test.mjs \
+  packages/core/tests/adapters/scam-pool-history.test.mjs \
+  packages/core/tests/adapters/scam-token-profile.test.mjs \
+  packages/core/tests/adapters/scam-fact-provider.test.mjs \
+  packages/core/tests/adapters/scam-data-probe.test.mjs
+```
+
+사용자의 실제 조회: GIWA Sepolia 대표 풀 1개, 24시간+warm-up 1시간, 캐시 없음. 첫 2,500ms 실행은 timeout(2,504.44ms·16요청), 진단용 15,000ms 실행은 data_missing(7,897.38ms·123요청)이었다. 진단 보완 후 15,000ms 실행은 **pool_history의 eth_getBlockByNumber에서 HTTP 429, 2번째 시도까지 실패**했다(11,971.31ms·200요청·재시도 1회·완료 응답 본문 3,750,422바이트·로그 구간 착수 9회·실패로 확정된 구간 0회). 세 실행 모두 반환 결과는 없었다. `logChunks`는 완료 수가 아니며, 마지막 결과가 앞선 두 실패 원인까지 증명하거나 200회가 서버의 정확한 한도임을 뜻하지 않는다.
+
+후속 요청 속도 제어: source 내 배치·재시도 간 요청 간격과 공유 rate-limit cooldown, 기한 내 지수 backoff·429 Retry-After 처리를 추가했다. 프로브 기본은 간격 100ms·재시도 base 1,000ms/cap 8,000ms이며 최대 재시도 1회·조회 범위·자원 상한·제품 시간 제한은 유지한다. 사용자 후속 60,000ms 실행은 **pool_history/block_header의 내부 maxRequests=512에서 resource_limit**으로 종료됐다(56,601.39ms·512요청·재시도 0·7,175,224바이트·logChunks 9·failedChunks 0·반환 결과 없음). 이번 실행에서 429는 보고되지 않았지만, cold 이력 수집과 최종 재확인 비용은 해소되지 않았다.
+
+2026-10-26 보완: optional `blockTimestamp`를 임시 스냅샷에 사용하되 반환 전 실제 헤더의 해시·시각을 모두 대조하고, 누락 시 기존 헤더 조회를 유지한다. 로그 수집 직후 고유 블록·추가 헤더·최종 검증의 요청/최소 pacing 비용을 계산해 명백한 예산 부족은 대량 조회 전에 종료한다. 프로브는 raw 요청 상한과 builder 헤더 조회 상한을 구분해 표시한다.
+
+최신 사용자 실측(60초 제한)은 **4,219.68ms·21요청 후 pool_history/preflight의 resource_limit**으로 종료됐다. 로그의 고유 블록 2,498개 모두 시각이 있어 추가 시각 헤더 조회는 0회였지만, 최종 재확인은 2,502회로 남은 요청 예산 491회를 초과했다. 최소 요청 간격 비용도 250,100ms로 남은 55,782ms를 초과했다. 반환 결과는 없으며 사전 중단은 정상 작동했으나 이력 조회 비용 문제는 남아 있다. **SF4-5는 미완료이며 이후 어댑터 이력 검증 개선 대상으로 넘긴다.** 512회 한도·24시간+warm-up 범위는 유지한다. 미지원 나이·관리자 설정의 `partial`, 확장 환경과 Node의 차이, 프로브의 알고리즘 미포함 제한은 유지하며 제품의 2.5초 성능과 단일 완료·다중 대상 실측은 미검증이다.
+
 ## 번들 B1-1 — Universal Router
 
 2026-10-12, `main 7387536` 이후 B1-1 변경 검증: **Native 원문 2개 시험과 패키지 WASM 3개 시험 통과, 최종 WASM 로그 3 통과·0 실패.** 저장된 snapshot은 801개이며 기존 799개 내용 보존·UR 2개 추가·digest/bytes 일치를 확인했다. source-context 제외 30,484개와 Aave 거절 3개는 유지한다. 별도 `decoder_snapshot` target의 전체 결과는 공유되지 않았다. 대표 UR 경로의 편입·검증을 마쳤으며 다음은 B1-2 Aave다.

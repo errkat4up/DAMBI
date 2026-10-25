@@ -68,6 +68,25 @@ test("scam RPC logs reject scope violations, incomplete identities, conflicting 
   invalid(() => logs(null));
 });
 
+test("scam RPC optional log timestamps retain only safe, consistent observations", () => {
+  assert.equal(Object.hasOwn(logs([log()])[0], "timestampMs"), false);
+  assert.equal(logs([log({ blockTimestamp: "0x0" })])[0].timestampMs, 0);
+  const timed = log({ blockTimestamp: "0x10" });
+  const result = logs([log({ blockNumber: "0xb", blockHash: OTHER_HASH, blockTimestamp: "0x11" }), timed, timed]);
+  assert.deepEqual(result.map((entry) => entry.timestampMs), [16_000, 17_000]);
+  for (const bad of [null, undefined, 16, "0x", "0x00", "0x10\n",
+    quantity(BigInt(Number.MAX_SAFE_INTEGER) / 1_000n + 1n)]) {
+    invalid(() => logs([log({ blockTimestamp: bad })]));
+  }
+  // Distinct entries in one block cannot disagree; duplicates cannot silently
+  // gain or lose a time observation either.
+  invalid(() => logs([timed, log({ logIndex: "0x3", blockTimestamp: "0x11" })]));
+  invalid(() => logs([timed, log()]));
+  invalid(() => logs([log(), timed]));
+  invalid(() => logs([timed, log({ blockNumber: "0xb", blockHash: OTHER_HASH, blockTimestamp: "0xf" })]));
+  assert.equal(logs([timed, log({ logIndex: "0x3" })])[1].timestampMs, undefined);
+});
+
 test("scam RPC ABI returns enforce exact padding and widths while retaining valid zeros", () => {
   assert.equal(decodeAddressWord(`0x${"0".repeat(24)}${"AB".repeat(20)}`), ADDRESS);
   for (const bad of [ADDRESS, `0x${"1".repeat(24)}${"ab".repeat(20)}`, `0x${word(0)}`]) {

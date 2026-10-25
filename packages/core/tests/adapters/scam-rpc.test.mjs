@@ -180,6 +180,114 @@ test("scam RPC retries transient failures within its attempt cap and shares the 
   assert.equal(exhausted.calls.length, 3);
 });
 
+test("scam RPC spaces actual attempts across batches and caps exponential retry backoff", { timeout: 5_000 }, async (t) => {
+  const starts = [];
+  let firstChain = true;
+  const paced = fixture({ limits: { minRequestIntervalMs: 12, maxRetries: 1 }, handle: (rpc) => {
+    starts.push(performance.now());
+    if (rpc.method === "eth_chainId" && firstChain) {
+      firstChain = false;
+      return new Response("transient", { status: 503 });
+    }
+    return undefined;
+  } });
+  const results = await Promise.all([
+    paced.source.withBatch(request({ planId: "paced:a" }), async () => null),
+    paced.source.withBatch(request({ planId: "paced:b" }), async () => null),
+  ]);
+  assert.equal(results.reduce((sum, result) => sum + result.metrics.retries, 0), 1);
+  assert.equal(starts.length, 11, "Both references and the retry pass through the same launch gate");
+  for (let i = 1; i < starts.length; i++) assert.ok(starts[i] - starts[i - 1] >= 9,
+    "Consecutive actual attempts retain the configured 12 ms spacing (3 ms scheduling tolerance)");
+
+  const retryStarts = [], scheduled = [];
+  let attempts = 0;
+  const backoff = fixture({ limits: { maxRetries: 3, retryDelayMs: 20, maxRetryDelayMs: 30 }, handle: (rpc) => {
+    if (rpc.method !== "eth_chainId") return undefined;
+    retryStarts.push(performance.now());
+    if (++attempts <= 3) return new Response("transient", { status: 503 });
+    return undefined;
+  } });
+  // Observe requested delays without replacing timers or advancing the clock.
+  // This checks the cap without a flaky upper bound on elapsed wall time.
+  const originalTimer = globalThis.setTimeout;
+  t.mock.method(globalThis, "setTimeout", (...args) => { scheduled.push(args[1]); return originalTimer(...args); });
+  const retried = await backoff.source.withBatch(request(), async () => null);
+  t.mock.restoreAll();
+  assert.equal(retried.metrics.retries, 3);
+  assert.deepEqual(scheduled.filter((ms) => ms <= 100), [20, 30, 30]);
+  for (let i = 1; i < retryStarts.length; i++) assert.ok(retryStarts[i] - retryStarts[i - 1] >= [17, 27, 27][i - 1]);
+});
+
+test("scam RPC cancels queued pacing waits and ignores late rate limits after abort or timeout", { timeout: 5_000 }, async () => {
+  const entered = deferred(), late = deferred();
+  let first = true;
+  const paced = fixture({ limits: { minRequestIntervalMs: 40 }, handle: () => {
+    if (first) { first = false; entered.resolve(); return late.promise; }
+    return undefined;
+  } });
+  const initialController = new AbortController();
+  const initial = paced.source.withBatch(request({ signal: initialController.signal }), async () => null);
+  const initialRejected = assert.rejects(initial, failure("aborted"));
+  await entered.promise;
+  const queued = Array.from({ length: 20 }, (_, i) => {
+    const controller = new AbortController();
+    const pending = paced.source.withBatch(request({ planId: `cancelled:${i}`, signal: controller.signal }), async () => null);
+    return { controller, rejected: assert.rejects(pending, failure("aborted")) };
+  });
+  for (const item of queued) item.controller.abort();
+  initialController.abort();
+  await Promise.all([initialRejected, ...queued.map((item) => item.rejected)]);
+  assert.equal(paced.calls.length, 1, "Queued cancellations consume no actual dispatch slots");
+  late.resolve(new Response("too late", { status: 429, headers: { "retry-after": "60" } }));
+  await turn();
+  const fresh = await paced.source.withBatch(request({ planId: "after-cancellation", deadlineMs: NOW + 700 }), async () => "fresh");
+  assert.equal(fresh.value, "fresh", "Cancelled queues reserve no future slots and late 429 adds no cooldown");
+  assert.equal(fresh.metrics.requests, 5);
+
+  const timeoutReply = deferred();
+  let timeoutFirst = true;
+  const timed = fixture({ handle: () => {
+    if (timeoutFirst) { timeoutFirst = false; return timeoutReply.promise; }
+    return undefined;
+  } });
+  await assert.rejects(timed.source.withBatch(request({ deadlineMs: NOW + 25 }), async () => null), failure("timeout"));
+  timeoutReply.resolve(new Response("too late", { status: 429, headers: { "retry-after": "60" } }));
+  await turn();
+  assert.equal((await timed.source.withBatch(request({ deadlineMs: NOW + 250 }), async () => "recovered")).value, "recovered");
+});
+
+test("scam RPC shares rate-limit cooldown with a later batch even when retries are exhausted", { timeout: 5_000 }, async () => {
+  for (const kind of ["http", "json_rpc"]) {
+    const starts = [];
+    let first = true;
+    const f = fixture({ limits: { maxRetries: 0, retryDelayMs: 80, maxRetryDelayMs: 80 }, handle: (rpc) => {
+      starts.push(performance.now());
+      if (!first) return undefined;
+      first = false;
+      return kind === "http" ? new Response("rate limited", { status: 429 })
+        : new Response(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, error: { code: -32005, message: "rate limited" } }));
+    } });
+    await assert.rejects(f.source.withBatch(request(), async () => null), failure("rpc_error"));
+    assert.equal(f.calls.length, 1);
+    const next = await f.source.withBatch(request({ planId: `after-${kind}` }), async () => "fresh");
+    assert.equal(next.value, "fresh");
+    assert.equal(next.metrics.retries, 0);
+    assert.ok(starts[1] - starts[0] >= 77, `${kind}: the next batch must wait for the shared 80 ms cooldown`);
+  }
+});
+
+test("scam RPC honors Retry-After seconds and HTTP dates beyond the backoff cap without retrying past its deadline", { timeout: 5_000 }, async () => {
+  for (const retryAfter of ["1", new Date(Date.now() + 5_000).toUTCString()]) {
+    const f = fixture({ limits: { maxRetries: 2, retryDelayMs: 5, maxRetryDelayMs: 10 }, handle: () =>
+      new Response("rate limited", { status: 429, headers: { "retry-after": retryAfter } }) });
+    await assert.rejects(f.source.withBatch(request({ deadlineMs: NOW + 50 }), async () => null), failure("timeout"));
+    assert.equal(f.calls.length, 1, "A 10 ms backoff cap must not shorten a longer server cooldown");
+    await assert.rejects(f.source.withBatch(request({ planId: "still-cooling-down", deadlineMs: NOW + 25 }), async () => null), failure("timeout"));
+    assert.equal(f.calls.length, 1, "The valid earlier 429 also delays a later batch instead of starting another burst");
+  }
+});
+
 test("scam RPC discards drafts when checked head, reference, historical state or returned-log block hashes change", async () => {
   for (const mode of ["head", "reference", "historical", "log"]) {
     const reads = new Map();
@@ -201,6 +309,86 @@ test("scam RPC discards drafts when checked head, reference, historical state or
       return mode === "historical" ? batch.reserves(pool, "9") : batch.logs(pool, query("9", "9"));
     }), failure("reorg"));
   }
+});
+
+test("scam RPC verifies log timestamps against actual final headers before publishing drafts", async () => {
+  for (const mode of ["valid", "wrong_time", "wrong_hash"]) {
+    const f = fixture({ head: 25, handle: (rpc) => rpc.method === "eth_getLogs"
+      ? ok(rpc, [{ ...rawLog(9), blockTimestamp: q(mode === "wrong_time" ? 1008 : 1009),
+        ...(mode === "wrong_hash" ? { blockHash: blockHash(999) } : {}) }]) : undefined });
+    let drafted = false;
+    const work = f.source.withBatch(request(), async (batch) => {
+      const scan = await batch.logs(await batch.pool(0), query("9", "9"));
+      assert.equal(f.calls.filter(({ rpc }) => rpc.method === "eth_getBlockByNumber" && rpc.params[0] === q(9)).length, 0);
+      batch.preflightHeaders([]);
+      drafted = true;
+      return scan.logs[0].timestampMs;
+    });
+    if (mode === "valid") assert.equal((await work).value, 1_009_000);
+    else await assert.rejects(work, failure(mode === "wrong_time" ? "invalid_response" : "reorg"));
+    assert.equal(drafted, true, "unverified log times can form a draft, never a published result");
+    assert.equal(f.calls.filter(({ rpc }) => rpc.method === "eth_getBlockByNumber" && rpc.params[0] === q(9)).length, 1);
+  }
+});
+
+test("scam RPC rejects log times beyond the reference or inconsistent across chunks and cached headers", async () => {
+  for (const mode of ["future", "cross_chunk", "cached_header"]) {
+    const f = fixture({ handle: (rpc) => {
+      if (rpc.method !== "eth_getLogs") return undefined;
+      if (mode === "cross_chunk") {
+        const n = BigInt(rpc.params[0].fromBlock);
+        return ok(rpc, [{ ...rawLog(n), blockTimestamp: q(n === 1n ? 2000 : 1999) }]);
+      }
+      return ok(rpc, [{ ...rawLog(9), blockTimestamp: q(mode === "future" ? 100_000 : 1008) }]);
+    } });
+    await assert.rejects(f.source.withBatch(request(), async (batch) => {
+      const pool = await batch.pool(0);
+      if (mode === "cached_header") await batch.block("9");
+      return batch.logs(pool, mode === "cross_chunk" ? query("1", "10001") : query("9", "9"));
+    }), failure("invalid_response"));
+  }
+});
+
+test("scam RPC preflight counts uncached headers and all final checks without spending an impossible budget", async () => {
+  for (const timestamped of [false, true]) {
+    const reports = [];
+    const f = fixture({ head: 25, limits: { maxRequests: 11 }, handle: (rpc) => rpc.method === "eth_getLogs"
+      ? ok(rpc, [{ ...rawLog(9), ...(timestamped ? { blockTimestamp: q(1009) } : {}) }]) : undefined });
+    const work = f.source.withBatch(request({ onMetrics: (value) => reports.push(value) }), async (batch) => {
+      await batch.logs(await batch.pool(0), query("9", "9"));
+      // Duplicate heights and the cached reference must not cost extra reads.
+      batch.preflightHeaders(timestamped ? [] : ["9", "9", "23"]);
+      return "verified";
+    });
+    if (timestamped) assert.equal((await work).value, "verified");
+    else await assert.rejects(work, failure("resource_limit"));
+    const metric = reports[0];
+    assert.equal(reports.length, 1);
+    assert.equal(metric.preflight.uniqueLogBlocks, 1);
+    assert.equal(metric.preflight.timestampedLogBlocks, timestamped ? 1 : 0);
+    assert.equal(metric.preflight.additionalHeaderRequests, timestamped ? 0 : 1);
+    assert.equal(metric.preflight.finalRecheckRequests, 3);
+    assert.equal(metric.preflight.minimumRemainingRequests, timestamped ? 3 : 4);
+    assert.equal(metric.preflight.remainingRequestBudget, 3);
+    assert.equal(metric.preflight.minimumPacingMs, 0);
+    assert.ok(Object.isFrozen(metric.preflight));
+    assert.equal(f.calls.length, timestamped ? 11 : 8);
+    if (!timestamped) {
+      assert.deepEqual(metric.failure, { stage: "preflight", kind: "resource_limit" });
+      assert.equal(f.calls.filter(({ rpc }) => rpc.method === "eth_getBlockByNumber" && rpc.params[0] === q(9)).length, 0);
+    }
+  }
+  const pacedReports = [];
+  const paced = fixture({ limits: { maxRequests: 200, minRequestIntervalMs: 2 } });
+  await assert.rejects(paced.source.withBatch(request({ deadlineMs: NOW + 200,
+    onMetrics: (value) => pacedReports.push(value) }), async (batch) => {
+    batch.preflightHeaders(Array.from({ length: 80 }, (_, i) => String(i + 1)));
+    return "must not publish";
+  }), failure("resource_limit"));
+  assert.equal(paced.calls.length, 3);
+  assert.ok(pacedReports[0].preflight.minimumRemainingRequests <= pacedReports[0].preflight.remainingRequestBudget);
+  assert.ok(pacedReports[0].preflight.minimumPacingMs >= pacedReports[0].preflight.remainingTimeMs);
+  assert.deepEqual(pacedReports[0].failure, { stage: "preflight", kind: "resource_limit" });
 });
 
 test("scam RPC cancellation and deadlines reject late fetches without poisoning the next batch", async () => {
@@ -283,6 +471,12 @@ test("scam RPC validates configuration and keeps endpoint errors free of remote 
     { endpoint: { rpcUrl: "https://rpc.invalid/", headers: { cookie: "private" } } },
     { limits: { ...base.limits, concurrency: 0 } }, { limits: { ...base.limits, maxRetries: 11 } },
     { limits: { ...base.limits, maxBlocksPerQuery: 0 } },
+    { limits: { ...base.limits, minRequestIntervalMs: -1 } },
+    { limits: { ...base.limits, minRequestIntervalMs: 0.5 } },
+    { limits: { ...base.limits, minRequestIntervalMs: 60_001 } },
+    { limits: { ...base.limits, maxRetryDelayMs: -1 } },
+    { limits: { ...base.limits, maxRetryDelayMs: 60_001 } },
+    { limits: { ...base.limits, retryDelayMs: 20, maxRetryDelayMs: 10 } },
   ]) assert.throws(() => createScamRpcSource({ ...base, ...patch }), failure("invalid_config"));
   for (const handle of [
     () => { throw new Error("SECRET_endpoint_token"); },
@@ -297,4 +491,138 @@ test("scam RPC validates configuration and keeps endpoint errors free of remote 
       return true;
     });
   }
+});
+
+test("scam RPC emits one sanitized immutable terminal snapshot without trusting its observer", async () => {
+  const received = [];
+  const f = fixture();
+  const result = await f.source.withBatch(request({ onMetrics: (metrics) => {
+    received.push(metrics);
+    throw new Error("observer must not alter success");
+  } }), async () => "collected");
+  assert.equal(result.value, "collected");
+  assert.equal(received.length, 1);
+  assert.deepEqual(received[0], { ...result.metrics, outcome: "success" });
+  assert.ok(Object.isFrozen(received[0]));
+  assert.ok(Object.isFrozen(result.metrics));
+  assert.throws(() => { received[0].requests = 123; }, TypeError);
+  const asynchronous = await f.source.withBatch(request({ onMetrics: async () => {
+    throw new Error("asynchronous observer rejection is diagnostic only");
+  } }), async () => "still collected");
+  assert.equal(asynchronous.value, "still collected");
+  await turn();
+  const failures = [];
+  for (const mode of ["invalid", "chain", "resource", "pre-abort"]) {
+    const local = fixture({ ...(mode === "resource" ? { limits: { maxRequests: 1 } } : {}),
+      handle: mode === "chain" ? (rpc) => ok(rpc, "0x1") : undefined });
+    const reports = [];
+    const expected = { invalid: "invalid_request", chain: "chain_mismatch", resource: "resource_limit", "pre-abort": "aborted" }[mode];
+    await assert.rejects(local.source.withBatch(request({
+      ...(mode === "invalid" ? { subjects: [] } : {}),
+      ...(mode === "pre-abort" ? { signal: AbortSignal.abort() } : {}),
+      onMetrics: (metrics) => { reports.push(metrics); throw new Error("observer must not replace failure"); },
+    }), async () => null), failure(expected));
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0].outcome, "failed");
+    assert.equal(reports[0].reason, expected);
+    assert.equal(reports[0].requests, local.calls.length);
+    assert.ok(Object.isFrozen(reports[0]));
+    failures.push(reports[0]);
+  }
+  assert.doesNotMatch(JSON.stringify([received, failures]), /private|rpc\.invalid|x-test|headers|url/i);
+});
+
+test("scam RPC late replies cannot mutate or repeat an aborted metrics snapshot", async () => {
+  const entered = deferred(), late = deferred();
+  let rpcRequest;
+  const reports = [];
+  const f = fixture({ handle: (rpc) => { rpcRequest = rpc; entered.resolve(); return late.promise; } });
+  const controller = new AbortController();
+  const pending = f.source.withBatch(request({ signal: controller.signal, onMetrics: (metrics) => reports.push(metrics) }), async () => null);
+  await entered.promise;
+  controller.abort();
+  await assert.rejects(pending, failure("aborted"));
+  assert.equal(reports.length, 1);
+  const terminal = JSON.stringify(reports);
+  assert.equal(reports[0].requests, 1);
+  assert.equal(reports[0].receivedBytes, 0);
+  assert.equal(reports[0].failure.kind, "lifecycle");
+  assert.equal(reports[0].failure.httpStatus, undefined);
+  assert.equal(reports[0].failure.rpcCode, undefined);
+  late.resolve(ok(rpcRequest, q(91342)));
+  await turn();
+  assert.equal(JSON.stringify(reports), terminal);
+});
+
+test("scam RPC terminal diagnostics distinguish header reads, final rechecks and sanitized error kinds", async () => {
+  for (const mode of ["http", "json_rpc", "network", "decode", "internal"]) {
+    const reports = [];
+    const f = fixture({ limits: { maxRetries: 1 }, handle: (rpc) => {
+      if (mode === "network" && rpc.method === "eth_chainId") throw new Error("SECRET network detail");
+      if (mode === "http" && rpc.method === "eth_getBlockByNumber" && rpc.params[0] === q(9)) {
+        return new Response("SECRET http detail", { status: 429 });
+      }
+      // The checked head is reread by number only at finalization.
+      if (rpc.method !== "eth_getBlockByNumber" || rpc.params[0] !== q(20_050)) return undefined;
+      if (mode === "json_rpc") return new Response(JSON.stringify({ jsonrpc: "2.0", id: rpc.id,
+        error: { code: -32000, message: "SECRET remote detail", data: { url: "private" } } }));
+      if (mode === "decode") return ok(rpc, { ...header(20_050), hash: "SECRET invalid hash" });
+      return undefined;
+    } });
+    await assert.rejects(f.source.withBatch(request({ onMetrics: (value) => reports.push(value) }), async (batch) => {
+      if (mode === "internal") throw new TypeError("SECRET builder detail");
+      return batch.block("9");
+    }), failure(mode === "decode" ? "invalid_response" : "rpc_error"));
+    assert.equal(reports.length, 1);
+    const expected = {
+      http: { stage: "block_header", kind: "http", method: "eth_getBlockByNumber", httpStatus: 429, attempt: 2 },
+      json_rpc: { stage: "final_recheck", kind: "json_rpc", method: "eth_getBlockByNumber", rpcCode: -32000, attempt: 1 },
+      network: { stage: "reference", kind: "network", method: "eth_chainId", attempt: 2 },
+      decode: { stage: "final_recheck", kind: "validation", method: "eth_getBlockByNumber", attempt: 1 },
+      internal: { stage: "collect", kind: "internal" },
+    }[mode];
+    assert.deepEqual(reports[0].failure, expected);
+    assert.ok(Object.isFrozen(reports[0].failure));
+    assert.throws(() => { reports[0].failure.stage = "changed"; }, TypeError);
+    assert.doesNotMatch(JSON.stringify(reports), /SECRET|private|rpc\.invalid|params|message|stack/);
+  }
+});
+
+test("scam RPC diagnostics do not promote recovered retries or missing log chunks to the terminal cause", async () => {
+  let chainAttempts = 0;
+  const reports = [];
+  const f = fixture({ limits: { maxRetries: 1 }, handle: (rpc) => {
+    if (rpc.method === "eth_chainId" && ++chainAttempts === 1) return new Response("retry", { status: 429 });
+    if (rpc.method === "eth_getLogs") return new Response("missing chunk", { status: 500 });
+    return undefined;
+  } });
+  const collect = async (batch) => {
+    const scan = await batch.logs(await batch.pool(0), query("9", "9"));
+    assert.equal(scan.missing.length, 1);
+    return scan;
+  };
+  await f.source.withBatch(request({ onMetrics: (value) => reports.push(value) }), collect);
+  assert.equal(reports[0].retries, 1);
+  assert.equal(reports[0].failedChunks, 1);
+  assert.equal(reports[0].failure, undefined);
+  await assert.rejects(f.source.withBatch(request({ onMetrics: (value) => reports.push(value) }), async (batch) => {
+    await collect(batch);
+    throw new TypeError("SECRET unrelated processing error");
+  }), failure("rpc_error"));
+  assert.equal(reports[1].failedChunks, 1);
+  assert.deepEqual(reports[1].failure, { stage: "collect", kind: "internal" });
+  await f.source.withBatch(request({ onMetrics: (value) => reports.push(value) }), async () => null);
+  assert.equal(reports[2].failure, undefined);
+
+  // A deadline superseding HTTP 429 must not retain its status as the cause.
+  let time = NOW;
+  const expired = fixture({ clock: { now: () => time }, handle: () => {
+    time = NOW + 5_000;
+    return new Response("SECRET prior HTTP failure", { status: 429 });
+  } });
+  const timedOut = [];
+  await assert.rejects(expired.source.withBatch(request({ onMetrics: (value) => timedOut.push(value) }), async () => null), failure("timeout"));
+  assert.equal(timedOut[0].failure.kind, "lifecycle");
+  assert.equal(timedOut[0].failure.httpStatus, undefined);
+  assert.equal(timedOut[0].failure.rpcCode, undefined);
 });

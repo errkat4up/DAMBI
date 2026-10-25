@@ -130,13 +130,6 @@ export async function buildPoolHistory(
       const scan = await batch.logs(pool, { scope: "pair", fromBlock: queryFrom.toString(),
         toBlock: batch.reference.block.number, topics: [V2_SYNC_TOPIC] });
       if (scan.logs.length > limits.maxLogs || scan.missing.length > limits.maxLogs) return fail("resource_limit");
-      for (const gap of scan.missing) {
-        const first = await times.block(gap.fromBlock);
-        // The missing interval will remain open past the failed chunk, until
-        // another complete state is known; the last block guards recovery.
-        markers.push({ kind: "gap", block: BigInt(gap.fromBlock), through: BigInt(gap.toBlock),
-          tMs: first.timestampMs, reason: gap.reason === "rpc_error" ? "rpc_error" : "unavailable_history" });
-      }
       // SF4-2 has already scoped, sorted and deduplicated logs. Each block's
       // final Sync is its observed end state; any malformed Sync poisons it.
       const perBlock = new Map<string, { log: RpcLog; reserves?: Reserves }>();
@@ -145,11 +138,35 @@ export async function buildPoolHistory(
         perBlock.set(log.blockNumber, { log,
           reserves: previous && !previous.reserves ? undefined : syncReserves(log) });
       }
+      const headerNumbers = [...new Set([
+        ...scan.missing.map((gap) => gap.fromBlock),
+        ...[...perBlock].filter(([, last]) => last.log.timestampMs === undefined).map(([number]) => number),
+      ])];
+      // Include the raw batch's final evidence checks in its lower-bound cost
+      // before spending requests on individual Sync headers. The local budget
+      // separately bounds only actual time-index lookups, including boundaries.
+      batch.preflightHeaders(headerNumbers);
+      times.preflight(headerNumbers);
+      for (const gap of scan.missing) {
+        const first = await times.block(gap.fromBlock);
+        // The missing interval will remain open past the failed chunk, until
+        // another complete state is known; the last block guards recovery.
+        markers.push({ kind: "gap", block: BigInt(gap.fromBlock), through: BigInt(gap.toBlock),
+          tMs: first.timestampMs, reason: gap.reason === "rpc_error" ? "rpc_error" : "unavailable_history" });
+      }
       for (const [number, last] of perBlock) {
-        const block = await times.block(number);
-        if (block.hash !== last.log.blockHash) return fail("reorg");
-        if (last.reserves) markers.push({ kind: "state", block: BigInt(number), tMs: block.timestampMs, reserves: last.reserves });
-        else markers.push({ kind: "gap", block: BigInt(number), through: BigInt(number), tMs: block.timestampMs, reason: "unavailable_history" });
+        let tMs: number;
+        if (last.log.timestampMs !== undefined) {
+          // This value is usable only inside the unpublished draft. The raw
+          // batch still checks its hash AND time against an actual final header.
+          tMs = times.logTime(last.log);
+        } else {
+          const block = await times.block(number);
+          if (block.hash !== last.log.blockHash) return fail("reorg");
+          tMs = block.timestampMs;
+        }
+        if (last.reserves) markers.push({ kind: "state", block: BigInt(number), tMs, reserves: last.reserves });
+        else markers.push({ kind: "gap", block: BigInt(number), through: BigInt(number), tMs, reason: "unavailable_history" });
       }
     }
     markers.sort((a, b) => a.block < b.block ? -1 : a.block > b.block ? 1 : a.kind === b.kind ? 0 : a.kind === "gap" ? -1 : 1);

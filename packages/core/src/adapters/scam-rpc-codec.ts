@@ -14,6 +14,8 @@ export type RpcLog = {
   readonly address: `0x${string}`;
   readonly blockNumber: string;
   readonly blockHash: `0x${string}`;
+  /** Optional RPC-provided time; publication still requires a real header check. */
+  readonly timestampMs?: number;
   readonly transactionHash: `0x${string}`;
   readonly transactionIndex: number;
   readonly logIndex: number;
@@ -56,16 +58,20 @@ function safeQuantity(value: unknown): number {
   return Number(decoded);
 }
 
+function timestampMs(value: unknown): number {
+  const milliseconds = decodeQuantity(value) * 1_000n;
+  if (milliseconds > BigInt(Number.MAX_SAFE_INTEGER)) return invalidResponse();
+  return Number(milliseconds);
+}
+
 export function decodeBlock(value: unknown, expectedNumber?: bigint): RpcBlock {
   if (!record(value) || !hash(value.hash) || !hash(value.parentHash)) return invalidResponse();
   const number = decodeQuantity(value.number);
   if (expectedNumber !== undefined && number !== expectedNumber) return invalidResponse();
-  const milliseconds = decodeQuantity(value.timestamp) * 1_000n;
-  if (milliseconds > BigInt(Number.MAX_SAFE_INTEGER)) return invalidResponse();
   return Object.freeze({
     number: number.toString(),
     hash: normalized(value.hash),
-    timestampMs: Number(milliseconds),
+    timestampMs: timestampMs(value.timestamp),
     parentHash: normalized(value.parentHash),
   });
 }
@@ -89,6 +95,7 @@ export function decodeLogs(
   const expectedAddress = requestedAddress.toLowerCase();
   const acceptedTopics = new Set(topics.map((topic) => topic.toLowerCase()));
   const blocks = new Map<string, string>();
+  const times = new Map<string, number>();
   const positions = new Map<string, RpcLog>();
   for (const entry of value) {
     if (!record(entry) || entry.removed !== false || !address(entry.address)
@@ -99,10 +106,13 @@ export function decodeLogs(
         || !acceptedTopics.has(entry.topics[0].toLowerCase())) return invalidResponse();
     const blockNumber = decodeQuantity(entry.blockNumber);
     if (blockNumber < from || blockNumber > to) return invalidResponse();
+    // A present but invalid value is not equivalent to an unsupported field.
+    const observedTime = "blockTimestamp" in entry ? timestampMs(entry.blockTimestamp) : undefined;
     const decoded: RpcLog = Object.freeze({
       address: normalized(entry.address),
       blockNumber: blockNumber.toString(),
       blockHash: normalized(entry.blockHash),
+      ...(observedTime === undefined ? {} : { timestampMs: observedTime }),
       transactionHash: normalized(entry.transactionHash),
       transactionIndex: safeQuantity(entry.transactionIndex),
       logIndex: safeQuantity(entry.logIndex),
@@ -112,6 +122,11 @@ export function decodeLogs(
     const knownHash = blocks.get(decoded.blockNumber);
     if (knownHash !== undefined && knownHash !== decoded.blockHash) return invalidResponse();
     blocks.set(decoded.blockNumber, decoded.blockHash);
+    if (observedTime !== undefined) {
+      const knownTime = times.get(decoded.blockNumber);
+      if (knownTime !== undefined && knownTime !== observedTime) return invalidResponse();
+      times.set(decoded.blockNumber, observedTime);
+    }
     // logIndex is block-global. A different transaction/hash/body at the same
     // position is an inconsistent response, not a duplicate to silently drop.
     const key = `${decoded.blockNumber}:${decoded.logIndex}`;
@@ -122,12 +137,19 @@ export function decodeLogs(
       positions.set(key, decoded);
     }
   }
-  return Object.freeze([...positions.values()].sort((left, right) => {
+  const sorted = [...positions.values()].sort((left, right) => {
     const a = BigInt(left.blockNumber);
     const b = BigInt(right.blockNumber);
     if (a !== b) return a < b ? -1 : 1;
     return left.transactionIndex - right.transactionIndex || left.logIndex - right.logIndex;
-  }));
+  });
+  let previousTime: number | undefined;
+  for (const log of sorted) {
+    if (log.timestampMs === undefined) continue;
+    if (previousTime !== undefined && previousTime > log.timestampMs) return invalidResponse();
+    previousTime = log.timestampMs;
+  }
+  return Object.freeze(sorted);
 }
 
 export function decodeAddressWord(value: unknown): `0x${string}` {
