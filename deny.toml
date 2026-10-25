@@ -8,6 +8,7 @@ ignore = [
     { id = "RUSTSEC-2024-0436", reason = "Transitive through alloy-primitives/alloy-sol-types; revisit when upgrading Alloy." },
     { id = "RUSTSEC-2025-0048", reason = "tsify-next unmaintained; no safe upgrade path available. Tracked separately." },
     { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 unmaintained; transitive through alloy-sol-macro. Not a vuln; revisit when upgrading Alloy." },
+    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5 timing variability; via p256 0.13 (public-key signature verification only, no secret-key ops) and alloy-primitives' optional k256 (not built). Remove after upgrading p256 to 0.14 with Alloy 1.x." },
 ]
 
 [licenses]
