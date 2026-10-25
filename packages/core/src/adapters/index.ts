@@ -11,4 +11,4 @@ export type { ScamDataFailure } from "../types/scam-error.js";
 export { SCAM_DATA_BUILDER_VERSION } from "./scam-pool-history.js";
 export type { PoolHistoryBuildLimits } from "./scam-pool-history.js";
 export type { FactoryHistorySupport, TokenAdminSupport, TokenProfileBuildOptions } from "./scam-token-profile.js";
-export type { ScamRpcLimits, ScamRpcOptions, ScamRpcDiagnostic } from "./scam-rpc.js";
+export type { ScamRpcLimits, ScamRpcOptions, ScamRpcDiagnostic, ScamVerificationOptions } from "./scam-rpc.js";

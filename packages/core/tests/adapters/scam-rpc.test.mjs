@@ -103,6 +103,9 @@ test("scam RPC batches pin one confirmed reference, verify pool identity and cop
     requiredConfirmDepth: 2, observedConfirmDepth: 2,
   });
   assert.equal(result.observedAt, NOW);
+  assert.equal(result.verifiedAt, NOW);
+  assert.deepEqual(result.verification, { history: "all_event_headers", stateBinding: "number_recheck" });
+  assert.equal(Object.isFrozen(result.verification), true);
   assert.equal(result.metrics.requests, f.calls.length);
   const stateCalls = f.calls.filter(({ rpc }) => ["eth_call", "eth_getCode"].includes(rpc.method));
   assert.ok(stateCalls.every(({ rpc }) => [q(20_048), q(9)].includes(rpc.params[1])));
@@ -112,6 +115,24 @@ test("scam RPC batches pin one confirmed reference, verify pool identity and cop
   assert.equal(getPair.params[0].data, `0xe6a43905${TOKEN.slice(2).padStart(64, "0")}${QUOTE.slice(2).padStart(64, "0")}`);
   assert.ok(f.calls.every(({ url, init }) => url === "https://rpc.invalid/test?key=private"
     && init.headers.get("x-test") === "copied" && init.credentials === "omit" && init.redirect === "error"));
+});
+
+test("scam RPC freezes verification configuration and rejects unavailable modes before work", async () => {
+  const f = fixture();
+  const verification = { history: "all_event_headers", stateBinding: "number_recheck" };
+  const source = createScamRpcSource({ ...f.options, verification });
+  verification.history = "rpc_anchor";
+  verification.stateBinding = "block_hash_canonical";
+  const result = await source.withBatch(request(), async () => null);
+  assert.deepEqual(result.verification, { history: "all_event_headers", stateBinding: "number_recheck" });
+
+  const before = f.calls.length;
+  for (const invalid of [null, [], { history: "rpc_anchor" }, { stateBinding: "block_hash_canonical" },
+    { history: null }, { stateBinding: "latest" }, { history: "all_event_headers", extra: true },
+    { [Symbol("unexpected")]: true }]) {
+    assert.throws(() => createScamRpcSource({ ...f.options, verification: invalid }), failure("invalid_config"));
+  }
+  assert.equal(f.calls.length, before, "Unsupported verification does not dispatch or silently downgrade");
 });
 
 test("scam RPC rejects wrong chains, forged identities and unverified or arbitrary log targets", async () => {

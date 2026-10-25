@@ -137,6 +137,51 @@ test("scam provider shares references within groups but owns one deadline across
   assert.equal(timeoutMetrics[0].preflightGroup, undefined);
 });
 
+test("scam provider reports per-method raw time sources only after final verification and counts metadata in its result budget", async () => {
+  const f = setup();
+  const originalFetch = f.raw.rpc.fetch;
+  let now = NOW, referenceReads = 0;
+  const verification = { history: "all_event_headers", stateBinding: "number_recheck" };
+  f.config.rpc = { ...f.raw.rpc, verification, clock: { now: () => now }, fetch: async (...args) => {
+    const rpc = JSON.parse(args[1].body);
+    const response = await originalFetch(...args);
+    if (rpc.method === "eth_getLogs") {
+      const body = await response.json();
+      const originSec = BigInt(NOW / 1_000) - 1_002n;
+      for (const log of body.result) log.blockTimestamp = `0x${(originSec + BigInt(log.blockNumber)).toString(16)}`;
+      return new Response(JSON.stringify(body));
+    }
+    if (rpc.method === "eth_getBlockByNumber" && rpc.params[0] === "0x3e8" && ++referenceReads === 2) now = NOW + 25;
+    return response;
+  } };
+  const provider = f.create();
+  verification.history = "rpc_anchor";
+  verification.stateBinding = "block_hash_canonical";
+  const batch = await provider.fetch(calls(), context());
+  const history = batch.results["a:history"].value.verification;
+  const profile = batch.results["a:profile"].value.verification;
+  const expected = { version: 1, history: "all_event_headers", stateBinding: "number_recheck",
+    reuse: "none", rawObservedAt: { fromMs: NOW, toMs: NOW }, verifiedAt: NOW + 25 };
+  assert.deepEqual(history, { ...expected, timeSources: ["header", "rpc_log"] });
+  assert.deepEqual(profile, { ...expected, timeSources: ["header"] });
+  assert.equal(referenceReads, 2, "Metadata is emitted after the reference's final read");
+  assert.ok(Object.isFrozen(history) && Object.isFrozen(history.timeSources) && Object.isFrozen(history.rawObservedAt));
+
+  // A response that would fit without verification must still be rejected
+  // when the complete SDK wrapper exceeds the caller's byte budget.
+  const baseline = setup();
+  const complete = await baseline.create().fetch(calls(), context());
+  const withoutVerification = structuredClone(complete);
+  for (const fact of Object.values(withoutVerification.results)) delete fact.value.verification;
+  const limit = new TextEncoder().encode(JSON.stringify(withoutVerification)).byteLength;
+  const metrics = [];
+  const bounded = setup({ onMetrics: (metric) => metrics.push(metric) });
+  bounded.config.limits.maxResultBytes = limit;
+  await assert.rejects(bounded.create().fetch(calls(), context()), failure("resource_limit"));
+  assert.equal(metrics[0].failure.operation, "result");
+  assert.equal(metrics[0].resultBytes, 0, "Oversized provenance is never truncated or reported as returned data");
+});
+
 test("scam provider preserves the bounded preflight cause before spending an impossible header budget", async () => {
   const metrics = [];
   const f = setup({ onMetrics: (metric) => metrics.push(metric) });

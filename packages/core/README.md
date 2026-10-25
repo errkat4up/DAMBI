@@ -267,6 +267,30 @@ apply per reference group; the deadline and output-size cap cover all groups.
 Each history/profile pair shares a fixed reference and is withheld until the
 final block-hash checks pass. There is no cross-fetch cache.
 
+`rpc.verification` is copied at provider creation. Its supported defaults are
+`{ history: "all_event_headers", stateBinding: "number_recheck" }`.
+The future `rpc_anchor` and `block_hash_canonical` choices are currently rejected
+as invalid configuration; they are never silently substituted or advertised as
+implemented checks. This is a provider execution contract, not a new Core policy.
+
+Successful built-in method values include version-1 `verification` metadata:
+the modes, raw timestamp source kinds (`header` / `rpc_log`), reuse status,
+original collection time range and final verification time. `timeSources`
+describes raw evidence supplied to each method, not the source of every output
+grid point; a final header check does not erase an original log timestamp source.
+Current fresh batches use `reuse: "none"` and their original `observedAt` for
+both collection-range endpoints. Metadata is included in the output-size limit.
+
+Core retains the declarations in `binding.verification` with status `declared`.
+Legacy inputs omitting metadata on both methods produce `legacy_unspecified`;
+explicit null, partial/unknown metadata or incompatible method declarations are
+invalid scam input. Collection times must be ordered and no later than the final
+check; that check cannot predate `Fact.observedAt` or exceed allowed clock skew.
+Fresh (`reuse: "none"`) observations cannot predate that Fact's collection start.
+These are checked provider declarations, not cryptographic proof of source data.
+Rebuild the matching Rust/WASM with TypeScript: older Core artifacts reject the
+new wrapper fields. The pure algorithm's wire contract remains version 1.
+
 `rpc.limits.minRequestIntervalMs` sets minimum request-start spacing (default 0
 for compatibility). Spacing and rate-limit cooldown are shared across batches
 and retries of the same provider/source, not across separate instances or

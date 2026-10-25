@@ -14,4 +14,5 @@ export type {
   PlannedScamCall, ScamFactBatch, ScamReport, ScamReportStatus, TargetReport,
   RuleResult, ScamFailureReason, PoolHistoryValue, TokenProfileValue,
   DataCoverage, FixedReference, Subject, PoolAge,
+  HistoryVerification, StateBinding, VerificationTimeSource, MethodVerification, AnalysisVerification,
 } from "./types/scam.js";

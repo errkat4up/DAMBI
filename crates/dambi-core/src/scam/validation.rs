@@ -20,6 +20,7 @@ pub(super) fn validate_request(
     rules: &[RuleSpec],
     limits: &AlgorithmLimits,
 ) -> Result<(), FailureReason> {
+    binding.verification.validate()?;
     if req.rules != rules || req.rules.is_empty() {
         return Err(FailureReason::InvalidScamInput);
     }

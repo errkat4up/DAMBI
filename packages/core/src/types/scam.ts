@@ -93,6 +93,36 @@ export interface FixedReference {
   readonly checkedHead: BlockReference;
   readonly observedConfirmDepth: number;
 }
+/** Provider-declared consistency checks, not cryptographic source verification.
+ * The built-in RPC provider currently implements only all_event_headers and
+ * number_recheck; other declared modes are reserved for explicit later support.
+ */
+export type HistoryVerification = "all_event_headers" | "rpc_anchor";
+export type StateBinding = "number_recheck" | "block_hash_canonical";
+export type VerificationTimeSource = "header" | "rpc_log";
+export interface MethodVerification {
+  readonly version: 1;
+  readonly history: HistoryVerification;
+  readonly stateBinding: StateBinding;
+  /** Unique, nonempty source kinds in the raw evidence supplied to this method.
+   * Header rechecking does not erase an RPC log timestamp's original source.
+   */
+  readonly timeSources: readonly VerificationTimeSource[];
+  readonly reuse: "none" | "interval_cache";
+  /** Earliest/latest original collection time, never refreshed by a cache hit.
+   * With reuse=none these cannot predate the enclosing Fact.observedAt.
+   */
+  readonly rawObservedAt: { readonly fromMs: UnixMs; readonly toMs: UnixMs };
+  /** Wall-clock time after final checks; must not precede Fact.observedAt. */
+  readonly verifiedAt: UnixMs;
+}
+export type AnalysisVerification =
+  | { readonly status: "legacy_unspecified" }
+  | {
+      readonly status: "declared";
+      readonly poolHistory: MethodVerification;
+      readonly tokenProfile: MethodVerification;
+    };
 export interface MissingInterval {
   /** Proposed coverage convention: (fromMs, toMs], in actual Unix ms. */
   readonly fromMs: UnixMs;
@@ -211,6 +241,10 @@ interface MethodValueMeta {
   readonly referenceGroupId: string;
   readonly reference: FixedReference;
   readonly coverage: DataCoverage;
+  /** Absent only for legacy providers; absence does not claim any check mode.
+   * If present, both method values must declare compatible verification.
+   */
+  readonly verification?: MethodVerification;
 }
 export interface PoolHistoryValue<THistory = PoolHistory> extends MethodValueMeta {
   readonly method: "scam.pool_history";
@@ -372,6 +406,10 @@ export interface AnalysisBinding {
   readonly planId: string;
   readonly subject: Subject;
   readonly reference: FixedReference;
+  /** New Core results explicitly identify declared or legacy provenance.
+   * Omission in an older binding also means legacy_unspecified.
+   */
+  readonly verification?: AnalysisVerification;
   readonly settingsHash: Digest;
   readonly settingsHashScheme: AlgorithmHashScheme;
   readonly bundleSequence: DecimalInteger;

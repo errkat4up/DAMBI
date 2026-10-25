@@ -1,7 +1,7 @@
 import type { FactProvider, FactResult } from "../ports/fact.js";
 import type { CallOptions } from "../types/options.js";
 import type { FactBatch, PlannedCall } from "../types/plan.js";
-import type { Address, PlannedScamCall, Subject } from "../types/scam.js";
+import type { Address, MethodVerification, PlannedScamCall, PoolHistoryValue, Subject, TokenProfileValue, VerificationTimeSource } from "../types/scam.js";
 import { CoreError } from "../types/errors.js";
 import { ScamDataError, type ScamDataFailure } from "../types/scam-error.js";
 import { copyJson } from "../runtime/json.js";
@@ -10,7 +10,7 @@ import { callSignal } from "./http.js";
 import { address } from "./scam-rpc-codec.js";
 import { buildPoolHistory, SCAM_DATA_BUILDER_VERSION, type PoolHistoryBuildLimits } from "./scam-pool-history.js";
 import { buildTokenProfile, type FactoryHistorySupport, type TokenAdminSupport, type TokenProfileBuildOptions } from "./scam-token-profile.js";
-import { createScamRpcSource, ScamRpcError, type ScamRpcDiagnostic, type ScamRpcMetrics, type ScamRpcOptions } from "./scam-rpc.js";
+import { createScamRpcSource, ScamRpcError, type ScamRpcBatch, type ScamRpcDiagnostic, type ScamRpcMetrics, type ScamRpcOptions } from "./scam-rpc.js";
 
 export interface ScamProviderLimits {
   /** One deadline for the complete fetch, including all reference groups. */
@@ -195,6 +195,32 @@ function ownGroups(input: readonly PlannedCall[], planId: string, config: Return
   return [...groups.values()];
 }
 
+/** Track the raw time sources supplied to one builder, without changing I/O or
+ * counting a log timestamp as an independently verified header. Both methods
+ * already receive their shared reference from an actual header.
+ */
+function methodTimeSources(batch: ScamRpcBatch) {
+  const sources = new Set<VerificationTimeSource>(["header"]);
+  return {
+    batch: Object.freeze({ ...batch,
+      async logs(pool: Parameters<ScamRpcBatch["logs"]>[0], query: Parameters<ScamRpcBatch["logs"]>[1]) {
+        const scan = await batch.logs(pool, query);
+        if (scan.logs.some((log) => log.timestampMs !== undefined)) sources.add("rpc_log");
+        return scan;
+      },
+    } satisfies ScamRpcBatch),
+    snapshot: (): readonly VerificationTimeSource[] => Object.freeze([...sources]),
+  };
+}
+
+function boundResult(planId: string, results: Record<string, FactResult>, maxBytes: number): void {
+  try { copyJson({ planId, results }, "INVALID_REQUEST", maxBytes); }
+  catch (error) {
+    if (error instanceof CoreError && error.code === "LIMIT_EXCEEDED") throw new ScamRpcError("resource_limit");
+    throw error;
+  }
+}
+
 /** No cross-fetch cache, default capabilities, algorithm, or policy projection.
  * The same provider handles manual fetch/evaluate and Core.check(). Each group
  * is published only after its final canonical checks, and no partial batch is
@@ -240,16 +266,21 @@ export function createScamFactProvider(options: ScamFactProviderOptions): FactPr
             },
           }, async (batch) => {
             const draft: Record<string, FactResult> = Object.assign(Object.create(null), results);
+            const timeSources = new Map<string, readonly VerificationTimeSource[]>();
             // Sequential targets bound peak normalized memory and avoid detached
             // I/O after a failing target. The raw source bounds HTTP concurrency.
             for (let i = 0; i < members.length; i++) {
               operation = "pool_identity";
               const target = members[i], pool = await batch.pool(i);
               operation = "pool_history";
-              const history = await buildPoolHistory(batch, pool, target.history!.params, config.history);
+              const historyTimes = methodTimeSources(batch);
+              const history = await buildPoolHistory(historyTimes.batch, pool, target.history!.params, config.history);
+              timeSources.set(target.history!.callId, historyTimes.snapshot());
               operation = "token_profile";
-              const profile = await buildTokenProfile(batch, pool, target.profile!.params, { ...config.profile,
+              const profileTimes = methodTimeSources(batch);
+              const profile = await buildTokenProfile(profileTimes.batch, pool, target.profile!.params, { ...config.profile,
                 factorySupport: config.factories.get(pool.subject.factory), adminSupport: config.admins.get(pool.subject.token) });
+              timeSources.set(target.profile!.callId, profileTimes.snapshot());
               operation = "result";
               for (const [callId, value] of [[target.history!.callId, history], [target.profile!.callId, profile]] as const) {
                 draft[callId] = { value, source: `scam-rpc:eip155:${config.chainId}`, observedAt: batch.observedAt,
@@ -260,22 +291,31 @@ export function createScamFactProvider(options: ScamFactProviderOptions): FactPr
               }
               // Bound the actual envelope before collecting the next target.
               // Nothing in this draft is published before final hash checks.
-              try { copyJson({ planId, results: draft }, "INVALID_REQUEST", config.limits.maxResultBytes); }
-              catch (error) {
-                if (error instanceof CoreError && error.code === "LIMIT_EXCEEDED") throw new ScamRpcError("resource_limit");
-                throw error;
-              }
+              boundResult(planId, draft, config.limits.maxResultBytes);
             }
             operation = "final_recheck";
-            return draft;
+            return { draft, timeSources };
           });
-          results = response.value;
+          operation = "result";
+          results = response.value.draft;
+          for (const [callId, timeSources] of response.value.timeSources) {
+            const fact = results[callId];
+            const value = fact.value as PoolHistoryValue | TokenProfileValue;
+            const verification: MethodVerification = Object.freeze({ version: 1, ...response.verification,
+              timeSources, reuse: "none", rawObservedAt: Object.freeze({ fromMs: response.observedAt, toMs: response.observedAt }),
+              verifiedAt: response.verifiedAt });
+            results[callId] = { ...fact, value: { ...value, verification } };
+          }
+          // The completed verification metadata belongs to the same result budget.
+          boundResult(planId, results, config.limits.maxResultBytes);
         }
         operation = "result";
         const batch = { planId, results };
-        resultBytes = new TextEncoder().encode(JSON.stringify(batch)).byteLength;
+        const encodedBytes = new TextEncoder().encode(JSON.stringify(batch)).byteLength;
+        if (encodedBytes > config.limits.maxResultBytes) throw new ScamRpcError("resource_limit");
         if (signal?.aborted) throw new ScamRpcError("aborted");
         if (now() < started || now() >= deadlineMs) throw new ScamRpcError("timeout");
+        resultBytes = encodedBytes;
         outcome = partial ? "partial" : "success";
         return batch;
       } catch (error) {

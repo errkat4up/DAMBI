@@ -3,7 +3,7 @@
  * its result only after the reference and every evidence block are rechecked.
  */
 import type { Clock } from "../ports/clock.js";
-import type { Address, FixedReference, Subject } from "../types/scam.js";
+import type { Address, FixedReference, HistoryVerification, StateBinding, Subject } from "../types/scam.js";
 import type { EvmRpcEndpoint } from "./fact-provider.js";
 import { AdapterError } from "./errors.js";
 import { decodeQuantity, readRpcResult, RpcResponseError } from "./evm-rpc.js";
@@ -39,12 +39,19 @@ export interface ScamRpcLimits {
   /** Caps exponential backoff only, not a server's longer Retry-After. */
   readonly maxRetryDelayMs?: number;
 }
+export interface ScamVerificationOptions {
+  /** AH1 supports all_event_headers only. Other declared modes fail configuration. */
+  readonly history?: HistoryVerification;
+  /** AH1 supports number_recheck only; unsupported choices never silently fall back. */
+  readonly stateBinding?: StateBinding;
+}
 export interface ScamRpcOptions {
   readonly chainId: number;
   readonly endpoint: EvmRpcEndpoint;
   readonly factories: readonly Address[];
   readonly quoteTokens: readonly Address[];
   readonly limits: ScamRpcLimits;
+  readonly verification?: ScamVerificationOptions;
   readonly fetch?: typeof globalThis.fetch;
   readonly clock?: Clock;
 }
@@ -189,6 +196,15 @@ function retryAfterDelay(value: string | null, wallNow: number): number | undefi
 function ownOptions(supplied: ScamRpcOptions) {
   try {
     const { chainId, endpoint, factories, quoteTokens, fetch: injected, clock } = supplied;
+    const requested = supplied.verification;
+    if (requested !== undefined && (!requested || typeof requested !== "object" || Array.isArray(requested)
+        || Reflect.ownKeys(requested).some((key) => key !== "history" && key !== "stateBinding"))) throw new Error();
+    const verification = Object.freeze({
+      history: requested?.history === undefined ? "all_event_headers" : requested.history,
+      stateBinding: requested?.stateBinding === undefined ? "number_recheck" : requested.stateBinding,
+    } satisfies Required<ScamVerificationOptions>);
+    // Keep the existing implementation truthful until the later modes exist.
+    if (verification.history !== "all_event_headers" || verification.stateBinding !== "number_recheck") throw new Error();
     const limits = { ...supplied.limits,
       minRequestIntervalMs: supplied.limits.minRequestIntervalMs === undefined ? 0 : supplied.limits.minRequestIntervalMs,
       maxRetryDelayMs: supplied.limits.maxRetryDelayMs === undefined ? Math.max(30_000, supplied.limits.retryDelayMs) : supplied.limits.maxRetryDelayMs };
@@ -226,7 +242,7 @@ function ownOptions(supplied: ScamRpcOptions) {
     const fetcher = injected ?? globalThis.fetch.bind(globalThis);
     const now = clock === undefined ? Date.now : clock.now.bind(clock);
     if (typeof fetcher !== "function") throw new Error();
-    return { chainId, url: url.href, headers, fetcher, now, limits,
+    return { chainId, url: url.href, headers, fetcher, now, limits, verification,
       factories: new Set(factories.map((v) => v.toLowerCase())),
       quotes: new Set(quoteTokens.map((v) => v.toLowerCase())) };
   } catch { return fail("invalid_config"); }
@@ -266,6 +282,9 @@ export function createScamRpcSource(options: ScamRpcOptions) {
   return Object.freeze({
     async withBatch<T>(input: ScamRpcRequest, collect: (batch: ScamRpcBatch) => Promise<T>): Promise<{
       readonly value: T; readonly reference: FixedReference; readonly observedAt: number; readonly metrics: ScamRpcMetrics;
+      readonly verification: Readonly<Required<ScamVerificationOptions>>;
+      /** Recorded only after the batch's final header checks have completed. */
+      readonly verifiedAt: number;
     }> {
       const metrics: { requests: number; retries: number; receivedBytes: number;
         logChunks: number; failedChunks: number; preflight?: ScamRpcPreflight } = {
@@ -649,7 +668,11 @@ export function createScamRpcSource(options: ScamRpcOptions) {
         }
         validateTimes();
         check();
-        return { value, reference, observedAt, metrics: Object.freeze({ ...metrics, durationMs: Math.max(0, now() - observedAt) }) };
+        const verifiedAt = now();
+        if (verifiedAt < observedAt || verifiedAt >= request.deadlineMs) return fail("timeout");
+        check();
+        return { value, reference, observedAt, verification: config.verification, verifiedAt,
+          metrics: Object.freeze({ ...metrics, durationMs: verifiedAt - observedAt }) };
       } catch (error) {
         try { check(); } catch (current) {
           // A deadline/cancel/global stop still wins. Preserve context only

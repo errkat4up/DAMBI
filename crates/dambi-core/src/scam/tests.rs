@@ -329,6 +329,68 @@ fn fixed_rule_states_preserve_binding_evidence_and_provider_provenance() {
     }
 }
 
+fn declared_verification() -> AnalysisVerification {
+    let method = MethodVerification {
+        version: 1, history: HistoryVerification::AllEventHeaders,
+        state_binding: StateBinding::NumberRecheck,
+        time_sources: vec![VerificationTimeSource::Header, VerificationTimeSource::RpcLog],
+        reuse: VerificationReuse::None,
+        raw_observed_at: RawObservedAt { from_ms: 100, to_ms: 100 }, verified_at: 150,
+    };
+    AnalysisVerification::Declared { pool_history: method.clone(), token_profile: method }
+}
+
+#[test]
+fn verification_provenance_is_explicit_preserved_and_counted_in_output_limits() {
+    let request = request();
+    let mut context = pinned(&request);
+    let module = FixedModule::new(&request, RuleState::Clear);
+    let legacy = evaluate(&module, &context, &request).unwrap();
+    assert_eq!(serde_json::to_value(&legacy.binding).unwrap()["verification"],
+        json!({"status":"legacy_unspecified"}));
+    let legacy_bytes = serde_json::to_vec(&legacy).unwrap().len() as u64;
+    context.binding.verification = declared_verification();
+    let declared = evaluate(&module, &context, &request).unwrap();
+    assert_eq!(declared.binding.verification, context.binding.verification);
+    assert_eq!(declared.analysis, legacy.analysis, "Transport metadata does not alter the pure algorithm result");
+    let encoded = serde_json::to_string(&request).unwrap();
+    let limited = AlgorithmLimits { max_output_bytes: legacy_bytes, ..limits() };
+    assert_eq!(AlgorithmAdapter::with_test_stub(&module)
+        .evaluate(&context, Some(&encoded), &limited, 1000, || 0).err(),
+        Some(FailureReason::ResourceLimit));
+}
+
+#[test]
+fn verification_structure_is_validated_before_calling_the_algorithm() {
+    let request = request();
+    let cases: [(&str, fn(&mut MethodVerification)); 6] = [
+        ("unsupported version", |v| v.version = 2),
+        ("missing time source", |v| v.time_sources.clear()),
+        ("duplicate time source", |v| v.time_sources = vec![VerificationTimeSource::Header; 2]),
+        ("reversed raw interval", |v| v.raw_observed_at.from_ms = 101),
+        ("verified before raw observation", |v| v.verified_at = 99),
+        ("unsafe integer", |v| v.verified_at = 9_007_199_254_740_992),
+    ];
+    for (label, mutate) in cases {
+        let mut context = pinned(&request);
+        context.binding.verification = declared_verification();
+        if let AnalysisVerification::Declared { pool_history, .. } = &mut context.binding.verification {
+            mutate(pool_history);
+        }
+        let module = FixedModule::new(&request, RuleState::Clear);
+        assert_eq!(evaluate(&module, &context, &request).err(), Some(FailureReason::InvalidScamInput), "{label}");
+        assert_eq!(module.calls.get(), 0, "{label}");
+    }
+    let mut context = pinned(&request);
+    context.binding.verification = declared_verification();
+    if let AnalysisVerification::Declared { token_profile, .. } = &mut context.binding.verification {
+        token_profile.history = HistoryVerification::RpcAnchor;
+    }
+    let module = FixedModule::new(&request, RuleState::Clear);
+    assert_eq!(evaluate(&module, &context, &request).err(), Some(FailureReason::InvalidScamInput));
+    assert_eq!(module.calls.get(), 0);
+}
+
 #[test]
 fn inconsistent_or_nonfinite_output_is_never_accepted() {
     let request = request();

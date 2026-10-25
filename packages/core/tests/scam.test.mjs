@@ -311,6 +311,8 @@ test("observed ETH swap resolves its pool-side WETH and preserves manual/check s
   assert.equal(manual.source, "evaluated");
   assert.equal(manual.scam.status, "warn");
   assert.equal(manual.scam.targets[0].analysisMode, "stub");
+  assert.deepEqual(manual.scam.targets[0].binding.verification, { status: "legacy_unspecified" },
+    "Legacy provider inputs do not imply any particular verification mode");
   assert.deepEqual(manual.scam.targets[0].rules.map(({ ruleId, state }) => [ruleId, state]), [["r1", "fired"], ["r2", "fired"]]);
   assert.deepEqual(comparable(checked.scam), comparable(manual.scam));
   assert.equal(setup.fetches.filter(({ scam }) => scam).length, 1);
@@ -417,6 +419,36 @@ test("malformed, mismatched and missing scam batches stay isolated from the poli
   assert.equal(verdict.decision, "allow");
   assert.equal(verdict.source, "evaluated");
   assert.equal(verdict.scam.status, "insufficient");
+});
+
+test("AH1-1 malformed or mixed verification declarations stay advisory across the WASM boundary", options, async (t) => {
+  const { core } = await open(t, harness());
+  const valid = () => ({ version: 1, history: "all_event_headers", stateBinding: "number_recheck",
+    timeSources: ["header"], reuse: "none", rawObservedAt: { fromMs: NOW, toMs: NOW }, verifiedAt: NOW });
+  const mutations = [
+    ["explicit null is not legacy", (h, p) => { h.verification = null; p.verification = null; }],
+    ["one missing method declaration", (_h, p) => { delete p.verification; }],
+    ["different history modes", (_h, p) => { p.verification.history = "rpc_anchor"; }],
+    ["unknown metadata version", (h, p) => { h.verification.version = 2; p.verification.version = 2; }],
+    ["unknown field is not silently discarded", (h) => { h.verification.claim = "safe"; }],
+    ["future final check", (h) => { h.verification.verifiedAt = NOW + 60_000; }],
+    ["old observations cannot claim fresh collection", (h) => { h.verification.rawObservedAt.fromMs = NOW - 1; }],
+  ];
+  for (const [label, mutate] of mutations) {
+    const plan = await core.plan(redirectedSwap());
+    const batch = scamBatch(plan.scamCalls, plan);
+    const byMethod = Object.fromEntries(plan.scamCalls.map((call) => [call.method, batch.results[call.callId].value]));
+    const history = byMethod["scam.pool_history"], profile = byMethod["scam.token_profile"];
+    history.verification = valid(); profile.verification = valid();
+    mutate(history, profile);
+    const verdict = core.evaluate(plan, policyBatch(plan.calls, plan), batch);
+    assert.equal(verdict.decision, "deny", label);
+    assert.equal(verdict.source, "evaluated", label);
+    assert.ok(verdict.reasons.some(({ policyId }) => policyId === "swap-recipient-not-self-deny"), label);
+    assert.equal(verdict.scam.status, "insufficient", label);
+    assert.ok(reasons(verdict).includes("invalid_scam_input"), label);
+    assert.equal(verdict.scam.targets[0].binding, undefined, label);
+  }
 });
 
 test("an issued plan pins settings, bundle and algorithm despite later fixture/settings replacement", options, async (t) => {
@@ -616,6 +648,14 @@ test("SF4-5 raw RPC provider reaches manual evaluate and check with identical pi
   assert.equal(manual.scam.targets[0].analysisMode, "stub", "The actual algorithm is still an explicit test fixture");
   assert.equal(manual.scam.targets[0].binding.builderVersion, "dambi-v2/1");
   assert.equal(manual.scam.targets[0].binding.selectionReason, "lower_bound_mature");
+  assert.deepEqual(manual.scam.targets[0].binding.verification, {
+    status: "declared", poolHistory: history.verification, tokenProfile: profile.verification,
+  }, "Actual provider verification survives TypeScript, strict Rust parsing and report composition");
+  assert.equal(history.verification.version, 1);
+  assert.equal(history.verification.history, "all_event_headers");
+  assert.equal(history.verification.stateBinding, "number_recheck");
+  assert.equal(history.verification.reuse, "none");
+  assert.equal(history.verification.verifiedAt, NOW);
   assert.deepEqual(comparable(checked.scam), comparable(manual.scam));
   assert.equal(policyCalls.length, 2);
   assert.ok(policyCalls.every(({ calls }) => calls.length === 1 && calls[0].method === "sf3.policy-marker"));

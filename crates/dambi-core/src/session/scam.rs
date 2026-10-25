@@ -626,6 +626,8 @@ struct HistoryValue {
     subject: Subject,
     reference_group_id: String,
     reference: FixedReference,
+    #[serde(default, deserialize_with = "deserialize_present_verification")]
+    verification: Option<MethodVerification>,
     coverage: DataCoverage,
     histories: Vec<HistoryGrid>,
 }
@@ -643,12 +645,20 @@ struct ProfileValue {
     subject: Subject,
     reference_group_id: String,
     reference: FixedReference,
+    #[serde(default, deserialize_with = "deserialize_present_verification")]
+    verification: Option<MethodVerification>,
     coverage: DataCoverage,
     age: PoolAge,
     searched_ranges: Vec<DataCoverage>,
     events: Vec<AdminEvent>,
     #[serde(default)]
     activity_start: Option<ActivityStart>,
+}
+
+// Omission is the legacy contract; an explicit null is malformed metadata.
+fn deserialize_present_verification<'de, D>(deserializer: D) -> Result<Option<MethodVerification>, D::Error>
+where D: serde::Deserializer<'de> {
+    MethodVerification::deserialize(deserializer).map(Some)
 }
 
 #[derive(Deserialize, Serialize)]
@@ -795,6 +805,8 @@ impl Plan {
         if h.reference_group_id != target.group || p.reference_group_id != target.group
             || h.reference != p.reference { return Err(FailureReason::ReferenceMismatch); }
         validate_reference(&h.reference, target.support.confirm_depth, now, skew)?;
+        let verification = bind_verification(&h.verification, &p.verification,
+            history_fact.observed_at, profile_fact.observed_at, now, skew)?;
         let (selected, selection_reason, created, lower_bound) = select_age(&p.age, pair, target, &h.reference)?;
         let preset = if selected == "established" { &pair.established } else { &pair.new_market };
         if preset.rules.is_empty() {
@@ -877,6 +889,7 @@ impl Plan {
         let context = self.context.as_ref().ok_or(FailureReason::BundleInvalid)?;
         let binding = AnalysisBinding {
             plan_id: plan_id.into(), subject: target.subject.clone(), reference: h.reference,
+            verification,
             settings_hash: context["settingsHash"].as_str().ok_or(FailureReason::BundleInvalid)?.into(),
             settings_hash_scheme: "sha256-jcs-scam-v1".into(), bundle_sequence: installed.bundle.sequence.clone(),
             selected_preset: selected.into(), selection_reason: selection_reason.into(),
@@ -959,6 +972,28 @@ fn validate_fact(fact: &Fact, reference: &FixedReference, now: u64, skew: u64, m
     Ok(())
 }
 
+fn bind_verification(
+    history: &Option<MethodVerification>, profile: &Option<MethodVerification>,
+    history_observed_at: u64, profile_observed_at: u64, now: u64, skew: u64,
+) -> Result<AnalysisVerification, FailureReason> {
+    let result = match (history, profile) {
+        (None, None) => AnalysisVerification::LegacyUnspecified,
+        (Some(history), Some(profile)) => {
+            for (verification, observed_at) in [(history, history_observed_at), (profile, profile_observed_at)] {
+                if observed_at > MAX_SAFE_INTEGER || verification.verified_at < observed_at
+                    || verification.verified_at > now.saturating_add(skew)
+                    || (verification.reuse == VerificationReuse::None && verification.raw_observed_at.from_ms < observed_at) {
+                    return Err(FailureReason::InvalidScamInput);
+                }
+            }
+            AnalysisVerification::Declared { pool_history: history.clone(), token_profile: profile.clone() }
+        },
+        _ => return Err(FailureReason::InvalidScamInput),
+    };
+    result.validate()?;
+    Ok(result)
+}
+
 fn validate_coverage(coverage: &DataCoverage, reference: &FixedReference, required_from: u64, max: u64) -> Result<(), FailureReason> {
     if coverage.from_ms > required_from || coverage.to_ms != reference.block.timestamp_ms
         || coverage.from_ms > coverage.to_ms || decimal(&coverage.from_block).is_none()
@@ -1033,4 +1068,94 @@ pub(super) fn policy_fact_deadline(input: &str, max_bytes: u64, max_age: u64) ->
         deadline = deadline.min(observed.saturating_add(max_age).min(MAX_SAFE_INTEGER));
     }
     Some(deadline)
+}
+
+#[cfg(test)]
+mod verification_tests {
+    use super::*;
+
+    fn metadata() -> MethodVerification {
+        MethodVerification {
+            version: 1, history: HistoryVerification::AllEventHeaders,
+            state_binding: StateBinding::NumberRecheck,
+            time_sources: vec![VerificationTimeSource::Header], reuse: VerificationReuse::None,
+            raw_observed_at: RawObservedAt { from_ms: 100, to_ms: 110 }, verified_at: 140,
+        }
+    }
+
+    fn values() -> (Value, Value) {
+        let common = json!({
+            "builderVersion":"test/1", "referenceGroupId":"group", "subject":{
+                "chainId":1,"token":"token","pool":"pool","factory":"factory",
+                "quoteToken":"quote","venue":"uniswap_v2","actionPaths":[]
+            },
+            "reference":{
+                "block":{"number":"1","hash":"hash","timestampMs":90},
+                "checkedHead":{"number":"3","hash":"head","timestampMs":92},
+                "requiredConfirmDepth":2,"observedConfirmDepth":2
+            },
+            "coverage":{"fromBlock":"0","fromMs":0,"toMs":90,"missing":[],"unavailable":[]}
+        });
+        let mut history = common.clone();
+        history["method"] = json!("scam.pool_history");
+        history["schema"] = json!("scam.pool_history/1");
+        history["histories"] = json!([]);
+        let mut profile = common;
+        profile["method"] = json!("scam.token_profile");
+        profile["schema"] = json!("scam.token_profile/1");
+        profile["age"] = json!({"kind":"unknown","reasons":["fixture"]});
+        profile["searchedRanges"] = json!([]);
+        profile["events"] = json!([]);
+        (history, profile)
+    }
+
+    #[test]
+    fn verification_wrappers_accept_omission_but_reject_null_and_malformed_metadata() {
+        let (history, profile) = values();
+        assert!(serde_json::from_value::<HistoryValue>(history.clone()).unwrap().verification.is_none());
+        assert!(serde_json::from_value::<ProfileValue>(profile.clone()).unwrap().verification.is_none());
+        let valid = serde_json::to_value(metadata()).unwrap();
+        let mut unknown = valid.clone(); unknown["trustMe"] = json!(true);
+        let mut unknown_nested = valid.clone(); unknown_nested["rawObservedAt"]["extra"] = json!(0);
+        let mut wrong_version = valid.clone(); wrong_version["version"] = json!(2);
+        let mut wrong_mode = valid.clone(); wrong_mode["history"] = json!("unverified");
+        for malformed in [Value::Null, json!({"version":1}), unknown, unknown_nested, wrong_version, wrong_mode] {
+            let mut h = history.clone(); h["verification"] = malformed.clone();
+            let mut p = profile.clone(); p["verification"] = malformed;
+            assert!(serde_json::from_value::<HistoryValue>(h).is_err());
+            assert!(serde_json::from_value::<ProfileValue>(p).is_err());
+        }
+        let mut h = history; h["verification"] = valid.clone();
+        let mut p = profile; p["verification"] = valid;
+        assert_eq!(serde_json::from_value::<HistoryValue>(h).unwrap().verification, Some(metadata()));
+        assert_eq!(serde_json::from_value::<ProfileValue>(p).unwrap().verification, Some(metadata()));
+    }
+
+    #[test]
+    fn verification_binding_checks_presence_shared_modes_and_observation_times() {
+        assert_eq!(bind_verification(&None, &None, 100, 100, 150, 0),
+            Ok(AnalysisVerification::LegacyUnspecified));
+        let declared = Some(metadata());
+        assert_eq!(bind_verification(&declared, &None, 100, 100, 150, 0), Err(FailureReason::InvalidScamInput));
+        assert_eq!(bind_verification(&None, &declared, 100, 100, 150, 0), Err(FailureReason::InvalidScamInput));
+        let mut cached = metadata();
+        cached.reuse = VerificationReuse::IntervalCache;
+        cached.raw_observed_at.from_ms = 80;
+        cached.time_sources.push(VerificationTimeSource::RpcLog);
+        cached.verified_at = 145;
+        assert!(bind_verification(&declared, &Some(cached), 100, 100, 150, 0).is_ok(),
+            "Method-specific reuse, source and observation times need not match");
+        let cases: [(&str, fn(&mut MethodVerification)); 5] = [
+            ("mode mismatch", |v| v.history = HistoryVerification::RpcAnchor),
+            ("binding mismatch", |v| v.state_binding = StateBinding::BlockHashCanonical),
+            ("future verification", |v| v.verified_at = 153),
+            ("verification before fact", |v| { v.raw_observed_at.from_ms = 80; v.raw_observed_at.to_ms = 90; v.verified_at = 99; }),
+            ("fresh data predates fetch", |v| v.raw_observed_at.from_ms = 99),
+        ];
+        for (label, mutate) in cases {
+            let mut other = metadata(); mutate(&mut other);
+            assert_eq!(bind_verification(&declared, &Some(other), 100, 100, 150, 2),
+                Err(FailureReason::InvalidScamInput), "{label}");
+        }
+    }
 }

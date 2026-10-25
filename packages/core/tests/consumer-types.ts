@@ -23,6 +23,8 @@ import {
   type SignedPolicyBundle,
   type UnsupportedRequest,
   type Verdict,
+  type AnalysisVerification,
+  type MethodVerification,
 } from "@dambi/core";
 import "@dambi/core/internal";
 import { decoderSnapshot, decoderSnapshotInfo } from "@dambi/core/decoders";
@@ -105,7 +107,8 @@ void [evmFact, evmBatch, invalidFactRequest];
 
 function scamAdapter(options: ScamFactProviderOptions): FactProvider {
   return createScamFactProvider({ ...options, policy: evmFact,
-    rpc: { ...options.rpc, limits: { ...options.rpc.limits, minRequestIntervalMs: 75,
+    rpc: { ...options.rpc, verification: { history: "all_event_headers", stateBinding: "number_recheck" },
+      limits: { ...options.rpc.limits, minRequestIntervalMs: 75,
       maxRetryDelayMs: Math.max(30_000, options.rpc.limits.retryDelayMs) } },
     onMetrics(metrics: ScamProviderMetrics) {
       const outcome: "success" | "partial" | "failed" = metrics.outcome;
@@ -143,6 +146,24 @@ new ScamDataError("arbitrary_remote_error");
 // @ts-expect-error Provider failure reasons are immutable.
 scamDataFailure.reason = "timeout";
 void [scamAdapter, invalidScamPacing, scamDataFailure];
+
+const declaredVerification: MethodVerification = {
+  version: 1, history: "all_event_headers", stateBinding: "number_recheck", timeSources: ["header", "rpc_log"],
+  reuse: "none", rawObservedAt: { fromMs: 1_800_000_000_000, toMs: 1_800_000_000_000 }, verifiedAt: 1_800_000_000_001,
+};
+const legacyVerification: AnalysisVerification = { status: "legacy_unspecified" };
+const analysisVerification: AnalysisVerification = {
+  status: "declared", poolHistory: declaredVerification, tokenProfile: declaredVerification,
+};
+// @ts-expect-error Metadata versions are explicit, not arbitrary integers.
+const unknownVerification: MethodVerification = { ...declaredVerification, version: 2 };
+// @ts-expect-error Consistency provenance cannot claim a cryptographic source proof.
+const inventedVerification: MethodVerification = { ...declaredVerification, history: "cryptographic_proof" };
+// @ts-expect-error Both method declarations must be retained in a declared binding.
+const incompleteVerification: AnalysisVerification = { status: "declared", poolHistory: declaredVerification };
+// @ts-expect-error Timestamp provenance is immutable.
+declaredVerification.timeSources.push("header");
+void [legacyVerification, analysisVerification, unknownVerification, inventedVerification, incompleteVerification];
 
 // @ts-expect-error Decoder lookup is not a public I/O port.
 import type { DecoderSource } from "@dambi/core";
