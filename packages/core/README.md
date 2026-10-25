@@ -320,14 +320,17 @@ an actual canonical header with the matching hash and any recorded timestamp.
 This avoids the first of two event-header reads where log times are available;
 it does not remove final verification or guarantee cold-history completion.
 
-After collecting history logs, `onMetrics.preflight` records the last known-work
-budget check in `preflightGroup` (one-based reference group). It counts unique
-log blocks, timestamped blocks, uncached header reads and final rechecks, plus
-remaining request/time budgets and the minimum pacing delay. This is a lower
-bound at that checkpoint, excluding later profile/target work, retries and
-network latency. Impossible request or pacing budgets fail with
-`resource_limit` at stage `preflight`, before individual event-header reads.
-The separate builder header-lookup cap and all existing deadlines still apply.
+`onMetrics.preflight` records the last known-work budget check in `preflightGroup`
+(one-based reference group). It counts unique log blocks, timestamped blocks,
+uncached header reads and final rechecks, plus remaining request/time budgets
+and the minimum pacing delay. The history checkpoint excludes later profile/target
+work. After collection finishes, the check is refreshed with the frozen final
+target list, including evidence added by those later operations. The same selector
+supplies both budget checks and final verification; shared heights are checked
+once and the reference block is checked last. Neither checkpoint predicts network
+latency or retries. Impossible request or pacing budgets fail with `resource_limit`
+at stage `preflight`, before the corresponding header reads. The separate builder
+header-lookup cap and all existing deadlines still apply.
 
 This adapter neither installs a scam bundle nor provides an algorithm. Production
 bundle/module integration remains separate. For manual read-only RPC measurement,

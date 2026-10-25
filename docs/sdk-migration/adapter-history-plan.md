@@ -1,6 +1,6 @@
 # 어댑터 이력 조회·검증 개선 세부 구현 계획서
 
-상태: **설계안 v0.1 / AH1-1 완료, AH1-2 미착수**. 작업 브랜치: `feat/adapter-history`. 출발 커밋: `07eb4f4` — SF4-5 provider 통합·진단 checkpoint. 날짜별 일정 대신 변경 계약, 구현 순서, 완료 기준을 정의한다.
+상태: **설계안 v0.1 / AH1 완료, AH2 미착수**. 작업 브랜치: `feat/adapter-history`. 출발 커밋: `07eb4f4` — SF4-5 provider 통합·진단 checkpoint. 날짜별 일정 대신 변경 계약, 구현 순서, 완료 기준을 정의한다.
 
 이 문서는 **과거 로그를 가져오는 어댑터의 첫 조회·반복 조회 비용을 줄이는 코드 구현 계획**이다. [기존 어댑터 계획](adapter-development-plan.md)의 후속이며, [Scam Filter 계획](../scam-filter/mvp-design-plan.md)의 SF4-5에서 분리한 작업이다. 조사 근거는 [어댑터 이력 검증 개선안](</Users/spu/SDKdambi/reports/어댑터 이력 검증 개선안.md>)에 있다. 원격 자료의 변경이 이 계획의 계약을 자동으로 바꾸지는 않는다.
 
@@ -168,7 +168,7 @@ source에 무효화 세대 번호(generation)를 두고 각 batch가 시작 시 
 | 단계 | 작업 | 완료 기준 | 현재 상태 |
 | --- | --- | --- | --- |
 | **AH1-1 계약·근거 연결** | §4 설정과 SDK metadata, Rust 파싱·binding, legacy 호환 의미 고정 | 잘못된·불일치 metadata 거부, 실제 근거가 verdict까지 보존; 알고리즘 wire 의미 유지 | 완료 — 사용자 실행 결과 확인 |
-| **AH1-2 최종 검증 분리** | 역할별 evidence, 공통 selector·preflight·finalizer | 기본 모드에서 기존 대상·결과 동일, 실제 선택과 비용 일치 | 미착수 |
+| **AH1-2 최종 검증 분리** | 역할별 evidence, 공통 selector·preflight·finalizer | 기본 모드에서 기존 대상·결과 동일, 실제 선택과 비용 일치 | 완료 — 사용자 실행 결과 확인 |
 | **AH2 RPC 신뢰 모드** | 명시적 rpc_anchor, 계측·probe 옵션 | 시간 제공 로그가 늘어도 로그 전용 final 요청은 증가하지 않음; 남겨야 할 검사·실패 격리 유지 | 미착수 |
 | **AH3 해시 상태 결속** | 모든 상태 selector 공통화, EIP-1898 선택 지원 | 메서드별 블록 해시 정확, 오류 fallback 없음; 실연결 지원은 별도 확인 | 미착수 / AH2와 독립 가능한 후속 |
 | **AH4-1 구간 저장·차집합** | bounded memory store, 완료·빈 구간·필터 분리 | 같은 T/증가한 T에서 필요한 누락 구간만 조회, 새 Fact 재구성 | 조건부 대기 |

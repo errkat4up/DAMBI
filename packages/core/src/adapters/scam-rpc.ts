@@ -119,7 +119,9 @@ export interface ScamRpcMetrics {
   readonly logChunks: number;
   readonly failedChunks: number;
   readonly durationMs: number;
-  /** Last preflight snapshot in this reference group; not a completion estimate. */
+  /** Last preflight snapshot in this reference group, refreshed before final
+   * verification with its frozen targets; not a completion-time estimate.
+   */
   readonly preflight?: ScamRpcPreflight;
 }
 /** Terminal diagnostics only. Never contains URLs, arguments or remote text. */
@@ -144,6 +146,46 @@ export type ScamRpcTerminalMetrics = ScamRpcMetrics & {
 const diagnostics = new WeakMap<ScamRpcError, ScamRpcDiagnostic>();
 
 const fail = (reason: ScamRpcFailure): never => { throw new ScamRpcError(reason); };
+type EvidenceRole = "checked_head" | "reference" | "queried_header" | "state_read" | "log" | "cache_boundary";
+interface BlockEvidence {
+  readonly hash: string;
+  timestampMs?: number;
+  readonly roles: Set<EvidenceRole>;
+}
+interface FinalCheck {
+  readonly number: string;
+  /** Absent only in a preflight projection for a header not collected yet. */
+  readonly hash?: string;
+  readonly timestampMs?: number;
+  readonly roles: readonly EvidenceRole[];
+}
+
+/** One selection policy for budget projections and actual final verification.
+ * AH1 keeps every observed block. No weaker mode is implemented by this step.
+ * Pending headers project future work without inventing hash/time evidence.
+ */
+function selectFinalChecks(evidence: ReadonlyMap<string, BlockEvidence>, mode: HistoryVerification,
+  referenceNumber: string, pendingHeaders: Iterable<string> = []): readonly FinalCheck[] {
+  if (mode !== "all_event_headers") return fail("invalid_config");
+  const selected = new Map<string, FinalCheck>();
+  for (const [number, entry] of evidence) {
+    selected.set(number, { number, hash: entry.hash, timestampMs: entry.timestampMs, roles: [...entry.roles] });
+  }
+  for (const number of pendingHeaders) {
+    const existing = selected.get(number);
+    const roles = new Set<EvidenceRole>(existing?.roles);
+    roles.add("queried_header");
+    selected.set(number, { ...existing, number, roles: [...roles] });
+  }
+  const reference = selected.get(referenceNumber);
+  if (!reference || !reference.roles.includes("reference")) return fail("invalid_request");
+  // Preserve collection order except for the reference, checked once and last.
+  selected.delete(referenceNumber);
+  selected.set(referenceNumber, reference);
+  return Object.freeze([...selected.values()].map((entry) => Object.freeze({
+    ...entry, roles: Object.freeze([...entry.roles]),
+  })));
+}
 const integer = (v: unknown, min = 0): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= min;
 const text = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 512;
 function height(v: unknown): bigint {
@@ -442,26 +484,64 @@ export function createScamRpcSource(options: ScamRpcOptions) {
           }
         }
       };
-      const evidence = new Map<string, string>();
-      const evidenceTimes = new Map<string, number>();
+      const evidence = new Map<string, BlockEvidence>();
       const logBlocks = new Set<string>(), timestampedLogBlocks = new Set<string>();
       const blocks = new Map<string, RpcBlock>();
-      const remember = (number: string, blockHash: string, timestampMs?: number): void => {
-        if (evidence.has(number) && evidence.get(number) !== blockHash) return stop("reorg");
-        if (timestampMs !== undefined) {
-          if (evidenceTimes.has(number) && evidenceTimes.get(number) !== timestampMs) return stop("invalid_response");
-          evidenceTimes.set(number, timestampMs);
+      const remember = (number: string, blockHash: string, role: EvidenceRole, timestampMs?: number): void => {
+        const existing = evidence.get(number);
+        if (existing && existing.hash !== blockHash) return stop("reorg");
+        if (timestampMs !== undefined && existing?.timestampMs !== undefined
+            && existing.timestampMs !== timestampMs) return stop("invalid_response");
+        if (existing) {
+          if (timestampMs !== undefined) existing.timestampMs = timestampMs;
+          existing.roles.add(role);
+        } else {
+          evidence.set(number, { hash: blockHash, timestampMs, roles: new Set([role]) });
         }
-        evidence.set(number, blockHash);
       };
-      const validateTimes = (): void => {
-        const ordered = [...evidenceTimes].sort(([a], [b]) => BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0);
+      const validateTimes = (times: readonly (readonly [string, number])[]): void => {
+        const ordered = [...times].sort(([a], [b]) => BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0);
         for (let i = 1; i < ordered.length; i++) {
           if (ordered[i - 1][1] > ordered[i][1]) return stop("invalid_response");
         }
       };
+      const collectedTimes = (): [string, number][] => [...evidence].flatMap(([number, entry]) =>
+        entry.timestampMs === undefined ? [] : [[number, entry.timestampMs] as [string, number]]);
       const readBlock = (number: bigint, rpcStage: ScamRpcDiagnostic["stage"] = "block_header"): Promise<RpcBlock> =>
         rpc(rpcStage, "eth_getBlockByNumber", [quantity(number), false], (value) => decodeBlock(value, number));
+      const enforcePreflight = (checks: readonly FinalCheck[], additionalHeaders: number): void => {
+        try {
+          check();
+          if (pending !== 0) return fail("invalid_request");
+          const minimumRequests = additionalHeaders + checks.length;
+          const monoNow = performance.now();
+          // Round the zero-network-latency lower bound down and available time up.
+          const minimumPacingMs = minimumRequests === 0 ? 0 : Math.floor(
+            Math.max(0, Math.max(nextLaunchAt, cooldownUntil) - monoNow)
+            + (minimumRequests - 1) * config.limits.minRequestIntervalMs);
+          const remainingTimeMs = Math.max(0, Math.ceil(Math.min(request.deadlineMs - now(), expiresAt - monoNow)));
+          metrics.preflight = Object.freeze({ uniqueLogBlocks: logBlocks.size,
+            timestampedLogBlocks: timestampedLogBlocks.size, additionalHeaderRequests: additionalHeaders,
+            finalRecheckRequests: checks.length, minimumRemainingRequests: minimumRequests,
+            remainingRequestBudget: Math.max(0, config.limits.maxRequests - metrics.requests),
+            minimumPacingMs, remainingTimeMs });
+          if (minimumRequests > metrics.preflight.remainingRequestBudget
+              || minimumRequests > 0 && minimumPacingMs >= remainingTimeMs) return stop("resource_limit");
+        } catch (error) { throw diagnosticError(error, "preflight"); }
+      };
+      const verifyFinalChecks = async (checks: readonly FinalCheck[]): Promise<void> => {
+        const verifiedTimes: [string, number][] = [];
+        for (const target of checks) {
+          if (target.hash === undefined) return fail("invalid_request");
+          const current = await readBlock(BigInt(target.number), "final_recheck");
+          if (current.hash !== target.hash) return stop("reorg");
+          if (target.timestampMs !== undefined && current.timestampMs !== target.timestampMs) return stop("invalid_response");
+          // Header times complete the private verification set only. Do not
+          // collect new roles/blocks or change the already selected targets.
+          verifiedTimes.push([target.number, current.timestampMs]);
+        }
+        validateTimes(verifiedTimes);
+      };
       try {
         stage = "reference";
         if (await rpc("reference", "eth_chainId", [], decodeQuantity) !== BigInt(config.chainId)) return fail("chain_mismatch");
@@ -471,8 +551,8 @@ export function createScamRpcSource(options: ScamRpcOptions) {
         const base = request.confirmDepth === 0 ? head : await readBlock(baseHeight, "reference");
         if (base.timestampMs > head.timestampMs) return fail("invalid_response");
         blocks.set(base.number, base);
-        remember(head.number, head.hash, head.timestampMs);
-        remember(base.number, base.hash, base.timestampMs);
+        remember(head.number, head.hash, "checked_head", head.timestampMs);
+        remember(base.number, base.hash, "reference", base.timestampMs);
         const reference: FixedReference = Object.freeze({
           block: Object.freeze({ number: base.number, hash: base.hash, timestampMs: base.timestampMs }),
           checkedHead: Object.freeze({ number: head.number, hash: head.hash, timestampMs: head.timestampMs }),
@@ -483,16 +563,26 @@ export function createScamRpcSource(options: ScamRpcOptions) {
           const n = height(number);
           if (n > baseHeight) return fail("invalid_request");
           const cached = blocks.get(number);
-          if (cached) return cached;
+          if (cached) {
+            remember(number, cached.hash, "queried_header", cached.timestampMs);
+            return cached;
+          }
           const block = await readBlock(n);
           if (block.timestampMs > base.timestampMs) return fail("invalid_response");
-          remember(number, block.hash, block.timestampMs);
+          remember(number, block.hash, "queried_header", block.timestampMs);
           blocks.set(number, block);
           return block;
         };
+        const markStateRead = (number: string): void => {
+          const block = blocks.get(number);
+          if (!block) return fail("invalid_request");
+          remember(number, block.hash, "state_read", block.timestampMs);
+        };
         const ethCall = <R>(rpcStage: ScamRpcDiagnostic["stage"], to: Address, data: string,
-          decode: (value: unknown) => R, number = base.number): Promise<R> =>
-          rpc(rpcStage, "eth_call", [{ to, data }, quantity(height(number))], decode);
+          decode: (value: unknown) => R, number = base.number): Promise<R> => {
+          markStateRead(number);
+          return rpc(rpcStage, "eth_call", [{ to, data }, quantity(height(number))], decode);
+        };
         const verified = new Set<VerifiedPool>();
         const pools = new Map<number, Promise<VerifiedPool>>();
         const requirePool = (pool: VerifiedPool): void => {
@@ -538,22 +628,7 @@ export function createScamRpcSource(options: ScamRpcOptions) {
                 required.add(number);
               }
               const additional = [...required].filter((number) => !blocks.has(number)).length;
-              const finalChecks = new Set([...evidence.keys(), ...required]).size;
-              const minimumRequests = additional + finalChecks;
-              const monoNow = performance.now();
-              // Round a lower bound down and available time up. This only
-              // rejects work that cannot fit even with zero network latency.
-              const minimumPacingMs = minimumRequests === 0 ? 0 : Math.floor(
-                Math.max(0, Math.max(nextLaunchAt, cooldownUntil) - monoNow)
-                + (minimumRequests - 1) * config.limits.minRequestIntervalMs);
-              const remainingTimeMs = Math.max(0, Math.ceil(Math.min(request.deadlineMs - now(), expiresAt - monoNow)));
-              metrics.preflight = Object.freeze({ uniqueLogBlocks: logBlocks.size,
-                timestampedLogBlocks: timestampedLogBlocks.size, additionalHeaderRequests: additional,
-                finalRecheckRequests: finalChecks, minimumRemainingRequests: minimumRequests,
-                remainingRequestBudget: Math.max(0, config.limits.maxRequests - metrics.requests),
-                minimumPacingMs, remainingTimeMs });
-              if (minimumRequests > metrics.preflight.remainingRequestBudget
-                  || minimumRequests > 0 && minimumPacingMs >= remainingTimeMs) return stop("resource_limit");
+              enforcePreflight(selectFinalChecks(evidence, config.verification.history, base.number, required), additional);
             } catch (error) { throw diagnosticError(error, "preflight"); }
           },
           async reserves(pool: VerifiedPool, number = base.number) {
@@ -569,6 +644,7 @@ export function createScamRpcSource(options: ScamRpcOptions) {
           async code(pool: VerifiedPool, number: string) {
             requirePool(pool);
             await historicalBlock(number);
+            markStateRead(number);
             return rpc("code", "eth_getCode", [pool.subject.pool, quantity(height(number))], decodeCode);
           },
           async logs(pool: VerifiedPool, query: Parameters<ScamRpcBatch["logs"]>[1]) {
@@ -600,7 +676,7 @@ export function createScamRpcSource(options: ScamRpcOptions) {
                   logCount += (raw as unknown[]).length;
                   for (const log of decoded) {
                     if (log.timestampMs !== undefined && log.timestampMs > base.timestampMs) return stop("invalid_response");
-                    remember(log.blockNumber, log.blockHash, log.timestampMs);
+                    remember(log.blockNumber, log.blockHash, "log", log.timestampMs);
                     logBlocks.add(log.blockNumber);
                     if (log.timestampMs !== undefined) timestampedLogBlocks.add(log.blockNumber);
                   }
@@ -618,7 +694,7 @@ export function createScamRpcSource(options: ScamRpcOptions) {
             logs.sort((a, b) => BigInt(a.blockNumber) < BigInt(b.blockNumber) ? -1
               : BigInt(a.blockNumber) > BigInt(b.blockNumber) ? 1 : a.transactionIndex - b.transactionIndex || a.logIndex - b.logIndex);
             missing.sort((a, b) => BigInt(a.fromBlock) < BigInt(b.fromBlock) ? -1 : 1);
-            validateTimes();
+            validateTimes(collectedTimes());
             return { logs, missing };
           },
         });
@@ -654,19 +730,13 @@ export function createScamRpcSource(options: ScamRpcOptions) {
         collecting = false;
         check();
         if (operations !== 0 || pending !== 0) return fail("invalid_request");
-        // Recheck exact heights: a reorg discards the whole draft, never mixes
-        // replacement logs with the old reference or returns a stale success.
-        const finalEvidence = [...evidence].filter(([number]) => number !== base.number);
-        finalEvidence.push([base.number, base.hash]);
+        // Recompute after every method/target has collected its evidence. The
+        // immutable list used for this last budget check is executed unchanged.
+        const finalChecks = selectFinalChecks(evidence, config.verification.history, base.number);
+        stage = "preflight";
+        enforcePreflight(finalChecks, 0);
         stage = "final_recheck";
-        for (const [number, blockHash] of finalEvidence) {
-          const current = await readBlock(BigInt(number), "final_recheck");
-          if (current.hash !== blockHash) return stop("reorg");
-          // Log timestamps may have been used only to form a private draft.
-          // Publication still requires an actual header's matching hash/time.
-          remember(number, current.hash, current.timestampMs);
-        }
-        validateTimes();
+        await verifyFinalChecks(finalChecks);
         check();
         const verifiedAt = now();
         if (verifiedAt < observedAt || verifiedAt >= request.deadlineMs) return fail("timeout");

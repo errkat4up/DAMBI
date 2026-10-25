@@ -412,6 +412,84 @@ test("scam RPC preflight counts uncached headers and all final checks without sp
   assert.deepEqual(pacedReports[0].failure, { stage: "preflight", kind: "resource_limit" });
 });
 
+test("AH1-2 final checks merge evidence roles, seal collection and check the reference last", async () => {
+  for (const confirmDepth of [2, 0]) {
+    const reference = 25 - confirmDepth;
+    let collected = false, closedCollectionChecked = false, retainedBatch, beforeFinal;
+    const f = fixture({ head: 25, handle: async (rpc) => {
+      if (rpc.method === "eth_getLogs") return ok(rpc, [
+        { ...rawLog(9), blockTimestamp: q(1009) },
+        { ...rawLog(reference), blockTimestamp: q(reference + 1000) },
+      ]);
+      if (collected && !closedCollectionChecked && rpc.method === "eth_getBlockByNumber") {
+        closedCollectionChecked = true;
+        // Retaining the old handle cannot extend the frozen final-check set.
+        assert.throws(() => retainedBatch.preflightHeaders(["8"]), failure("invalid_request"));
+        await assert.rejects(retainedBatch.block("8"), failure("invalid_request"));
+      }
+      return undefined;
+    } });
+    const result = await f.source.withBatch(request({ confirmDepth }), async (batch) => {
+      retainedBatch = batch;
+      const pool = await batch.pool(0);
+      await batch.block("9");
+      await batch.reserves(pool, "9");
+      await batch.code(pool, "9");
+      await batch.logs(pool, query("9", String(reference)));
+      await batch.block(String(reference));
+      batch.preflightHeaders(["9", "9", String(reference)]);
+      beforeFinal = f.calls.length;
+      collected = true;
+      return "verified draft";
+    });
+    const finalCalls = f.calls.slice(beforeFinal).map(({ rpc }) => rpc);
+    const expected = confirmDepth === 0 ? [9, 25] : [25, 9, 23];
+    assert.equal(result.value, "verified draft");
+    assert.equal(closedCollectionChecked, true);
+    assert.ok(finalCalls.every((rpc) => rpc.method === "eth_getBlockByNumber"));
+    assert.deepEqual(finalCalls.map((rpc) => rpc.params[0]), expected.map(q),
+      "A height shared by log, state and header evidence is checked once; head=reference is checked once too");
+    assert.equal(result.metrics.preflight.additionalHeaderRequests, 0);
+    assert.equal(result.metrics.preflight.finalRecheckRequests, finalCalls.length);
+    assert.equal(result.metrics.preflight.minimumRemainingRequests, finalCalls.length);
+    assert.equal(f.calls.some(({ rpc }) => rpc.method === "eth_getBlockByNumber" && rpc.params[0] === q(8)), false);
+  }
+});
+
+test("AH1-2 final preflight includes later profile evidence before dispatching any final header", async () => {
+  for (const maxRequests of [14, 12]) {
+    const reports = [];
+    const f = fixture({ head: 25, limits: { maxRequests }, handle: (rpc) => rpc.method === "eth_getLogs"
+      ? ok(rpc, [{ ...rawLog(9), blockTimestamp: q(1009) }]) : undefined });
+    let beforeFinal;
+    const work = f.source.withBatch(request({ onMetrics: (metric) => reports.push(metric) }), async (batch) => {
+      const pool = await batch.pool(0);
+      await batch.logs(pool, query("9", "9"));
+      batch.preflightHeaders([]); // The history-only snapshot has three final checks.
+      await batch.code(pool, "8"); // Profile work adds a fourth evidence height and spends two requests.
+      beforeFinal = f.calls.length;
+      return "history and profile draft";
+    });
+    if (maxRequests === 14) assert.equal((await work).value, "history and profile draft");
+    else await assert.rejects(work, failure("resource_limit"));
+    assert.equal(beforeFinal, 10, "The earlier history preflight admits profile collection");
+    assert.equal(reports.length, 1);
+    const metric = reports[0];
+    assert.equal(metric.preflight.additionalHeaderRequests, 0);
+    assert.equal(metric.preflight.finalRecheckRequests, 4);
+    assert.equal(metric.preflight.minimumRemainingRequests, 4);
+    assert.equal(metric.preflight.remainingRequestBudget, maxRequests - beforeFinal);
+    const finalCalls = f.calls.slice(beforeFinal).map(({ rpc }) => rpc);
+    if (maxRequests === 14) {
+      assert.deepEqual(finalCalls.map((rpc) => rpc.params[0]), [25, 9, 8, 23].map(q));
+      assert.equal(finalCalls.length, metric.preflight.finalRecheckRequests);
+    } else {
+      assert.deepEqual(finalCalls, [], "A stale history-only estimate cannot start an unaffordable final pass");
+      assert.deepEqual(metric.failure, { stage: "preflight", kind: "resource_limit" });
+    }
+  }
+});
+
 test("scam RPC cancellation and deadlines reject late fetches without poisoning the next batch", async () => {
   const entered = deferred(), late = deferred();
   let firstRequest;
