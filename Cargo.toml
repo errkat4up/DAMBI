@@ -13,6 +13,7 @@ members = [
     "crates/dambi-core-wasm",
     "crates/policy-engine",
     "crates/policy-engine-wasm",
+    "crates/scam-filter",
     # crates/integration-tests is LOCAL-ONLY (gitignored, no production logic) —
     # intentionally NOT a member so a fresh clone builds without the dir present.
     "crates/adapters/abi-resolver",
