@@ -4,9 +4,11 @@
 //! whole window is observed and the rule's warm-up is met; `incomplete` otherwise;
 //! `not_evaluable` when the rule cannot run at this resolution or has no data.
 //!
-//! Warm-up (observed history before `B`, cut at pool creation, plus the host's
-//! `warmup.complete`): cumulative R1 and R2 need [`WARMUP_SEC`], window_drop needs `windowSec`,
-//! step R1 and event_count need none.
+//! Pool-history rules need the host's `warmup.complete` (a faithful block-level record) to be
+//! `clear`, and observed history before `B` (cut at pool creation): cumulative R1 and R2 need
+//! [`WARMUP_SEC`], window_drop needs `windowSec`, step R1 none. event_count needs neither.
+//! With the warm-up met, cumulative R1 and R2 approximate the full-history result; the other
+//! rules match it exactly.
 use crate::generators::{cumulative_events, drop_events, step_events, zigzag_switches, Sample};
 use crate::series::{coverage_bps, metric_series};
 use crate::types::*;
@@ -100,8 +102,8 @@ struct Finding {
     events: Vec<EvidenceEvent>,
     /// (coverage bps of the window, undefined point inside the window)
     coverage: (u32, bool),
-    /// Whether the history before the window start meets the rule's warm-up requirement.
-    warm: bool,
+    /// Why the pool history does not support `clear` (unverified, or warm-up too short).
+    warm: Option<Reason>,
 }
 
 struct Ctx<'a> {
@@ -138,16 +140,16 @@ impl Ctx<'_> {
         (cov, undefined_inside)
     }
 
-    /// Warm-up of `need_ms` before `b`: the host vouches for the history (`warmup.complete`) and
-    /// `(max(b - need_ms, pool creation), b]` is observed. No requirement when `need_ms` is 0.
-    fn warm(&self, series: &[Sample], b: i64, need_ms: i64) -> bool {
-        if need_ms == 0 {
-            return true;
+    /// Pool-history check: the host vouches for the history (`warmup.complete`) and
+    /// `(max(b - need_ms, pool creation), b]` is observed (nothing more when `need_ms` is 0).
+    fn warm(&self, series: &[Sample], b: i64, need_ms: i64) -> Option<Reason> {
+        if !self.req.pool_history.warmup.complete {
+            return Some(Reason::HistoryUnverified);
         }
         let start = self.window_floor(b.saturating_sub(need_ms));
         let first = series.first().map(|s| s.0);
-        self.req.pool_history.warmup.complete
-            && coverage_bps(start, b, first, &self.req.pool_history.missing) == 10_000
+        (need_ms > 0 && coverage_bps(start, b, first, &self.req.pool_history.missing) < 10_000)
+            .then_some(Reason::WarmupIncomplete)
     }
 
     fn result(&self, rule: &RuleSpec, f: Finding) -> RuleResult {
@@ -164,12 +166,12 @@ impl Ctx<'_> {
         let full = cov == 10_000 && !undefined_inside;
         let (outcome, reason) = if fired {
             (Outcome::Fired, None)
-        } else if full && warm {
-            (Outcome::Clear, None)
         } else if !full {
             (Outcome::Incomplete, Some(Reason::PartialCoverage))
+        } else if let Some(r) = warm {
+            (Outcome::Incomplete, Some(r))
         } else {
-            (Outcome::Incomplete, Some(Reason::WarmupIncomplete))
+            (Outcome::Clear, None)
         };
         RuleResult {
             rule_id: rule.id().to_string(),
@@ -180,7 +182,7 @@ impl Ctx<'_> {
             window,
             events,
             coverage_bps: cov,
-            warmup_complete: warm,
+            warmup_complete: warm.is_none(),
         }
     }
 
@@ -236,7 +238,7 @@ impl Ctx<'_> {
                     window,
                     events: ev_out,
                     coverage: (cov, false),
-                    warm: true,
+                    warm: None,
                 },
             ));
         }

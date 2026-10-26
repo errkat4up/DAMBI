@@ -268,9 +268,13 @@ fn r1(mode: ChangeMode) -> RuleSpec {
 #[test]
 fn quiet_r1_needs_warmup() {
     let flat = ["100", "100", "100", "100", "100"];
-    // step compares neighbouring points only: no warm-up beyond the window
-    let step = run(&request(&flat, vec![r1(ChangeMode::Step)], vec![], false));
+    // step compares neighbouring points only: no warm-up beyond the window ...
+    let step = run(&request(&flat, vec![r1(ChangeMode::Step)], vec![], true));
     assert_eq!(step.rules[0].outcome, Outcome::Clear);
+    // ... but still needs a history the host vouches for
+    let step = run(&request(&flat, vec![r1(ChangeMode::Step)], vec![], false));
+    assert_eq!(step.rules[0].outcome, Outcome::Incomplete);
+    assert_eq!(step.rules[0].reason, Some(Reason::HistoryUnverified));
 
     // cumulative needs 24 h of observed history before B, or history from pool creation
     let cum = vec![r1(ChangeMode::Cumulative)];
@@ -283,7 +287,10 @@ fn quiet_r1_needs_warmup() {
     assert!(!short.rules[0].warmup_complete);
     let host_says_no = run(&young(request(&flat, cum, vec![], false)));
     assert_eq!(host_says_no.rules[0].outcome, Outcome::Incomplete);
-    assert_eq!(host_says_no.rules[0].reason, Some(Reason::WarmupIncomplete));
+    assert_eq!(
+        host_says_no.rules[0].reason,
+        Some(Reason::HistoryUnverified)
+    );
 }
 
 #[test]
