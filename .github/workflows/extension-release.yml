@@ -104,6 +104,13 @@ jobs:
           npx tsx scripts/build-index.ts --summary-only --representative-source-refs --strict-callkeys
           npx tsx scripts/verify-prod-registry.ts --sample=200 --concurrency=1 --timeout-ms=8000
 
+      # Build the public SDK JS, declarations, decoder snapshot and production
+      # WASM once from this tag. Both extension packages use this same dist.
+      - name: Build Core SDK for extension release
+        run: |
+          yarn install --immutable --mode=skip-build
+          yarn core:build
+
       # Bake the release version from the tag (ext-vX.Y.Z) so a release needs
       # only a tag — no manual package.json / backend/manifest.json bump or
       # commit. Edits are ephemeral (runner only, never committed).

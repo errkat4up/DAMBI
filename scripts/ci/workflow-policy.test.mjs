@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 
 const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
@@ -7,7 +10,7 @@ const protection = JSON.parse(readFileSync(new URL('./main-protection.json', imp
 const requiredNames = protection.required_status_checks.checks.map(({ context }) => context).sort();
 const jobSource = workflow.slice(workflow.indexOf('\njobs:\n'));
 const jobs = [...jobSource.matchAll(/^  ([a-z][a-z0-9-]*):\n([\s\S]*?)(?=^  [a-z][a-z0-9-]*:\n|$(?![\s\S]))/gm)]
-  .map(([, id, body]) => ({ id, name: field(body, 'name', 4), condition: field(body, 'if', 4) }));
+  .map(([, id, body]) => ({ id, body, name: field(body, 'name', 4), condition: field(body, 'if', 4) }));
 const concurrency = workflow.match(/^concurrency:\n([\s\S]*?)(?=^jobs:)/m)?.[1];
 assert.ok(concurrency, 'the workflow must declare concurrency');
 
@@ -15,6 +18,12 @@ function field(source, key, indent) {
   const match = source.match(new RegExp(`^ {${indent}}${key}: (.+)$`, 'm'));
   assert.ok(match, `missing ${key} at indentation ${indent}`);
   return match[1];
+}
+
+function step(source, name) {
+  const body = source.split(`      - name: ${name}\n`)[1];
+  assert.ok(body, `missing step ${name}`);
+  return body.split('\n      - ')[0];
 }
 
 // This intentionally handles only the expression subset used by this workflow:
@@ -167,7 +176,93 @@ test('label filtering retains path selection, detector fail-safe and dependency 
   assert.deepEqual(selected(value), requiredNames);
   value.needs.core.result = 'failure';
   assert.ok(!selected(value).includes('core-consumers'), 'consumer check cannot use a failed package producer');
+  assert.ok(selected(value).includes('extension'), 'extension must report producer failure instead of a passing skip');
   value.cancelled = true;
   assert.ok(!selected(value).some((id) => id !== 'changes' && id !== 'secrets-scan'),
     'explicit always() build conditions must still reject cancelled work');
+});
+
+test('extension waits for both producers and stages the same-run Core package before typecheck', () => {
+  const extension = jobs.find(({ id }) => id === 'extension').body;
+  assert.equal(field(extension, 'needs', 4), '[changes, wasm, core]');
+  const guard = step(extension, 'Require successful extension artifact producers');
+  for (const result of ['failure', 'cancelled', 'skipped']) {
+    for (const producer of ['wasm', 'core']) {
+      const value = context();
+      value.needs[producer].result = result;
+      assert.equal(evaluate(field(guard, 'if', 8), value), true);
+    }
+  }
+  assert.equal(evaluate(field(guard, 'if', 8), context()), false);
+  assert.match(guard, /exit 1/);
+  const download = step(extension, 'Download verified Core package');
+  const producer = step(jobs.find(({ id }) => id === 'core').body,
+    'Upload the isolated Core package for SDK and extension consumers');
+  assert.equal(field(download, 'name', 10), field(producer, 'name', 10));
+  assert.match(download, /uses: actions\/download-artifact@v4/);
+  assert.ok(!/\b(?:run-id|repository):/.test(download), 'download must stay within this workflow run');
+  assert.ok(extension.indexOf('Stage Core dist for extension consumers') < extension.indexOf('run: yarn typecheck'));
+  assert.ok(!extension.includes('yarn core:build'), 'extension CI reuses Core instead of rebuilding it');
+});
+
+test('Core artifact staging handles a fresh checkout and rejects missing, ambiguous or incomplete packages', () => {
+  const body = step(workflow, 'Stage Core dist for extension consumers');
+  const script = body.split('        run: |\n')[1].split('\n')
+    .filter((line) => line.trim()).map((line) => {
+      assert.ok(line.startsWith('          '));
+      return line.slice(10);
+    }).join('\n');
+  const entries = ['index.js', 'index.d.ts', 'adapters/index.js', 'adapters/index.d.ts',
+    'decoders.js', 'decoders.d.ts', 'runtime/wasm/dambi_core_wasm.js', 'runtime/wasm/dambi_core_wasm_bg.wasm'];
+  const root = mkdtempSync(join(tmpdir(), 'dambi-core-staging-'));
+  try {
+    for (const scenario of ['complete', 'missing', 'ambiguous', 'incomplete', 'stale-dist']) {
+      const cwd = join(root, scenario);
+      const runnerTemp = join(cwd, 'runner-temp');
+      const download = join(runnerTemp, 'core-consumer-package');
+      const source = join(cwd, 'tar-source');
+      mkdirSync(download, { recursive: true });
+      mkdirSync(join(cwd, 'packages/core'), { recursive: true });
+      writeFileSync(join(cwd, 'packages/core/package.json'), 'checkout manifest');
+      mkdirSync(join(source, 'package'), { recursive: true });
+      writeFileSync(join(source, 'package/package.json'), 'artifact manifest');
+      for (const entry of entries) {
+        if (scenario === 'incomplete' && entry.endsWith('.wasm')) continue;
+        const path = join(source, 'package/dist', entry);
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, 'artifact');
+      }
+      const count = scenario === 'missing' ? 0 : scenario === 'ambiguous' ? 2 : 1;
+      for (let i = 0; i < count; i++) {
+        const tar = spawnSync('tar', ['-czf', join(download, `core-${i}.tgz`), '-C', source, 'package']);
+        assert.equal(tar.status, 0, tar.stderr?.toString());
+      }
+      if (scenario === 'stale-dist') mkdirSync(join(cwd, 'packages/core/dist'));
+      const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script], {
+        cwd, env: { ...process.env, RUNNER_TEMP: runnerTemp }, encoding: 'utf8',
+      });
+      if (result.error) throw result.error;
+      assert.equal(result.status === 0, scenario === 'complete', `${scenario}: ${result.stderr}`);
+      assert.equal(readFileSync(join(cwd, 'packages/core/package.json'), 'utf8'), 'checkout manifest');
+      if (scenario === 'complete') {
+        for (const entry of entries) assert.equal(readFileSync(join(cwd, 'packages/core/dist', entry), 'utf8'), 'artifact');
+      } else if (scenario === 'missing' || scenario === 'ambiguous') {
+        assert.equal(existsSync(join(cwd, 'packages/core/dist')), false);
+      }
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('extension release builds production Core once from the tag before packaging without weakening release guards', () => {
+  const release = readFileSync(new URL('../../.github/workflows/extension-release.yml', import.meta.url), 'utf8');
+  const build = step(release, 'Build Core SDK for extension release');
+  assert.match(build, /yarn install --immutable --mode=skip-build\n +yarn core:build/);
+  assert.equal(release.match(/yarn core:build/g)?.length, 1);
+  assert.ok(release.indexOf('Require extension release tag') < release.indexOf('Build Core SDK'));
+  assert.ok(release.indexOf('Require prod build config') < release.indexOf('Build Core SDK'));
+  assert.ok(release.indexOf('Build Core SDK') < release.indexOf('Build + zip Chrome dev/QA and Web Store packages'));
+  assert.ok(!release.includes('DAMBI_ALLOW_INSECURE_REGISTRY'));
+  assert.match(release, /test "\$\{DAMBI_REQUIRE_BUNDLE_SIGNATURE\}" = "true"/);
 });
