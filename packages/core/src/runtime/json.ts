@@ -47,14 +47,16 @@ export function field(
   return result;
 }
 
-/** Copy before serialization: no getters, toJSON calls, cycles, or coercion. */
-export function copyJson(value: unknown, code: CoreErrorCode, maxBytes: number): unknown {
-  let remaining = maxBytes;
+/** Both callers share validation and escaped UTF-8 accounting. Measurement
+ * walks descriptors without allocating a second tree or invoking serialization.
+ */
+function walkJson(value: unknown, code: CoreErrorCode, maxBytes: number, makeCopy: boolean): { value: unknown; bytes: number } {
+  let bytes = 0;
   const ancestors = new Set<object>();
   const invalid = (message: string): never => { throw new CoreError(code, message); };
-  const add = (bytes: number): void => {
-    remaining -= bytes;
-    if (remaining < 0) throw new CoreError("LIMIT_EXCEEDED", "JSON input exceeds its byte limit.");
+  const add = (amount: number): void => {
+    bytes += amount;
+    if (bytes > maxBytes) throw new CoreError("LIMIT_EXCEEDED", "JSON input exceeds its byte limit.");
   };
   const string = (input: string): string => {
     add(2);
@@ -103,25 +105,26 @@ export function copyJson(value: unknown, code: CoreErrorCode, maxBytes: number):
           invalid("Array length must be a valid data property.");
         }
         const size = length as number;
-        if (size > remaining + 1) add(size);
+        if (size > maxBytes - bytes + 1) add(size);
         const descriptors = Object.getOwnPropertyDescriptors(object);
         const keys = Reflect.ownKeys(descriptors);
         if (keys.length !== size + 1) invalid("Arrays must contain only contiguous JSON elements.");
-        const result: unknown[] = [];
+        const result: unknown[] | undefined = makeCopy ? [] : undefined;
         // Prevent inherited toJSON hooks when this private copy is serialized.
-        Object.setPrototypeOf(result, null);
+        if (result) Object.setPrototypeOf(result, null);
         for (let i = 0; i < size; i++) {
           const descriptor = descriptors[String(i)];
           if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) {
             invalid("Array holes and accessors are not accepted.");
           }
           if (i) add(1);
-          result[i] = copy(descriptor.value, depth + 1);
+          const child = copy(descriptor.value, depth + 1);
+          if (result) result[i] = child;
         }
         return result;
       }
       record(object, code);
-      const result: DataRecord = Object.create(null) as DataRecord;
+      const result = makeCopy ? Object.create(null) as DataRecord : undefined;
       const descriptors = Object.getOwnPropertyDescriptors(object);
       let count = 0;
       for (const key of Reflect.ownKeys(descriptors)) {
@@ -133,7 +136,8 @@ export function copyJson(value: unknown, code: CoreErrorCode, maxBytes: number):
         if (count++) add(1);
         string(key as string);
         add(1);
-        result[key as string] = copy(descriptor.value, depth + 1);
+        const child = copy(descriptor.value, depth + 1);
+        if (result) result[key as string] = child;
       }
       return result;
     } finally {
@@ -141,11 +145,22 @@ export function copyJson(value: unknown, code: CoreErrorCode, maxBytes: number):
     }
   };
   try {
-    return copy(value, 0);
+    const result = copy(value, 0);
+    return { value: result, bytes };
   } catch (error) {
     if (error instanceof CoreError) throw error;
     throw new CoreError(code, "Input data could not be copied safely.");
   }
+}
+
+/** Copy before serialization: no getters, toJSON calls, cycles, or coercion. */
+export function copyJson(value: unknown, code: CoreErrorCode, maxBytes: number): unknown {
+  return walkJson(value, code, maxBytes, true).value;
+}
+
+/** Validate and measure the same JSON representation without creating a copy. */
+export function measureJson(value: unknown, code: CoreErrorCode, maxBytes: number): number {
+  return walkJson(value, code, maxBytes, false).bytes;
 }
 
 export function requestJson(input: CheckRequest | UnsupportedRequest, maxBytes: number, allowUnknown = false): string {

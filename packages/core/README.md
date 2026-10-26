@@ -6,7 +6,7 @@ responses; Core decodes requests, plans Fact calls and returns allow/warn/deny.
 ## Status: 0.1.0
 
 First runtime release. `createCore`, `check`, `plan`, `evaluate`,
-`refreshPolicies` and `dispose` run on this package's Rust/WASM runtime.
+`refreshPolicies`, `refreshScam` and `dispose` run on this package's Rust/WASM runtime.
 `check()` coordinates planning, Fact fetching, bounded in-memory cache and
 evaluation. A Registry decoder snapshot ships as `@dambi/core/decoders`, and
 policies are served signed by the Dambi API (see
@@ -251,7 +251,309 @@ The report omits endpoint URLs, headers, raw responses, owner/token addresses an
 key material. The live command is never run automatically by CI; CI uses only
 loopback fixtures. Missing configuration or package artifacts fail with a nonzero exit.
 
-### Standalone Node and browser consumers
+## Optional Scam Filter data adapter (development)
+
+`createScamFactProvider` from `@dambi/core/adapters` wraps an existing
+`FactProvider` through its `policy` option. Assign the wrapper to `ports.fact`;
+ordinary policy batches are delegated unchanged and `scam.*` batches use the
+dedicated data path. Do not combine the two channels into one batch. Manual
+evaluation fetches `plan.calls` and `plan.scamCalls` separately and passes the
+second batch as the third argument of `core.evaluate()`.
+
+Configure one chain through `rpc`, explicit `history`/`profile` builder limits,
+and whole-fetch `limits` (`timeoutMs`, `maxCalls`, `maxTargets`, `maxRequestBytes`,
+`maxResultBytes`). Share Core's clock if overriding it. RPC request/byte/log caps
+apply per reference group; the deadline and output-size cap cover all groups.
+Each history/profile pair shares a fixed reference and is withheld until the
+final block-hash checks pass. Cross-fetch raw-log reuse is opt-in through
+`rpc.historyCache: { maxEntries, maxBytes, ttlMs, maxBlockSpan }`; all four limits
+must be positive integers. The cache belongs to this provider instance and stores
+complete log scans, including empty scans, rather than Facts, state values or grids.
+`maxBytes` bounds serialized entry bytes, not JavaScript heap usage.
+
+With the cache enabled, `await provider.prepare(scamCalls, { planId, timeoutMs,
+signal })` prepares history using a separate 1–60,000ms budget. Supply complete
+history/profile call pairs from a preparation plan. The call returns no analysis
+or Facts. Before signing, create a **new plan** and fetch through the same provider;
+the ordinary fetch still uses its configured deadline (e.g. 2,500ms). Preparation
+is an explicit host action, not an automatic background task or a deadline extension.
+Preparation and fetch use the same verification mode and resource caps.
+
+A later fetch downloads only missing log ranges, rereads current reference/state,
+rebuilds snapshots and rechecks the original cache boundaries. Complete hits do
+not extend the entry's TTL. Reorgs invalidate the cache; cancelled or failed raw
+batches cannot publish drafts. An independently verified raw scan can survive a
+later provider-level result-size failure. Expiry, capacity eviction or an absent
+overlap requires cold work and can still exhaust the signing deadline.
+
+`rpc.verification` is copied at provider creation. Its defaults are
+`{ history: "all_event_headers", stateBinding: "number_recheck" }`.
+Opt into `history: "rpc_anchor"` to omit final header reads for blocks known only
+from logs. Checked head, reference, queried headers and state-read blocks still
+receive final hash/time checks. Pending timestamp-header lookups count toward
+both their initial reads and final checks. Log scope, identity, conflicts and
+overall timestamp ordering remain checked in both modes.
+
+`rpc_anchor` trusts the endpoint's log-only hashes and timestamps without comparing
+each against a header. It can miss an internally consistent log from a different
+branch; neither mode independently proves log completeness or authenticates log
+contents. Missing timestamps, boundary searches and profile events can still
+require many actual header reads. There is no automatic mode switch on error or
+budget exhaustion. `block_hash_canonical` remains unsupported and is rejected as
+invalid configuration. This is a provider execution contract, not a new Core policy.
+
+Successful built-in method values include version-1 `verification` metadata:
+the modes, raw timestamp source kinds (`header` / `rpc_log`), reuse status,
+original collection time range and final verification time. `timeSources`
+describes raw evidence supplied to each method, not the source of every output
+grid point; a final header check does not erase an original log timestamp source.
+Current fresh batches use `reuse: "none"` and their original `observedAt` for
+both collection-range endpoints. A method reusing logs declares
+`reuse: "interval_cache"`, preserving the original raw collection range while its
+Fact and final verification are fresh. Reuse is recorded independently for history
+and profile. Metadata is included in the output-size limit.
+
+Core retains the declarations in `binding.verification` with status `declared`.
+Legacy inputs omitting metadata on both methods produce `legacy_unspecified`;
+explicit null, partial/unknown metadata or incompatible method declarations are
+invalid scam input. Collection times must be ordered and no later than the final
+check; that check cannot predate `Fact.observedAt` or exceed allowed clock skew.
+Fresh (`reuse: "none"`) observations cannot predate that Fact's collection start.
+These are checked provider declarations, not cryptographic proof of source data.
+Rebuild the matching Rust/WASM with TypeScript: older Core artifacts reject the
+new wrapper fields. The pure algorithm's wire contract remains version 1.
+
+`rpc.limits.minRequestIntervalMs` sets minimum request-start spacing (default 0
+for compatibility). Spacing and rate-limit cooldown are shared across batches
+and retries of the same provider/source, not across separate instances or
+processes. `retryDelayMs` is the exponential backoff base; optional
+`maxRetryDelayMs` defaults to the greater of 30,000ms and the base. HTTP 429 and
+RPC -32005 also pause sibling requests, including when retries are exhausted.
+A valid 429 `Retry-After` (seconds or IMF-fixdate) is honored even if longer than
+the backoff cap. All waits consume the existing deadline and are cancellable;
+late replies cannot extend cooldown. Request counts include actual starts only.
+
+Factory and administrator capabilities are optional trusted configuration,
+not assumptions inferred from a matching topic. Missing configuration leaves
+age unknown and requested administrator events unavailable. `ScamDataError`
+preserves sanitized advisory failure reasons without changing policy failure
+semantics. `onMetrics` reports data-path success/partial/failure, requests,
+retries, completed response-body bytes, latency and result size. It excludes
+algorithm execution and Core evaluation; observer failures do not affect results.
+Failed runs also include an immutable `failure` diagnostic: provider operation,
+RPC stage/method, error kind and available numeric HTTP status/RPC code/attempt.
+No endpoint, headers, arguments or remote error text are exposed. Recovered
+errors are not terminal causes, and success/partial runs omit this field.
+
+Pool history can use optional RPC log timestamps to form an unpublished draft.
+Missing timestamps retain the original header lookup; malformed or inconsistent
+times are not substituted. Before publication, `all_event_headers` compares every
+evidence block against an actual header with the matching hash and any recorded
+timestamp. `rpc_anchor` omits that comparison for log-only blocks, retaining
+comparisons for actual header/state reads and the reference points. All collected
+timestamps still participate in the final ordering check. Neither mode guarantees
+cold-history completion within the configured budget.
+
+`onMetrics.preflight` records the last known-work budget check in `preflightGroup`
+(one-based reference group). It counts unique log blocks, timestamped blocks,
+uncached header reads and final rechecks, plus remaining request/time budgets
+and the minimum pacing delay. The history checkpoint excludes later profile/target
+work. After collection finishes, the check is refreshed with the frozen final
+target list, including evidence added by those later operations. The same selector
+supplies both budget checks and final verification; shared heights are checked
+once and the reference block is checked last. Neither checkpoint predicts network
+latency or retries. Impossible request or pacing budgets fail with `resource_limit`
+at stage `preflight`, before the corresponding header reads. The separate builder
+header-lookup cap and all existing deadlines still apply.
+
+This data adapter neither installs a scam bundle nor provides an algorithm.
+Bundle installation uses the separate signed source described below; actual
+algorithm linking remains separate. For manual read-only RPC measurement,
+after building TypeScript from the repository root:
+
+```sh
+node scripts/sdk/scam-data-probe.mjs
+```
+
+The probe keeps `all_event_headers` as its default. To explicitly diagnose the
+`rpc_anchor` cold path with the same history window and resource caps:
+
+```sh
+SCAM_HISTORY_VERIFICATION=rpc_anchor SCAM_TIMEOUT_MS=60000 SCAM_REPEATS=1 \
+  node scripts/sdk/scam-data-probe.mjs
+```
+
+The 60-second budget is diagnostic, not the product's 2,500 ms acceptance budget.
+Reports distinguish requested verification settings from each returned method's
+performed modes. The last preflight's `finalRecheckRequests` is its selected
+target count; `additionalHeaderRequests` is pending work, not cumulative timestamp
+fallback requests. It is zero at the final checkpoint after collection completes.
+
+To measure preparation separately from a subsequent 2,500ms data fetch:
+
+```sh
+SCAM_HISTORY_VERIFICATION=rpc_anchor SCAM_HISTORY_CACHE=1 \
+SCAM_PREPARE_TIMEOUT_MS=60000 SCAM_TIMEOUT_MS=2500 SCAM_REPEATS=1 \
+  node scripts/sdk/scam-data-probe.mjs
+```
+
+The probe uses bounded in-memory storage (8 entries, 16,000,000 serialized bytes,
+120-second TTL, 100,000-block maximum span). `preparation` is excluded from the
+fetch trials and `summary.targetBudget`; a preparation failure skips fetch trials.
+Read each returned method's `verification.reuse` to confirm an actual hit. A
+`partial` fetch within budget is still incomplete coverage. These measurements
+exclude the algorithm and Core evaluation and cannot establish the full signing SLA.
+
+For a short consecutive-fetch check, use the same command with `SCAM_REPEATS=3`.
+Each returned Fact keeps `referenceBlock` and adds a validated
+`reference: { number, hash, timestampMs }`. A zero-based `targetIndex` is included
+only when the result matches the requested identity. `referenceRelation` compares
+that method/target with the immediately preceding completed fetch: `same`,
+`advanced`, `changed` or `unknown`. The first fetch, including after preparation,
+has no reference baseline. A failed or missing predecessor is not skipped.
+`same` requires matching height, hash and timestamp; `advanced` requires a higher
+height, different hash and nondecreasing timestamp. `changed` is not a confirmed
+reorg. Check `verification.reuse` separately: reference advancement alone does not
+prove reuse or ancestry. Exact reused/downloaded block ranges and cumulative
+timestamp-fallback request counts are not reported.
+
+For the **AH5-2 extension Service Worker diagnostic**, build the manual console
+bundle from the repository root after the two probe test files pass:
+
+```sh
+node --test packages/core/tests/adapters/scam-data-probe.test.mjs \
+  packages/core/tests/adapters/scam-sw-diagnostic.test.mjs &&
+node browser-extension/scripts/build-scam-sw-probe.cjs &&
+pbcopy < browser-extension/dist/diagnostics/scam-sw-probe.js
+```
+
+This uses the existing Core adapter build; it does not rebuild WASM or the full
+extension. Open Dambi's **Service Worker → Inspect** from `chrome://extensions`,
+paste the copied bundle into that worker's console, then run:
+
+```js
+dambiScamProbe.start();
+await dambiScamProbe.prepare();
+await dambiScamProbe.fetch();
+await dambiScamProbe.fetch();
+await dambiScamProbe.fetch();
+console.log(JSON.stringify(dambiScamProbe.report(), null, 2));
+```
+
+Copy and save the printed JSON report. Use `console.log` rather than the
+DevTools-only `copy()` helper, which may be unavailable in this execution context.
+If only the output command fails, run the `console.log` line separately; do not
+restart preparation or repeat the fetches. The same provider serves each call, with a separate
+60-second preparation budget and 2,500ms fetch budget. Installation and `start()`
+make no RPC calls. A failed preparation prevents fetches; failed fetches remain
+in the report. Re-pasting or calling `start()` again cannot reset the session.
+The cache TTL is 120 seconds, so run the prepared fetches promptly; a miss after
+TTL expiry is not a worker-restart failure. Inspect actual history `reuse`,
+reference identity, coverage, latency and failures independently.
+
+To check worker recreation, wait for calls to finish, close its DevTools, reload
+**Dambi** on `chrome://extensions`, and open its new Service Worker console. Before
+pasting the bundle again, record the result of:
+
+```js
+typeof globalThis.dambiScamProbe // expected: "undefined"
+```
+
+Repeat the `pbcopy < ...` command above and paste the same bundle again, then
+measure one explicitly cold fetch:
+
+```js
+dambiScamProbe.start({ SCAM_TIMEOUT_MS: "60000", SCAM_REPEATS: "1" });
+await dambiScamProbe.fetch(); // intentionally do not call prepare()
+console.log(JSON.stringify(dambiScamProbe.report(), null, 2));
+```
+
+Compare `workerSessionId` between reports and require the returned cold history
+to say `reuse: "none"` before claiming a cold fetch was observed. If that fetch
+fails, retain the failure; a new worker ID alone does not prove data retrieval.
+The cold 60-second diagnostic is excluded from the prepared 2.5-second target.
+Reload verifies worker recreation, not natural idle suspension (DevTools may
+affect lifetime). This diagnostic is not installed in the production manifest or
+transaction path and does not establish full signing-check performance.
+
+The probe defaults to GIWA Sepolia, one known pool, a 24-hour window plus one-hour
+warm-up, a 2,500 ms budget and one uncached attempt. Defaults are diagnostic inputs,
+not calibrated risk policy. Probe request spacing is explicitly 100ms, with
+1,000ms retry base, 8,000ms backoff cap and one retry. Override these diagnostic
+settings using `SCAM_RPC_MIN_INTERVAL_MS`, `SCAM_RPC_RETRY_BASE_MS` and
+`SCAM_RPC_RETRY_MAX_MS` (0–60,000, cap >= base). Pacing may exhaust the unchanged
+budget; it does not guarantee completion of a cold 24-hour scan.
+Unknown age/unsupported admin coverage is expected
+without deployment capabilities. Use `SCAM_RPC_URL`, `SCAM_REPEATS` (1–20),
+`SCAM_TIMEOUT_MS`, or `SCAM_TARGETS_JSON` (up to four explicit
+`{pool, token, quoteToken, factory}` objects) when needed. Never add private
+endpoint credentials to tracked files. Reports omit endpoints and headers;
+failures remain in the denominator and small-sample percentiles are not production
+performance claims. Node reachability does not establish extension reachability.
+
+## Signed Scam Filter bundles (SF5-1, development)
+
+The signed configuration channel is separate from policy snapshots and market
+data. Compose it with the existing policy source and retain local `scam.settings`,
+`scam.limits` and `scam.trust` configuration:
+
+```ts
+import { createPolicyApiSource, createScamBundleApiSource } from "@dambi/core/adapters";
+
+const policySource = {
+  ...createPolicyApiSource({ baseUrl: hostApiOrigin, maxResponseBytes: 2_000_000 }),
+  ...createScamBundleApiSource({ baseUrl: hostApiOrigin, maxResponseBytes: 2_000_000,
+    env: "staging", profile: "default" }),
+};
+// CoreConfig.ports.policy = policySource; CoreConfig.scam = localScamConfig.
+// createCore attempts an initial scam fetch only when both are configured.
+await core.refreshScam(); // Subsequent refresh; separately cancellable from refreshPolicies.
+```
+
+`GET /v1/scam-bundle?env=staging&profile=default` selects latest; optional
+`sequence` is a canonical decimal string. The HTTP wrapper is
+`{payload, signature, key_id?}`; the SDK retains the original payload string and
+maps `key_id` to telemetry-only `keyId`. HTTP ETags are independent per source.
+The new endpoint must be deployed before using it remotely; this change does not
+publish a service, register a production key or issue an onchain attestation.
+
+Core verifies original UTF-8 bytes using P-256/SHA-256 and padded Base64 P1363
+signatures against locally configured `scam` role keys, distinct from policy and
+Decoder trust keys. It checks scope, validity, compatibility, rules, resource
+bounds and sequence before replacing the snapshot. Compatibility accepts `*` or
+the exact version; the current builder is `dambi-v2/1`. Lower sequences and changed
+payload bytes at the same sequence are rejected. Identical payload bytes at the
+same sequence are idempotent. New plans receive the replacement; existing plans
+retain their snapshot and still enforce its expiry. Sequence memory is scoped to
+the current Core instance.
+
+`refreshScam()` uses `policyTimeoutMs` for bundle retrieval, not `scamTimeoutMs`
+for market analysis. A failed refresh leaves policy and the previous scam
+snapshot unchanged; expiry still makes scam evaluation `insufficient`. Initial
+scam-source failures emit `scam_bundle_unavailable` and preserve policy service.
+Caller cancellation still rejects initialization. Missing scam configuration
+performs no scam fetch. Bundle installation does not supply an algorithm:
+active supported rules with no module report `algorithm_unavailable`, never
+`quiet`. Uncalibrated R1/R2 remain disabled in default-purpose presets; explicit
+demo-purpose presets may enable them.
+
+Local issuance uses `registryV2/scripts/publish-scam-bundle.ts` with an explicit
+scam-only key path/ID and a complete payload draft:
+
+```sh
+SCAM_SIGNING_KEY_PATH=/explicit/scam.hex SCAM_SIGNING_KEY_ID=scam-staging-1 \
+  npm --prefix registryV2 run publish:scam-bundle -- \
+  --input /absolute/draft.json --env staging --profile default --out /absolute/output
+```
+
+This writes immutable `scam-bundles/<env>/<profile>/<sequence>.json` plus an
+atomically replaced `latest.json`; it does not upload files or generate keys.
+The publisher checks basic draft structure; the consuming Core remains the
+authority for full rule/compatibility validation. The Registry API serves those
+paths verbatim with independent cache keys. Production deployment and key
+provisioning require their own configured environment.
+
+## Standalone Node and browser consumers
 
 The [adapter example](../../examples/sdk-adapters/README.md) combines the policy
 HTTP and EVM Fact adapters using the public package exports. The consumer gate

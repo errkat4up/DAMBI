@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { CoreError } from "@dambi/core";
 import { AdapterError } from "@dambi/core/adapters";
 import { createAdapterCore } from "./client.mjs";
+import { checkWithTiming } from "./check-timing.mjs";
 
 const controller = new AbortController();
 const cancel = () => controller.abort();
@@ -20,7 +21,9 @@ try {
   phase = "initialization";
   core = await createAdapterCore(settings, { signal: controller.signal });
   phase = "check";
-  const verdict = await core.check(request, { signal: controller.signal });
+  const verdict = await checkWithTiming(core, request, { signal: controller.signal }, (measurement) => {
+    console.error(JSON.stringify({ checkTiming: measurement }));
+  });
   console.log(JSON.stringify(verdict, null, 2));
   // A completed deny/warn is a verdict; a failed evaluation is a failed command.
   if (verdict.source === "fail_closed") process.exitCode = 1;

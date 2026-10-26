@@ -12,6 +12,7 @@
  *   GET /contexts/<source...>/<chainId>/<address>.json
  *   GET /policy-bundles/<profile>/<sequence>.json     (immutable, sequence IS the version)
  *   GET /policy-bundles/<profile>/latest.json         (mutable pointer)
+ *   GET /scam-bundles/<env>/<profile>/<sequence|latest>.json (separate signed scope)
  *
  * 이 regex 는 browser-extension/backend/service-worker/registry/client.ts
  * (CALL_KEY_ADDRESS_RE / CALL_KEY_SELECTOR_RE) 를 미러. 단 to/address/selector
@@ -45,6 +46,8 @@ const POLICY_PROFILE = "[a-z0-9-]+";
 const POLICY_BUNDLE_RE = new RegExp(
   `^(${POLICY_PROFILE})/(${CHAIN_ID}|latest)\\.json$`,
 );
+// Mirrors the SDK scam source. Zero is valid; decimal strings avoid JS integer loss.
+const SCAM_BUNDLE_RE = /^(staging|production)\/[a-z0-9-]{1,128}\/(?:0|[1-9][0-9]{0,77}|latest)\.json(?![\s\S])/;
 
 // typed-data key = <chainId>__<verifyingContract.lower>__<primaryType>.
 // primaryType 는 EIP-712 콜론(:)이 "__" 로 escape 된 형태라 자체적으로 "__" 를
@@ -94,6 +97,7 @@ const BUNDLES_PREFIX = "/bundles/";
 const SIGNATURES_PREFIX = "/signatures/";
 const CONTEXTS_PREFIX = "/contexts/";
 const POLICY_BUNDLES_PREFIX = "/policy-bundles/";
+const SCAM_BUNDLES_PREFIX = "/scam-bundles/";
 const JSON_SUFFIX = ".json";
 
 /**
@@ -179,6 +183,13 @@ export function parseProxyTarget(pathname: string): ProxyTarget {
     const file = pathname.slice(POLICY_BUNDLES_PREFIX.length);
     return POLICY_BUNDLE_RE.test(file)
       ? { ok: true, objectName: `policy-bundles/${file}` }
+      : { ok: false };
+  }
+
+  if (pathname.startsWith(SCAM_BUNDLES_PREFIX)) {
+    const file = pathname.slice(SCAM_BUNDLES_PREFIX.length);
+    return SCAM_BUNDLE_RE.test(file)
+      ? { ok: true, objectName: `scam-bundles/${file}` }
       : { ok: false };
   }
 

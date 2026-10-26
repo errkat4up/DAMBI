@@ -1,0 +1,219 @@
+{
+  "schema": "sf0-scam-fixtures-v1",
+  "scope": "fixture_only_not_public_api",
+  "provenance": {
+    "snapshots": "synthetic_reserve_snapshots_not_observed_GIWA_history",
+    "events": "hand_specified_qualified_events_not_derived_from_snapshots",
+    "expectations": "manual_product_semantics_from_plan_sections_4_and_5_not_algorithm_output",
+    "identityReference": "./rpc-evidence.json",
+    "observedHistoryLimitation": "The identity reference contains selected real transactions, not a complete analysis history. Synthetic reserves and relative times must not be attributed to that pool's real activity.",
+    "pendingSF1": [
+      "Public input/output schema, builder ownership and algorithm package",
+      "Bucket representative value, forward fill and raw-log to snapshot mapping",
+      "Step/cumulative change events, reversal confirmation and threshold equality semantics",
+      "Required warm-up and initial-state completion",
+      "Snapshot-to-event expectations; no pairing between the two fixture layers is asserted"
+    ]
+  },
+  "subject": {
+    "chainId": 91342,
+    "venue": "uniswap_v2",
+    "factory": "0xd51d7c2a3b9b0f6876336c165adda94468500c47",
+    "pool": "0xcaafb95fc292c10a526f03fa480407bb438dac67",
+    "token": "0x0274c57358c3a6b8a08b7297ba51665c303a471f",
+    "quote": "0x4200000000000000000000000000000000000006"
+  },
+  "snapshotDefaults": {
+    "clock": "relative_fixture_ms_not_chain_timestamp",
+    "Bms": 0,
+    "Tms": 10000,
+    "warmupMs": 2000,
+    "bucketMs": 1000,
+    "gridOriginMs": 0,
+    "columns": ["atMs", "tokenReserve", "quoteReserve"],
+    "reserveEncoding": "unsigned_decimal_integer_string",
+    "tokenDecimals": 18,
+    "quoteDecimals": 18,
+    "decimalsSource": "synthetic_fixture_assumption_not_RPC_measurement",
+    "missingInterval": "(startMs,endMs]",
+    "expectationStatus": "pending_SF1_no_event_count_or_verdict_claim"
+  },
+  "snapshotFixtures": [
+    {
+      "id": "flat-complete",
+      "purpose": "Normal complete history candidate for both rules",
+      "missing": [],
+      "samples": [
+        [-2000, "1000000000000000000000", "100000000000000000000"],
+        [-1000, "1000000000000000000000", "100000000000000000000"],
+        [0, "1000000000000000000000", "100000000000000000000"],
+        [1000, "1000000000000000000000", "100000000000000000000"],
+        [2000, "1000000000000000000000", "100000000000000000000"],
+        [3000, "1000000000000000000000", "100000000000000000000"],
+        [4000, "1000000000000000000000", "100000000000000000000"],
+        [5000, "1000000000000000000000", "100000000000000000000"],
+        [6000, "1000000000000000000000", "100000000000000000000"],
+        [7000, "1000000000000000000000", "100000000000000000000"],
+        [8000, "1000000000000000000000", "100000000000000000000"],
+        [9000, "1000000000000000000000", "100000000000000000000"],
+        [10000, "1000000000000000000000", "100000000000000000000"]
+      ]
+    },
+    {
+      "id": "one-way-stairs",
+      "purpose": "R1 candidate; event generation and step/cumulative choice remain unassigned",
+      "missing": [],
+      "samples": [
+        [-2000, "1000000000000000000000", "100000000000000000000"],
+        [-1000, "1000000000000000000000", "100000000000000000000"],
+        [0, "1000000000000000000000", "100000000000000000000"],
+        [1000, "1000000000000000000000", "110000000000000000000"],
+        [2000, "1000000000000000000000", "121000000000000000000"],
+        [3000, "1000000000000000000000", "133100000000000000000"],
+        [4000, "1000000000000000000000", "133100000000000000000"],
+        [5000, "1000000000000000000000", "133100000000000000000"],
+        [6000, "1000000000000000000000", "133100000000000000000"],
+        [7000, "1000000000000000000000", "133100000000000000000"],
+        [8000, "1000000000000000000000", "133100000000000000000"],
+        [9000, "1000000000000000000000", "133100000000000000000"],
+        [10000, "1000000000000000000000", "133100000000000000000"]
+      ]
+    },
+    {
+      "id": "alternating-reserves",
+      "purpose": "R2 candidate; turning-point/confirmation times are intentionally not inferred",
+      "missing": [],
+      "samples": [
+        [-2000, "1000000000000000000000", "100000000000000000000"],
+        [-1000, "1000000000000000000000", "100000000000000000000"],
+        [0, "1000000000000000000000", "100000000000000000000"],
+        [1000, "1000000000000000000000", "120000000000000000000"],
+        [2000, "1000000000000000000000", "90000000000000000000"],
+        [3000, "1000000000000000000000", "120000000000000000000"],
+        [4000, "1000000000000000000000", "90000000000000000000"],
+        [5000, "1000000000000000000000", "120000000000000000000"],
+        [6000, "1000000000000000000000", "90000000000000000000"],
+        [7000, "1000000000000000000000", "90000000000000000000"],
+        [8000, "1000000000000000000000", "90000000000000000000"],
+        [9000, "1000000000000000000000", "90000000000000000000"],
+        [10000, "1000000000000000000000", "90000000000000000000"]
+      ]
+    },
+    {
+      "id": "missing-chunk",
+      "purpose": "Missing samples are absent, never zero-filled; no continuity across the gap is asserted",
+      "missing": [{ "startMs": 4000, "endMs": 6000, "reason": "fixture_rpc_chunk_failed" }],
+      "samples": [
+        [-2000, "1000000000000000000000", "100000000000000000000"],
+        [-1000, "1000000000000000000000", "100000000000000000000"],
+        [0, "1000000000000000000000", "100000000000000000000"],
+        [1000, "1000000000000000000000", "110000000000000000000"],
+        [2000, "1000000000000000000000", "121000000000000000000"],
+        [3000, "1000000000000000000000", "133100000000000000000"],
+        [4000, "1000000000000000000000", "133100000000000000000"],
+        [7000, "1000000000000000000000", "80000000000000000000"],
+        [8000, "1000000000000000000000", "80000000000000000000"],
+        [9000, "1000000000000000000000", "80000000000000000000"],
+        [10000, "1000000000000000000000", "80000000000000000000"]
+      ]
+    }
+  ],
+  "eventDefaults": {
+    "clock": "relative_fixture_ms_not_chain_timestamp",
+    "Bms": 0,
+    "Tms": 30000,
+    "contextFromMs": -2000,
+    "X2ms": 5000,
+    "n": 3,
+    "m": 2,
+    "eventDefinition": "Each supplied change/switch event already satisfies its rule's configured metric, direction and magnitude criteria. These arrays test counting semantics, not I/theta threshold detection.",
+    "eventTime": "confirmation_time_not_unconfirmed_extremum_time",
+    "initialState": "confirmed",
+    "missing": [],
+    "fresh": true,
+    "age": { "kind": "verified_lower_bound", "ms": 86400000, "thresholdMs": 86400000 },
+    "activeRules": ["R1", "R2"],
+    "expectedRuleColumns": ["R1", "R2"],
+    "windowBoundary": "(startMs,endMs]",
+    "executionStatus": "not_run_no_algorithm_connected"
+  },
+  "cases": [
+    {
+      "id": "complete-no-events", "kind": "qualified_events",
+      "purpose": "No warning in complete input; quiet is not a safety certificate",
+      "context": {}, "changesMs": [], "switchesMs": [],
+      "expected": { "rules": ["clear", "clear"], "r1Count": 0, "r2MaxCount": 0, "window": null, "report": "quiet", "partial": false }
+    },
+    {
+      "id": "r1-count-equals-n", "kind": "qualified_events",
+      "purpose": "Count equality fires R1 independently of R2; not a claim about I equality",
+      "context": {}, "changesMs": [1000, 2000, 3000], "switchesMs": [],
+      "expected": { "rules": ["fired", "clear"], "r1Count": 3, "r2MaxCount": 0, "window": null, "report": "warn", "partial": false }
+    },
+    {
+      "id": "r2-historical-cluster", "kind": "qualified_events",
+      "purpose": "Scan the entire period, not only T-X2; R2 may fire with R1 clear",
+      "context": {}, "changesMs": [], "switchesMs": [6000, 10000],
+      "expected": { "rules": ["clear", "fired"], "r1Count": 0, "r2MaxCount": 2, "window": { "startMs": 5000, "endMs": 10000 }, "report": "warn", "partial": false }
+    },
+    {
+      "id": "r2-exact-x2-separated", "kind": "qualified_events",
+      "purpose": "Exactly X2 apart cannot share the open-left window; latest end wins ties",
+      "context": {}, "changesMs": [], "switchesMs": [5000, 10000],
+      "expected": { "rules": ["clear", "clear"], "r1Count": 0, "r2MaxCount": 1, "window": { "startMs": 5000, "endMs": 10000 }, "report": "quiet", "partial": false }
+    },
+    {
+      "id": "r2-boundaries-and-latest-tie", "kind": "qualified_events",
+      "purpose": "Exclude warm-up/B events, include T, choose the latest equally dense window",
+      "context": {}, "changesMs": [-1000, 0], "switchesMs": [-1000, 0, 6000, 10000, 26000, 30000],
+      "expected": { "rules": ["clear", "fired"], "r1Count": 0, "r2MaxCount": 2, "window": { "startMs": 25000, "endMs": 30000 }, "report": "warn", "partial": false }
+    },
+    {
+      "id": "r2-short-creation-window", "kind": "qualified_events",
+      "purpose": "A young pool can warn in a short window; no pre-creation records are required",
+      "context": { "Bms": 28000, "contextFromMs": 28000, "initialState": "confirmed_from_creation", "age": { "kind": "exact_from_creation", "ms": 2000, "thresholdMs": 86400000 } },
+      "changesMs": [], "switchesMs": [29000, 30000],
+      "expected": { "rules": ["clear", "fired"], "r1Count": 0, "r2MaxCount": 2, "window": { "startMs": 28000, "endMs": 30000 }, "report": "warn", "partial": false }
+    },
+    {
+      "id": "partial-but-fired", "kind": "qualified_events",
+      "purpose": "Confirmed events in one intact segment retain warn despite a separate missing chunk; no event is inferred across the gap",
+      "context": { "missing": [{ "startMs": 10000, "endMs": 20000, "reason": "fixture_rpc_chunk_failed" }] },
+      "changesMs": [], "switchesMs": [4000, 6000],
+      "expected": { "rules": ["incomplete", "fired"], "r1Count": 0, "r2MaxCount": 2, "window": { "startMs": 1000, "endMs": 6000 }, "report": "warn", "partial": true }
+    },
+    {
+      "id": "partial-no-confirmed-hit", "kind": "qualified_events",
+      "purpose": "Empty confirmed event lists plus a failed chunk are not a complete empty history",
+      "context": { "missing": [{ "startMs": 10000, "endMs": 20000, "reason": "fixture_rpc_chunk_failed" }] },
+      "changesMs": [], "switchesMs": [],
+      "expected": { "rules": ["incomplete", "incomplete"], "r1Count": 0, "r2MaxCount": 0, "window": null, "report": "insufficient", "partial": true }
+    },
+    {
+      "id": "required-initial-state-missing", "kind": "qualified_events",
+      "purpose": "Assume both rules require the missing state; actual warm-up requirements await SF1",
+      "context": { "initialState": "unconfirmed", "contextFromMs": 0 },
+      "changesMs": [], "switchesMs": [],
+      "expected": { "rules": ["incomplete", "incomplete"], "r1Count": 0, "r2MaxCount": 0, "window": null, "report": "insufficient", "partial": true }
+    },
+    {
+      "id": "unsupported-launchpad-request", "kind": "subject_selection",
+      "purpose": "Preserve SF0-3's unsupported real request; no new decoder support claim",
+      "input": { "support": "unsupported_request", "evidenceTx": "0x55f28ca8295e4526361edfc735b3eedb69052051591c52d98fac06b278ef3578" },
+      "expected": { "disposition": "not_applicable", "reasonMeaning": "unsupported_action", "rules": null, "report": null }
+    },
+    {
+      "id": "supported-path-zero-pool", "kind": "subject_selection",
+      "purpose": "Unresolved identity on a declared supported path is insufficient, not an exemption",
+      "input": { "support": "supported_path", "pool": "0x0000000000000000000000000000000000000000" },
+      "expected": { "disposition": "insufficient", "reasonMeaning": "unresolved_pool", "rules": null, "report": "insufficient" }
+    },
+    {
+      "id": "young-pool-clear-not-quiet", "kind": "qualified_events",
+      "purpose": "Full history since creation may be clear but age below X still prevents quiet",
+      "context": { "Bms": 28000, "contextFromMs": 28000, "initialState": "confirmed_from_creation", "age": { "kind": "exact_from_creation", "ms": 2000, "thresholdMs": 86400000 } },
+      "changesMs": [], "switchesMs": [],
+      "expected": { "rules": ["clear", "clear"], "r1Count": 0, "r2MaxCount": 0, "window": null, "report": "insufficient", "partial": false }
+    }
+  ]
+}

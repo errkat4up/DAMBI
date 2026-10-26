@@ -567,3 +567,343 @@ fn strict_permit_routes_and_malformed_known_requests_never_become_success() {
         "UNSUPPORTED_REQUEST",
     );
 }
+
+#[test]
+fn configured_scam_without_a_bundle_never_weakens_policy_or_installs_a_stub() {
+    let req = request(&"f".repeat(64)).to_string();
+    let mut original = session();
+    let original_plan = original.plan(&req, NOW).unwrap();
+    let baseline = evaluate(
+        &mut original,
+        &original_plan,
+        &empty_facts(&original_plan),
+        NOW,
+    );
+    assert!(baseline.get("scam").is_none());
+
+    let mut local = config(vec![approve_bundle()]);
+    let settings = json!({
+        "enabled": true, "presetId": "fixture", "overrides": [],
+        "additionalRules": [], "locale": "ko"
+    });
+    // This session has policy trust only; the independent existing development
+    // key is assigned to scam, not also installed as Decoder trust.
+    let key = support::key("decoder", dambi_core::bundle::KeyRole::Scam);
+    let scam_key = json!({"keyId":key.key_id,"role":"scam",
+        "publicKeySpkiBase64":key.public_key_spki_base64});
+    local["scam"] = json!({
+        "settings": settings,
+        "trust": {"env":"staging", "profile":"default", "keys":[scam_key]},
+        "limits": {
+            "scamTimeoutMs":2500, "scamEvalReserveMs":200,
+            "maxBundleBytes":1000000, "maxResultBytes":1000000,
+            "maxCalls":4, "maxTargets":2, "maxRules":16,
+            "maxLogs":20000, "maxPoints":20000, "maxAlgorithmWorkUnits":100000
+        }
+    });
+    let mut core = CoreSession::new(&local.to_string(), &wire(day1()), NOW).unwrap();
+    error_code(
+        core.set_scam_settings("{\"enabled\":\"false\"}"),
+        "INVALID_CONFIG",
+    );
+    let pinned = core.plan(&req, NOW).unwrap();
+    let mut disabled = settings;
+    disabled["enabled"] = json!(false);
+    core.set_scam_settings(&disabled.to_string()).unwrap();
+
+    let result = evaluate(&mut core, &pinned, &empty_facts(&pinned), NOW);
+    assert_eq!(result["decision"], baseline["decision"]);
+    assert_eq!(result["source"], baseline["source"]);
+    assert_eq!(result["reasons"], baseline["reasons"]);
+    assert_eq!(result["scam"]["status"], "insufficient");
+    assert_eq!(result["scam"]["reasons"], json!(["bundle_unavailable"]));
+    assert!(result["scam"].get("analysisMode").is_none());
+
+    let next = core.plan(&req, NOW).unwrap();
+    let result = evaluate(&mut core, &next, &empty_facts(&next), NOW);
+    assert_eq!(result["decision"], baseline["decision"]);
+    assert_eq!(result["scam"]["status"], "disabled");
+}
+
+fn scam_config() -> Value {
+    let mut local = config(vec![approve_bundle()]);
+    let key = support::key("decoder", dambi_core::bundle::KeyRole::Scam);
+    local["scam"] = json!({
+        "settings":{"enabled":true,"presetId":"default","overrides":[],"additionalRules":[],"locale":"ko"},
+        "trust":{"env":"staging","profile":"default","keys":[{
+            "keyId":key.key_id,"role":"scam","publicKeySpkiBase64":key.public_key_spki_base64
+        }]},
+        "limits":{"scamTimeoutMs":2500,"scamEvalReserveMs":200,
+            "maxBundleBytes":1000000,"maxResultBytes":1000000,"maxCalls":4,"maxTargets":2,
+            "maxRules":16,"maxLogs":20000,"maxPoints":20000,"maxAlgorithmWorkUnits":100000}
+    });
+    local
+}
+
+fn scam_bundle(sequence: &str) -> Value {
+    let preset = json!({"id":"base","rules":[{
+        "id":"liquidity-drop","kind":"window_drop","enabled":true,"metric":"quote_reserve",
+        "lookbackSec":60,"windowSec":10,"dropBps":5000
+    }],"bucketMs":1000,"gridOriginMs":0,"warmupSec":1,"maxDataAgeSec":30});
+    json!({
+        "kind":"scam_bundle","schema":"0.1","sequence":sequence,
+        "issuedAtMs":NOW-1000,"expiresAtMs":NOW+60000,"env":"staging","profile":"default",
+        "compatibility":{"engineRange":"*","builderRange":"dambi-v2/1","contractVersion":"0.1","algorithm":null},
+        "support":[{"chainId":1,"venue":"uniswap_v2","factories":[CONTRACT],
+            "quoteTokens":[SECOND_CONTRACT],"exemptTokens":[],"allowedBucketMs":[1000],"confirmDepth":2}],
+        "presets":[{"id":"default","purpose":"default",
+            "selection":{"ageThresholdSec":60,"unknownAge":"new_provisional_insufficient"},
+            "newMarket":preset,"established":preset}],"templates":{},"model":null
+    })
+}
+
+fn scam_wire(payload: &str) -> String {
+    json!({"payload":payload,"signature":support::sign("decoder",payload.as_bytes()),
+        "keyId":"ignored-remote-key-id"})
+    .to_string()
+}
+
+fn refresh_scam(core: &mut CoreSession, payload: &str, now: u64) -> Result<(), SessionError> {
+    let ticket = core.begin_scam_refresh()?;
+    core.commit_scam_refresh(ticket, &scam_wire(payload), now)
+}
+
+fn scam_report(core: &mut CoreSession, now: u64) -> Value {
+    let plan = core
+        .plan(&request(&"f".repeat(64)).to_string(), now)
+        .unwrap();
+    evaluate(core, &plan, &empty_facts(&plan), now)
+}
+
+#[test]
+fn scam_trust_requires_valid_curve_keys_and_separation_from_policy_and_decoder() {
+    let local = scam_config();
+    CoreSession::new(&local.to_string(), &wire(day1()), NOW).unwrap();
+    let mut invalid = local.clone();
+    invalid["scam"]["trust"]["keys"][0]["publicKeySpkiBase64"] = json!("not-spki");
+    error_code(
+        CoreSession::new(&invalid.to_string(), &wire(day1()), NOW),
+        "INVALID_CONFIG",
+    );
+    let mut shared = local.clone();
+    shared["scam"]["trust"]["keys"][0]["publicKeySpkiBase64"] =
+        local["trust"]["keys"][0]["publicKeySpkiBase64"].clone();
+    error_code(
+        CoreSession::new(&shared.to_string(), &wire(day1()), NOW),
+        "INVALID_CONFIG",
+    );
+    let mut decoder = local["scam"]["trust"]["keys"][0].clone();
+    decoder["role"] = json!("decoder");
+    let mut shared = local;
+    shared["trust"]["keys"]
+        .as_array_mut()
+        .unwrap()
+        .push(decoder);
+    error_code(
+        CoreSession::new(&shared.to_string(), &wire(day1()), NOW),
+        "INVALID_CONFIG",
+    );
+}
+
+#[test]
+fn scam_refresh_authenticates_original_utf8_and_never_uses_remote_key_selection() {
+    let mut core = CoreSession::new(&scam_config().to_string(), &wire(day1()), NOW).unwrap();
+    let mut bundle = scam_bundle("1");
+    bundle["templates"]["ko"] = json!("분석 범위 확인");
+    let payload = serde_json::to_string_pretty(&bundle).unwrap();
+    let signed: Value = serde_json::from_str(&scam_wire(&payload)).unwrap();
+    let mut tampered = signed.clone();
+    tampered["payload"] = json!(bundle.to_string());
+    let ticket = core.begin_scam_refresh().unwrap();
+    error_code(
+        core.commit_scam_refresh(ticket, &tampered.to_string(), NOW),
+        "INVALID_SIGNATURE",
+    );
+    let report = scam_report(&mut core, NOW);
+    assert_eq!(report["scam"]["reasons"], json!(["bundle_unavailable"]));
+    assert_eq!(report["decision"], "warn");
+
+    let mut wrong_role = signed.clone();
+    wrong_role["signature"] = json!(support::sign("policy", payload.as_bytes()));
+    let ticket = core.begin_scam_refresh().unwrap();
+    error_code(
+        core.commit_scam_refresh(ticket, &wrong_role.to_string(), NOW),
+        "INVALID_SIGNATURE",
+    );
+    for signature in [
+        "AA==".to_owned(),
+        signed["signature"]
+            .as_str()
+            .unwrap()
+            .trim_end_matches('=')
+            .to_owned(),
+    ] {
+        let mut bad = signed.clone();
+        bad["signature"] = json!(signature);
+        let ticket = core.begin_scam_refresh().unwrap();
+        error_code(
+            core.commit_scam_refresh(ticket, &bad.to_string(), NOW),
+            "INVALID_SIGNATURE",
+        );
+    }
+    refresh_scam(&mut core, &payload, NOW).unwrap();
+    let report = scam_report(&mut core, NOW);
+    assert_eq!(
+        report["scam"]["pinned"]["bundleDigest"],
+        digest(payload.as_bytes())
+    );
+    assert_eq!(
+        report["scam"]["pinned"]["algorithm"]["state"],
+        "unavailable"
+    );
+    assert_ne!(report["scam"]["status"], "quiet");
+
+    let duplicate = payload.replacen("\"kind\":", "\"kind\":\"scam_bundle\",\"kind\":", 1);
+    error_code(
+        refresh_scam(&mut core, &duplicate, NOW),
+        "INVALID_SCAM_BUNDLE",
+    );
+    let mut unknown = signed;
+    unknown["unexpected"] = json!(true);
+    let ticket = core.begin_scam_refresh().unwrap();
+    error_code(
+        core.commit_scam_refresh(ticket, &unknown.to_string(), NOW),
+        "INVALID_SCAM_BUNDLE",
+    );
+}
+
+#[test]
+fn scam_refresh_rejects_scope_semantic_sequence_and_lifetime_failures_atomically() {
+    let mut core = CoreSession::new(&scam_config().to_string(), &wire(day1()), NOW).unwrap();
+    let original = scam_bundle("2").to_string();
+    refresh_scam(&mut core, &original, NOW).unwrap();
+    refresh_scam(&mut core, &original, NOW).unwrap();
+    error_code(
+        refresh_scam(&mut core, &scam_bundle("1").to_string(), NOW),
+        "SCAM_SEQUENCE_REJECTED",
+    );
+    let differently_encoded = serde_json::to_string_pretty(&scam_bundle("2")).unwrap();
+    error_code(
+        refresh_scam(&mut core, &differently_encoded, NOW),
+        "SCAM_SEQUENCE_REJECTED",
+    );
+    for (pointer, value, expected) in [
+        ("/env", json!("production"), "SCAM_SCOPE_MISMATCH"),
+        ("/profile", json!("foreign"), "SCAM_SCOPE_MISMATCH"),
+        ("/schema", json!("9"), "INVALID_SCAM_BUNDLE"),
+        ("/sequence", json!("03"), "INVALID_SCAM_BUNDLE"),
+        (
+            "/compatibility/engineRange",
+            json!("^0.1.0"),
+            "INVALID_SCAM_BUNDLE",
+        ),
+        (
+            "/compatibility/builderRange",
+            json!("remote-builder"),
+            "INVALID_SCAM_BUNDLE",
+        ),
+        (
+            "/compatibility/contractVersion",
+            json!("0.2"),
+            "INVALID_SCAM_BUNDLE",
+        ),
+        ("/presets/0/id", json!("unselected"), "INVALID_SCAM_BUNDLE"),
+        (
+            "/presets/0/newMarket/bucketMs",
+            json!(2000),
+            "INVALID_SCAM_BUNDLE",
+        ),
+        ("/model", json!({"id":"unlinked"}), "INVALID_SCAM_BUNDLE"),
+        ("/issuedAtMs", json!(NOW + 1), "SCAM_EXPIRED"),
+        ("/expiresAtMs", json!(NOW), "SCAM_EXPIRED"),
+        ("/expiresAtMs", json!(NOW - 1000), "INVALID_SCAM_BUNDLE"),
+    ] {
+        let mut candidate = scam_bundle("3");
+        *candidate.pointer_mut(pointer).unwrap() = value;
+        error_code(
+            refresh_scam(&mut core, &candidate.to_string(), NOW),
+            expected,
+        );
+    }
+    let mut missing = scam_bundle("3");
+    missing.as_object_mut().unwrap().remove("model");
+    error_code(
+        refresh_scam(&mut core, &missing.to_string(), NOW),
+        "INVALID_SCAM_BUNDLE",
+    );
+    let report = scam_report(&mut core, NOW);
+    assert_eq!(report["scam"]["pinned"]["bundleSequence"], "2");
+    assert_eq!(
+        report["scam"]["pinned"]["bundleDigest"],
+        digest(original.as_bytes())
+    );
+    assert_eq!(report["decision"], "warn");
+    let mut sensitive_default = scam_bundle("3");
+    sensitive_default["presets"][0]["newMarket"]["rules"] = json!([{
+        "id":"r1","kind":"change_count","enabled":true,"metric":"quote_reserve",
+        "lookbackSec":60,"direction":"either","changeMode":"step","thresholdBps":500,"count":2
+    }]);
+    error_code(
+        refresh_scam(&mut core, &sensitive_default.to_string(), NOW),
+        "INVALID_SCAM_BUNDLE",
+    );
+    sensitive_default["presets"][0]["purpose"] = json!("demo");
+    refresh_scam(&mut core, &sensitive_default.to_string(), NOW).unwrap();
+    error_code(
+        refresh_scam(&mut core, &original, NOW + 60000),
+        "SCAM_EXPIRED",
+    );
+}
+
+#[test]
+fn scam_refresh_tickets_are_independent_and_existing_plans_keep_their_pinned_bundle() {
+    let mut core = CoreSession::new(&scam_config().to_string(), &wire(day1()), NOW).unwrap();
+    let earlier = core.begin_scam_refresh().unwrap();
+    let latest = core.begin_scam_refresh().unwrap();
+    error_code(
+        core.commit_scam_refresh(earlier, &scam_wire(&scam_bundle("1").to_string()), NOW),
+        "ABORTED",
+    );
+    error_code(core.cancel_scam_refresh(earlier), "ABORTED");
+    let mut other = CoreSession::new(&scam_config().to_string(), &wire(day1()), NOW).unwrap();
+    error_code(other.commit_scam_refresh(latest, "{}", NOW), "ABORTED");
+    core.commit_scam_refresh(latest, &scam_wire(&scam_bundle("1").to_string()), NOW)
+        .unwrap();
+    let pinned = core
+        .plan(&request(&"f".repeat(64)).to_string(), NOW)
+        .unwrap();
+
+    let policy_ticket = core.begin_refresh().unwrap();
+    let scam_ticket = core.begin_scam_refresh().unwrap();
+    core.commit_refresh(policy_ticket, &wire(signed_policy(policy_value(43))), NOW)
+        .unwrap();
+    core.commit_scam_refresh(scam_ticket, &scam_wire(&scam_bundle("2").to_string()), NOW)
+        .unwrap();
+    let before = evaluate(&mut core, &pinned, &empty_facts(&pinned), NOW);
+    let after = scam_report(&mut core, NOW);
+    assert_eq!(before["scam"]["pinned"]["bundleSequence"], "1");
+    assert_eq!(before["metadata"]["policyVersion"], "42");
+    assert_eq!(after["scam"]["pinned"]["bundleSequence"], "2");
+    assert_eq!(after["metadata"]["policyVersion"], "43");
+
+    let cancelled = core.begin_scam_refresh().unwrap();
+    core.cancel_scam_refresh(cancelled).unwrap();
+    error_code(
+        core.commit_scam_refresh(cancelled, &scam_wire(&scam_bundle("3").to_string()), NOW),
+        "ABORTED",
+    );
+    let mut expiring = scam_bundle("3");
+    expiring["expiresAtMs"] = json!(NOW + 100);
+    refresh_scam(&mut core, &expiring.to_string(), NOW).unwrap();
+    let old = core
+        .plan(&request(&"f".repeat(64)).to_string(), NOW)
+        .unwrap();
+    refresh_scam(&mut core, &scam_bundle("4").to_string(), NOW).unwrap();
+    let expired = evaluate(&mut core, &old, &empty_facts(&old), NOW + 100);
+    assert_eq!(expired["scam"]["reasons"], json!(["bundle_invalid"]));
+    assert_eq!(expired["decision"], "warn");
+    let pending = core.begin_scam_refresh().unwrap();
+    core.dispose();
+    error_code(core.commit_scam_refresh(pending, "{}", NOW), "DISPOSED");
+    error_code(core.begin_scam_refresh(), "DISPOSED");
+}

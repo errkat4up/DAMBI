@@ -15,6 +15,7 @@ import {
   type Ps2Request,
 } from "./policy-store/api";
 import { decideMessage } from "./orchestrator";
+import { warmScamHost } from "./scam-filter";
 import {
   ensureLoaded as ensureNotifySettings,
   shouldDesktop,
@@ -103,6 +104,9 @@ const WALLET_ACTION_TYPES = new Set<string>([
 ]);
 
 console.log("Dambi SW alive at", new Date().toISOString());
+// Optional SDK initialization/preparation is independent of legacy policy boot.
+// With no explicit local configuration this performs no network work.
+warmScamHost();
 
 // SW boot sequence: serialize the install stages so they don't race each other
 // (parallel calls would clobber the WASM engine state). Listeners are installed

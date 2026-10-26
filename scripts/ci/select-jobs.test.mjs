@@ -16,6 +16,7 @@ function expectJobs(plan, expected) {
 }
 
 const modified = (...paths) => paths.map((path) => ({ status: 'M', path }));
+const coreExtensionJobs = ['core', 'core-consumers', 'wasm', 'extension'];
 
 async function withRepository(run) {
   const cwd = await mkdtemp(join(tmpdir(), 'dambi-ci-selection-'));
@@ -53,9 +54,9 @@ test('ordinary Markdown edits skip builds, but deleted or replaced documents fai
 });
 
 test('independent product changes select their consumers and combine across areas', () => {
-  expectJobs(selectJobs(modified('packages/core/src/runtime/cache.ts')), ['core', 'core-consumers']);
+  expectJobs(selectJobs(modified('packages/core/src/runtime/cache.ts')), coreExtensionJobs);
   expectJobs(selectJobs(modified('registry-api/src/routes/decoders.ts')), ['registry-api']);
-  expectJobs(selectJobs(modified('browser-extension/src/background.ts')), ['wasm', 'extension']);
+  expectJobs(selectJobs(modified('browser-extension/src/background.ts')), coreExtensionJobs);
   expectJobs(selectJobs(modified(
     'packages/core/src/runtime/cache.ts',
     'registry-api/src/routes/decoders.ts',
@@ -64,7 +65,7 @@ test('independent product changes select their consumers and combine across area
   )), ['core', 'core-consumers', 'registry-api', 'wasm', 'extension']);
 });
 
-test('Core package and consumer sources always select their artifact producer and consumer job', () => {
+test('Core package and consumer sources select the package producer and all package consumers', () => {
   for (const path of [
     'packages/core/src/adapters/fact-provider.ts',
     'packages/core/src/runtime/wasm-loader.ts',
@@ -74,8 +75,8 @@ test('Core package and consumer sources always select their artifact producer an
     'scripts/sdk/consumer-cases.mjs',
     'scripts/sdk/consumer-fixture.mjs',
   ]) {
-    expectJobs(selectJobs(modified(path)), ['core', 'core-consumers']);
-    expectJobs(selectJobs([{ status: 'D', path }]), ['core', 'core-consumers']);
+    expectJobs(selectJobs(modified(path)), coreExtensionJobs);
+    expectJobs(selectJobs([{ status: 'D', path }]), coreExtensionJobs);
   }
   // Tool dependency changes still use the conservative complete matrix.
   expectJobs(selectJobs(modified('scripts/sdk/consumer-tools/package-lock.json')), JOBS);
@@ -85,7 +86,7 @@ test('Core package and consumer sources always select their artifact producer an
 test('server edits stay scoped except the handler consumed by extension catalog validation', () => {
   expectJobs(selectJobs(modified('crates/policy-server/db/src/lib.rs')), ['rust-server']);
   expectJobs(selectJobs(modified('crates/policy-server/server/src/handler.rs')),
-    ['rust-server', 'wasm', 'extension']);
+    ['rust-server', ...coreExtensionJobs]);
   expectJobs(selectJobs(modified(
     'crates/policy-server/server/src/handler.rs',
     'packages/core/src/index.ts',
@@ -142,7 +143,7 @@ test('Git push selection preserves both sides of renames, unusual filenames and 
     await mkdir(join(cwd, 'packages/core/src'), { recursive: true });
     git('mv', 'registry-api/src/original.ts', 'packages/core/src/renamed\nentry.ts');
     const after = commit('move code between independently tested products');
-    expectJobs(await planForEvent('push', { before, after }, { cwd }), ['registry-api', 'core', 'core-consumers']);
+    expectJobs(await planForEvent('push', { before, after }, { cwd }), ['registry-api', ...coreExtensionJobs]);
     git('rm', 'docs/required.md');
     const deleted = commit('remove required document');
     expectJobs(await planForEvent('push', { before: after, after: deleted }, { cwd }), JOBS);
@@ -159,7 +160,7 @@ test('PR selection uses its merge base so unrelated target branch changes do not
     await write('crates/asset-model/action/src/lib.rs');
     const base = commit('unrelated main change');
     const event = { pull_request: { base: { sha: base }, head: { sha: head }, labels: [] } };
-    expectJobs(await planForEvent('pull_request', event, { cwd }), ['core', 'core-consumers']);
+    expectJobs(await planForEvent('pull_request', event, { cwd }), coreExtensionJobs);
   });
 });
 
@@ -170,11 +171,11 @@ test('PR full-CI labels override path selection and malformed label metadata fai
     const head = commit('core change');
     const request = { base: { sha: base }, head: { sha: head } };
     const cases = [
-      ['synchronize', [], ['core', 'core-consumers']],
-      ['labeled', [{ name: 'enhancement' }], ['core', 'core-consumers']],
+      ['synchronize', [], coreExtensionJobs],
+      ['labeled', [{ name: 'enhancement' }], coreExtensionJobs],
       ['labeled', [{ name: 'enhancement' }, { name: 'ci:full' }], JOBS],
       ['synchronize', [{ name: 'ci:full' }], JOBS],
-      ['unlabeled', [], ['core', 'core-consumers']],
+      ['unlabeled', [], coreExtensionJobs],
     ];
     for (const [action, labels, expected] of cases) {
       expectJobs(await planForEvent('pull_request', {
@@ -198,6 +199,6 @@ test('changes after the first 300 files are included in the Git diff', async () 
     }
     await write('packages/core/src/last-change.ts');
     const after = commit('large documentation update with a runtime change');
-    expectJobs(await planForEvent('push', { before, after }, { cwd }), ['core', 'core-consumers']);
+    expectJobs(await planForEvent('push', { before, after }, { cwd }), coreExtensionJobs);
   });
 });

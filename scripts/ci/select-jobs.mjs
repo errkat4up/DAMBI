@@ -46,8 +46,14 @@ export function selectJobs(changes) {
       return full("Shared source or unmapped path changed");
     }
   }
-  // The extension downloads the WASM artifact produced in this same run.
-  if (selected.has("extension")) selected.add("wasm");
+  // The extension consumes Core's public package. Core changes therefore need
+  // extension regression checks, and extension-only changes still need its
+  // Core package and policy WASM producers from this same run.
+  if (selected.has("core")) selected.add("extension");
+  if (selected.has("extension")) {
+    selected.add("core");
+    selected.add("wasm");
+  }
   // Package consumers reuse the tarball produced by the isolated Core build.
   if (selected.has("core")) selected.add("core-consumers");
   return {

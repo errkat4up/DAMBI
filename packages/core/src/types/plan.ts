@@ -1,4 +1,5 @@
 import type { FactResult } from "../ports/fact.js";
+import type { PlannedScamCall } from "./scam.js";
 
 /** A read-only Fact enrichment call, never a transaction to submit. */
 export interface PlannedCall {
@@ -29,6 +30,8 @@ export interface CorePlan {
   readonly [corePlanBrand]: true;
   readonly planId: string;
   readonly calls: readonly PlannedCall[];
+  /** Separate advisory calls; absent when Scam Filter is unconfigured. */
+  readonly scamCalls?: readonly PlannedScamCall[];
   /** Plan TTL deadline in Unix ms. Snapshot validity is checked independently. */
   readonly expiresAt: number;
 }

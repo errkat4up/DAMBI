@@ -1,0 +1,99 @@
+{
+  "schema": "sf1-algorithm-v0.2-acceptance-notes",
+  "provenance": {
+    "source": "Algorithm specification v0.2 corrections supplied by the user on 2026-10-21",
+    "status": "hand_authored_spec_vectors_not_executed",
+    "referenceImplementation": "ref_rules.py and its executable test files have not been supplied or run here",
+    "scope": "Newly agreed boundary and zero-handling cases only; not a substitute for Python/Rust/Native/WASM parity tests"
+  },
+  "units": {
+    "clock": "relative_fixture_seconds_not_Unix_timestamps",
+    "toWire": "Choose one nonnegative Unix-ms origin and convert every tSec to origin + tSec * 1000; convert bucketSec to bucketMs. Preserve the relative event and window positions.",
+    "metricValues": "Decimal strings in scalar cases are hand-specified metric values, not raw reserve encoding. A wire fixture must represent them using integer reserve strings and fixed decimals; do not pass fractional strings as reserves.",
+    "window": "(startSec, endSec]",
+    "threshold": "500 bps = 5%"
+  },
+  "cases": [
+    {
+      "id": "r2-corrected-resolution-boundary",
+      "kind": "metric_to_switches_and_window",
+      "bucketSec": 10,
+      "points": [[0, "100"], [10, "106"], [20, "100"], [30, "106"], [40, "100"]],
+      "parameters": {
+        "reversalBps": 500,
+        "switchKind": "direction_reversal",
+        "count": 3,
+        "lookbackSec": 40,
+        "asOfSec": 40
+      },
+      "initialState": "The point at 0 seeds the direction state; the 10-second rise confirms the initial direction but is not a reversal. All required initialization is available.",
+      "expectedEvents": [{ "atSec": 20, "kind": "peak" }, { "atSec": 30, "kind": "trough" }, { "atSec": 40, "kind": "peak" }],
+      "variants": [
+        {
+          "windowSec": 21,
+          "expected": { "outcome": "fired", "observed": 3, "window": { "startSec": 19, "endSec": 40 } }
+        },
+        {
+          "windowSec": 20,
+          "expected": { "outcome": "not_evaluable", "reason": "resolution_too_coarse" }
+        }
+      ],
+      "note": "Resolution eligibility is X2 > (m - 1) * delta. It does not assert that eligible data necessarily contains enough events, and it is not a warm-up completeness test."
+    },
+    {
+      "id": "r1-and-drop-resolution-policy-boundaries",
+      "kind": "eligibility_only_no_verdict_claim",
+      "bucketSec": 10,
+      "variants": [
+        { "kind": "change_count", "count": 4, "lookbackSec": 31, "expectedResolutionEligible": true },
+        { "kind": "change_count", "count": 4, "lookbackSec": 30, "expectedResolutionEligible": false, "expectedReason": "resolution_too_coarse" },
+        { "kind": "window_drop", "windowSec": 10, "expectedResolutionEligible": true },
+        { "kind": "window_drop", "windowSec": 9, "expectedResolutionEligible": false, "expectedReason": "resolution_too_coarse" }
+      ],
+      "note": "R1 uses X1 > (n - 1) * delta. X2 >= delta is the agreed MVP minimum supported window for window_drop, not a mathematical impossibility claim about shorter windows. Actual evaluation still requires valid data, capabilities and initial state."
+    },
+    {
+      "id": "valid-zero-and-positive-restart",
+      "kind": "metric_to_change_events",
+      "bucketSec": 10,
+      "points": [[0, "10"], [10, "0"], [20, "5"], [30, "5.5"]],
+      "parameters": { "thresholdBps": 500, "direction": "either", "changeModes": ["step", "cumulative"] },
+      "appliesTo": ["quote_reserve", "price_quote_per_token_when_token_reserve_is_positive"],
+      "expectedEvents": [{ "atSec": 10, "kind": "down" }, { "atSec": 30, "kind": "up" }],
+      "note": "10 -> 0 is a valid -100% event. 0 -> 5 emits no percentage event and seeds fresh positive state; 5 -> 5.5 is a valid +10% event. Zero quote reserve by itself is not missing data."
+    },
+    {
+      "id": "undefined-price-breaks-continuity",
+      "kind": "reserve_points_to_price_events",
+      "bucketSec": 10,
+      "decimalsQuote": 0,
+      "decimalsToken": 0,
+      "columns": ["atSec", "reserveQuote", "reserveToken"],
+      "points": [[0, "100", "1"], [10, "110", "0"], [20, "200", "1"], [30, "200", "1"]],
+      "parameters": { "metric": "price_quote_per_token", "thresholdBps": 500, "direction": "either", "changeModes": ["step", "cumulative"], "lookbackSec": 30, "asOfSec": 30 },
+      "expected": {
+        "invalidMetricPointSec": [10],
+        "changeEvents": [],
+        "clearAllowed": false,
+        "bridgeFrom0To20Allowed": false
+      },
+      "note": "The zero denominator makes only the price metric unavailable at 10. End the segment, reset its state, and seed a new segment at 20. These assertions do not prescribe a more specific failure reason than the agreed incomplete/missing-data semantics."
+    },
+    {
+      "id": "zero-restarts-zigzag-without-false-reversal",
+      "kind": "metric_to_switches",
+      "bucketSec": 10,
+      "points": [[0, "100"], [10, "106"], [20, "0"], [30, "50"], [40, "60"]],
+      "parameters": { "reversalBps": 500, "switchKind": "direction_reversal" },
+      "expectedEvents": [{ "atSec": 20, "kind": "peak" }],
+      "note": "The drop to zero confirms the peak. The next positive value seeds new state; the rise to 60 determines a new initial direction, not a cross-zero trough reversal."
+    }
+  ],
+  "reuse": [
+    {
+      "path": "../../fixtures/sdk/giwa-sf0/scam-cases.json",
+      "caseId": "r2-boundaries-and-latest-tie",
+      "purpose": "Reuse the existing maximum-count/latest-end tie expectation. No duplicate executable case or new execution claim is added here."
+    }
+  ]
+}

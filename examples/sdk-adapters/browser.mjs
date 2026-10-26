@@ -2,12 +2,18 @@ import { CoreError } from "@dambi/core";
 import { AdapterError } from "@dambi/core/adapters";
 import { decoderSnapshotInfo } from "@dambi/core/decoders";
 import { createAdapterCore } from "./client.mjs";
+import { checkWithTiming } from "./check-timing.mjs";
 
 const settingsInput = document.querySelector("#settings");
 const requestInput = document.querySelector("#request");
 const checkButton = document.querySelector("#check");
 const cancelButton = document.querySelector("#cancel");
 const result = document.querySelector("#result");
+const timing = document.createElement("small");
+timing.id = "check-timing";
+timing.setAttribute("role", "status");
+timing.setAttribute("aria-live", "polite");
+result.insertAdjacentElement("afterend", timing);
 let active;
 
 // These are editable demonstration limits, not production recommendations.
@@ -69,6 +75,7 @@ checkButton.addEventListener("click", async () => {
   settingsInput.readOnly = requestInput.readOnly = true;
   let phase = "configuration";
   result.textContent = "Checking…";
+  timing.textContent = "";
   try {
     const settings = JSON.parse(settingsInput.value);
     const request = JSON.parse(requestInput.value);
@@ -76,7 +83,12 @@ checkButton.addEventListener("click", async () => {
     phase = "initialization";
     operation.core = await createAdapterCore(settings, { signal: operation.controller.signal });
     phase = "check";
-    const verdict = await operation.core.check(request, { signal: operation.controller.signal });
+    const verdict = await checkWithTiming(operation.core, request, { signal: operation.controller.signal }, (measurement) => {
+      const modes = measurement.analysisModes?.length ? ` Algorithm: ${measurement.analysisModes.join(", ")}.` : "";
+      timing.textContent = `Check ${measurement.outcome}: ${measurement.checkDurationMs.toFixed(1)} ms; `
+        + `${measurement.withinBudget ? "within" : "over"} ${measurement.targetBudgetMs} ms comparison.${modes} `
+        + "Latency only; excludes initialization, preparation and display. This does not establish analysis completeness or performance acceptance.";
+    });
     result.textContent = JSON.stringify(verdict, null, 2);
   } catch (error) {
     const code = error instanceof CoreError || error instanceof AdapterError ? error.code

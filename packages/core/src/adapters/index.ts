@@ -1,6 +1,17 @@
 export { createPolicyApiSource } from "./policy-api.js";
 export type { PolicyApiSourceOptions } from "./policy-api.js";
+export { createScamBundleApiSource } from "./scam-bundle-api.js";
+export type { ScamBundleApiSource, ScamBundleApiSourceOptions } from "./scam-bundle-api.js";
 export { createEvmFactProvider } from "./fact-provider.js";
 export type { EvmFactProviderOptions, EvmRpcEndpoint } from "./fact-provider.js";
 export { AdapterError } from "./errors.js";
 export type { AdapterErrorCode } from "./errors.js";
+export { createScamFactProvider } from "./scam-fact-provider.js";
+export type { ScamFactProvider, ScamPreparationOptions, ScamFactProviderOptions, ScamProviderLimits, ScamProviderMetrics, ScamProviderDiagnostic, ScamProviderOperation } from "./scam-fact-provider.js";
+export { ScamDataError } from "../types/scam-error.js";
+export type { ScamDataFailure } from "../types/scam-error.js";
+export { SCAM_DATA_BUILDER_VERSION } from "./scam-pool-history.js";
+export type { PoolHistoryBuildLimits } from "./scam-pool-history.js";
+export type { FactoryHistorySupport, TokenAdminSupport, TokenProfileBuildOptions } from "./scam-token-profile.js";
+export type { ScamRpcLimits, ScamRpcOptions, ScamRpcDiagnostic, ScamVerificationOptions } from "./scam-rpc.js";
+export type { ScamHistoryStoreOptions } from "./scam-history-store.js";

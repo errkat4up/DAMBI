@@ -46,6 +46,7 @@ policy-state = { path = "crates/asset-model/state", version = "0.1.0" }
 policy-action = { path = "crates/asset-model/action", version = "0.1.0" }
 policy-transition = { path = "crates/asset-model/transition", version = "0.1.0" }
 wasm-bindgen = "0.2"
+js-sys = "0.3"
 getrandom = { version = "0.2", features = ["js"] }
 async-trait = "0.1"
 tsify-next = { version = "0.5", default-features = false, features = ["js"] }

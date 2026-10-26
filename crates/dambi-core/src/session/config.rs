@@ -12,6 +12,8 @@ pub(super) struct Config {
     pub trust: Trust,
     pub limits: Limits,
     pub enforcement: String,
+    #[serde(default)]
+    pub scam: Option<super::scam::Config>,
 }
 
 #[derive(Deserialize)]
@@ -57,6 +59,9 @@ pub(super) struct Limits {
 impl Config {
     pub fn parse(input: &str) -> Result<Self, SessionError> {
         let value = parse_json(input, "INVALID_CONFIG")?;
+        if value.get("scam").is_some_and(serde_json::Value::is_null) {
+            return Err(SessionError::new("INVALID_CONFIG", "scam cannot be null"));
+        }
         if value
             .pointer("/limits/maxBundleAgeSec")
             .is_some_and(serde_json::Value::is_null)
@@ -72,6 +77,10 @@ impl Config {
             return Err(SessionError::new("INVALID_CONFIG", "invalid enforcement"));
         }
         config.limits.validate()?;
+        if let Some(scam) = &config.scam {
+            scam.validate()?;
+            scam.validate_separate_keys(&config.store_config()?.keys)?;
+        }
         Ok(config)
     }
 

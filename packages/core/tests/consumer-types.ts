@@ -21,15 +21,25 @@ import {
   type PolicySource,
   type Ports,
   type SignedPolicyBundle,
+  type SignedScamBundle,
   type UnsupportedRequest,
   type Verdict,
+  type AnalysisVerification,
+  type MethodVerification,
 } from "@dambi/core";
 import "@dambi/core/internal";
 import { decoderSnapshot, decoderSnapshotInfo } from "@dambi/core/decoders";
 import {
   AdapterError,
   createPolicyApiSource,
+  createScamBundleApiSource,
   createEvmFactProvider,
+  createScamFactProvider,
+  ScamDataError,
+  type ScamFactProviderOptions,
+  type ScamProviderMetrics,
+  type ScamProviderDiagnostic,
+  type ScamRpcDiagnostic,
   type AdapterErrorCode,
   type PolicyApiSourceOptions,
   type EvmFactProviderOptions,
@@ -50,6 +60,13 @@ const policyApiOptions: PolicyApiSourceOptions = {
 };
 const policyApi: PolicySource = createPolicyApiSource(policyApiOptions);
 const fetchedPolicy: Promise<SignedPolicyBundle> = policyApi.fetch({ signal: new AbortController().signal });
+const scamApi = createScamBundleApiSource({ baseUrl: "https://scam.example", env: "staging",
+  profile: "default", sequence: "9007199254740993", maxResponseBytes: 1_000_000 });
+const combinedSource: PolicySource = { ...policyApi, ...scamApi };
+const fetchedScam: Promise<SignedScamBundle> = scamApi.fetchScam();
+// @ts-expect-error Scam sequences are lossless decimal strings, not JS numbers.
+createScamBundleApiSource({ baseUrl: "https://scam.example", env: "staging", maxResponseBytes: 1000, sequence: 1 });
+void [combinedSource, fetchedScam];
 // @ts-expect-error Response size must be an explicit host decision.
 createPolicyApiSource({ baseUrl: "https://policies.example" });
 // @ts-expect-error Only the currently supported policy profile is accepted.
@@ -96,6 +113,66 @@ evmFact.fetch([], { signal: new AbortController().signal });
 // @ts-expect-error The EVM adapter belongs to its optional public subpath.
 import { createEvmFactProvider as rootEvmFactProvider } from "@dambi/core";
 void [evmFact, evmBatch, invalidFactRequest];
+
+function scamAdapter(options: ScamFactProviderOptions): FactProvider {
+  return createScamFactProvider({ ...options, policy: evmFact,
+    rpc: { ...options.rpc, verification: { history: "all_event_headers", stateBinding: "number_recheck" },
+      limits: { ...options.rpc.limits, minRequestIntervalMs: 75,
+      maxRetryDelayMs: Math.max(30_000, options.rpc.limits.retryDelayMs) } },
+    onMetrics(metrics: ScamProviderMetrics) {
+      const outcome: "success" | "partial" | "failed" = metrics.outcome;
+      // @ts-expect-error Diagnostic snapshots are read-only.
+      metrics.requests = 0;
+      if (metrics.preflight) {
+        const minimumRequests: number = metrics.preflight.minimumRemainingRequests;
+        const group: number | undefined = metrics.preflightGroup;
+        // @ts-expect-error Preflight snapshots cannot be edited by observers.
+        metrics.preflight.remainingRequestBudget = 0;
+        void [minimumRequests, group];
+      }
+      const failure: ScamProviderDiagnostic | undefined = metrics.failure;
+      if (failure) {
+        const raw: ScamRpcDiagnostic = failure;
+        const operation: "request" | "reference" | "pool_identity" | "pool_history" | "token_profile" | "result" | "final_recheck" | undefined = failure.operation;
+        // @ts-expect-error Failure details are immutable snapshots too.
+        failure.stage = "provider";
+        // @ts-expect-error Remote messages and endpoint URLs are never diagnostic fields.
+        const message = failure.message;
+        void [raw, operation, message];
+      }
+      void outcome;
+    } });
+}
+function invalidScamPacing(options: ScamFactProviderOptions): void {
+  // @ts-expect-error Request pacing is a numeric duration, never an RPC provider label.
+  createScamFactProvider({ ...options, rpc: { ...options.rpc, limits: { ...options.rpc.limits, minRequestIntervalMs: "75" } } });
+  // @ts-expect-error Retry backoff caps are numeric durations too.
+  createScamFactProvider({ ...options, rpc: { ...options.rpc, limits: { ...options.rpc.limits, maxRetryDelayMs: "30000" } } });
+}
+const scamDataFailure = new ScamDataError("reorg");
+// @ts-expect-error Only sanitized advisory failure categories may cross the port.
+new ScamDataError("arbitrary_remote_error");
+// @ts-expect-error Provider failure reasons are immutable.
+scamDataFailure.reason = "timeout";
+void [scamAdapter, invalidScamPacing, scamDataFailure];
+
+const declaredVerification: MethodVerification = {
+  version: 1, history: "all_event_headers", stateBinding: "number_recheck", timeSources: ["header", "rpc_log"],
+  reuse: "none", rawObservedAt: { fromMs: 1_800_000_000_000, toMs: 1_800_000_000_000 }, verifiedAt: 1_800_000_000_001,
+};
+const legacyVerification: AnalysisVerification = { status: "legacy_unspecified" };
+const analysisVerification: AnalysisVerification = {
+  status: "declared", poolHistory: declaredVerification, tokenProfile: declaredVerification,
+};
+// @ts-expect-error Metadata versions are explicit, not arbitrary integers.
+const unknownVerification: MethodVerification = { ...declaredVerification, version: 2 };
+// @ts-expect-error Consistency provenance cannot claim a cryptographic source proof.
+const inventedVerification: MethodVerification = { ...declaredVerification, history: "cryptographic_proof" };
+// @ts-expect-error Both method declarations must be retained in a declared binding.
+const incompleteVerification: AnalysisVerification = { status: "declared", poolHistory: declaredVerification };
+// @ts-expect-error Timestamp provenance is immutable.
+declaredVerification.timeSources.push("header");
+void [legacyVerification, analysisVerification, unknownVerification, inventedVerification, incompleteVerification];
 
 // @ts-expect-error Decoder lookup is not a public I/O port.
 import type { DecoderSource } from "@dambi/core";
@@ -268,6 +345,7 @@ async function consume(): Promise<void> {
   audit(await core.check(transaction, options));
   audit(await core.check(unsupported, options));
   await core.refreshPolicies(options);
+  await core.refreshScam(options);
   core.dispose();
 
   // @ts-expect-error plan accepts only known request variants.

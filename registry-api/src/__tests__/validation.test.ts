@@ -58,6 +58,16 @@ describe("validation — token segments", () => {
 });
 
 describe("parseProxyTarget", () => {
+  it("scopes scam bundles by environment/profile and accepts canonical decimal sequences including zero", () => {
+    for (const path of ["staging/default/0.json", "production/team-2/9007199254740993.json", "staging/default/latest.json"]) {
+      expect(parseProxyTarget(`/scam-bundles/${path}`)).toEqual({ ok: true, objectName: `scam-bundles/${path}` });
+    }
+    for (const path of ["default/1.json", "other/default/1.json", "staging/UPPER/1.json", "staging/default/01.json",
+      "staging/default/-1.json", "staging/default/1.json\n", "staging/%2fdefault/1.json", "staging/../1.json",
+      `staging/${"a".repeat(129)}/1.json`, `staging/default/${"1".repeat(79)}.json`]) {
+      expect(parseProxyTarget(`/scam-bundles/${path}`)).toEqual({ ok: false });
+    }
+  });
   it("maps a callkey path to the GCS object name", () => {
     expect(
       parseProxyTarget(
