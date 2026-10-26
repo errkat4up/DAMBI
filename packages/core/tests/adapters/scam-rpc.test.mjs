@@ -24,6 +24,7 @@ const subject = () => ({ chainId: 91342, venue: "uniswap_v2", pool: POOL, factor
 const request = (overrides = {}) => ({ planId: "plan:test", referenceGroupId: "reference:test",
   confirmDepth: 2, deadlineMs: NOW + 5_000, subjects: [subject()], ...overrides });
 const query = (from = "1", to = "10") => ({ scope: "pair", fromBlock: from, toBlock: to, topics: [TOPIC] });
+const historyCacheOptions = () => ({ maxEntries: 8, maxBytes: 500_000, ttlMs: 10_000, maxBlockSpan: 10_000 });
 const failure = (reason) => ({ name: "ScamRpcError", reason });
 const turn = () => new Promise((resolve) => setImmediate(resolve));
 function deferred() {
@@ -32,12 +33,12 @@ function deferred() {
   return { promise, resolve };
 }
 
-function fixture({ head = 20_050, limits = {}, handle, clock = { now: () => NOW } } = {}) {
+function fixture({ head = 20_050, limits = {}, handle, verification, historyCache, clock = { now: () => NOW } } = {}) {
   const calls = [];
   let active = 0, peak = 0;
   const options = {
     chainId: 91342, endpoint: { rpcUrl: "https://rpc.invalid/test?key=private", headers: { "x-test": "copied" } },
-    factories: [FACTORY], quoteTokens: [QUOTE], clock,
+    factories: [FACTORY], quoteTokens: [QUOTE], clock, verification, historyCache,
     limits: { maxRequests: 100, maxResponseBytes: 65_536, maxTotalResponseBytes: 1_000_000,
       maxLogs: 100, maxBlocksPerQuery: 10_000, concurrency: 2, maxRetries: 0, retryDelayMs: 0, ...limits },
     fetch: async (url, init) => {
@@ -119,15 +120,17 @@ test("scam RPC batches pin one confirmed reference, verify pool identity and cop
 
 test("scam RPC freezes verification configuration and rejects unavailable modes before work", async () => {
   const f = fixture();
-  const verification = { history: "all_event_headers", stateBinding: "number_recheck" };
-  const source = createScamRpcSource({ ...f.options, verification });
-  verification.history = "rpc_anchor";
-  verification.stateBinding = "block_hash_canonical";
-  const result = await source.withBatch(request(), async () => null);
-  assert.deepEqual(result.verification, { history: "all_event_headers", stateBinding: "number_recheck" });
+  for (const history of ["all_event_headers", "rpc_anchor"]) {
+    const verification = { history, stateBinding: "number_recheck" };
+    const source = createScamRpcSource({ ...f.options, verification });
+    verification.history = history === "rpc_anchor" ? "all_event_headers" : "rpc_anchor";
+    verification.stateBinding = "block_hash_canonical";
+    const result = await source.withBatch(request(), async () => null);
+    assert.deepEqual(result.verification, { history, stateBinding: "number_recheck" });
+  }
 
   const before = f.calls.length;
-  for (const invalid of [null, [], { history: "rpc_anchor" }, { stateBinding: "block_hash_canonical" },
+  for (const invalid of [null, [], { history: "unknown" }, { stateBinding: "block_hash_canonical" },
     { history: null }, { stateBinding: "latest" }, { history: "all_event_headers", extra: true },
     { [Symbol("unexpected")]: true }]) {
     assert.throws(() => createScamRpcSource({ ...f.options, verification: invalid }), failure("invalid_config"));
@@ -310,26 +313,112 @@ test("scam RPC honors Retry-After seconds and HTTP dates beyond the backoff cap 
 });
 
 test("scam RPC discards drafts when checked head, reference, historical state or returned-log block hashes change", async () => {
-  for (const mode of ["head", "reference", "historical", "log"]) {
+  const cases = ["all_event_headers", "rpc_anchor"].flatMap((history) =>
+    ["head", "reference", "historical", history === "rpc_anchor" ? "header" : "log"].map((mode) => ({ history, mode })));
+  for (const { history, mode } of cases) {
     const reads = new Map();
-    const f = fixture({ head: 25, handle: (rpc) => {
+    const f = fixture({ head: 25, verification: { history }, handle: (rpc) => {
       if (mode === "log" && rpc.method === "eth_getLogs") return ok(rpc, [{ ...rawLog(9), blockHash: blockHash(999) }]);
       if (rpc.method !== "eth_getBlockByNumber" || rpc.params[0] === "latest") return undefined;
       const n = BigInt(rpc.params[0]);
       const seen = (reads.get(n) ?? 0) + 1;
       reads.set(n, seen);
       if ((mode === "head" && n === 25n)
-          || (seen > 1 && ((mode === "reference" && n === 23n) || (mode === "historical" && n === 9n)))) {
+          || (seen > 1 && ((mode === "reference" && n === 23n) || (["historical", "header"].includes(mode) && n === 9n)))) {
         return ok(rpc, { ...header(n), hash: blockHash(999) });
       }
       return undefined;
     } });
     await assert.rejects(f.source.withBatch(request(), async (batch) => {
       if (mode === "head" || mode === "reference") return "must not escape";
+      if (mode === "header") return batch.block("9");
       const pool = await batch.pool(0);
       return mode === "historical" ? batch.reserves(pool, "9") : batch.logs(pool, query("9", "9"));
     }), failure("reorg"));
   }
+});
+
+test("AH2 rpc_anchor omits only log-only final headers and keeps preflight aligned as event counts grow", async () => {
+  for (const history of ["all_event_headers", "rpc_anchor"]) {
+    for (const count of [1, 12]) {
+      const heights = Array.from({ length: count }, (_, i) => i + 9);
+      const f = fixture({ head: 25, verification: { history }, handle: (rpc) => rpc.method === "eth_getLogs"
+        ? ok(rpc, heights.map((n) => ({ ...rawLog(n), blockTimestamp: q(n + 1000) }))) : undefined });
+      let beforeFinal;
+      const result = await f.source.withBatch(request(), async (batch) => {
+        const scan = await batch.logs(await batch.pool(0), query("9", "20"));
+        batch.preflightHeaders([]);
+        beforeFinal = f.calls.length;
+        return scan;
+      });
+      const finalHeights = f.calls.slice(beforeFinal).map(({ rpc }) => rpc.params[0]);
+      const expected = history === "rpc_anchor" ? [25, 23] : [25, ...heights, 23];
+      assert.deepEqual(finalHeights, expected.map(q));
+      assert.equal(result.metrics.preflight.finalRecheckRequests, expected.length);
+      assert.equal(result.metrics.preflight.minimumRemainingRequests, expected.length);
+      assert.equal(result.metrics.preflight.uniqueLogBlocks, count);
+      assert.equal(result.value.logs.length, count, "Fewer final headers must not truncate the log evidence");
+      assert.equal(result.verification.history, history);
+    }
+  }
+});
+
+test("AH2 rpc_anchor budgets pending headers and restores their final checks without weakening on failure", async () => {
+  for (const maxRequests of [11, 12]) {
+    const reports = [];
+    const f = fixture({ head: 25, limits: { maxRequests }, verification: { history: "rpc_anchor" },
+      handle: (rpc) => rpc.method === "eth_getLogs" ? ok(rpc, [rawLog(9)]) : undefined });
+    const work = f.source.withBatch(request({ onMetrics: (metric) => reports.push(metric) }), async (batch) => {
+      await batch.logs(await batch.pool(0), query("9", "9"));
+      batch.preflightHeaders(["9", "9"]);
+      await batch.block("9");
+      return "header-backed draft";
+    });
+    if (maxRequests === 12) {
+      assert.equal((await work).value, "header-backed draft");
+      assert.equal(f.calls.length, 12);
+      assert.equal(reports[0].preflight.finalRecheckRequests, 3);
+      assert.equal(f.calls.filter(({ rpc }) => rpc.method === "eth_getBlockByNumber" && rpc.params[0] === q(9)).length, 2);
+    } else {
+      await assert.rejects(work, failure("resource_limit"));
+      assert.equal(f.calls.length, 8);
+      assert.equal(reports[0].preflight.additionalHeaderRequests, 1);
+      assert.equal(reports[0].preflight.finalRecheckRequests, 3);
+      assert.equal(reports[0].preflight.minimumRemainingRequests, 4);
+      assert.deepEqual(reports[0].failure, { stage: "preflight", kind: "resource_limit" });
+    }
+  }
+});
+
+test("AH2 rpc_anchor exposes its log-only trust limit but rejects conflicts with observed headers", async () => {
+  for (const order of ["log_only", "header_first", "log_first"]) {
+    const f = fixture({ head: 25, verification: { history: "rpc_anchor" }, handle: (rpc) => rpc.method === "eth_getLogs"
+      ? ok(rpc, [{ ...rawLog(9), blockHash: blockHash(999), blockTimestamp: q(1009) }]) : undefined });
+    const work = f.source.withBatch(request(), async (batch) => {
+      const pool = await batch.pool(0);
+      if (order === "header_first") await batch.block("9");
+      const scan = await batch.logs(pool, query("9", "9"));
+      if (order === "log_first") await batch.block("9");
+      return scan;
+    });
+    if (order === "log_only") {
+      const result = await work;
+      assert.equal(result.value.logs[0].blockHash, blockHash(999),
+        "Anchor mode cannot detect a different backend branch without an individual log-header comparison");
+      assert.equal(f.calls.some(({ rpc }) => rpc.method === "eth_getBlockByNumber" && rpc.params[0] === q(9)), false);
+    } else await assert.rejects(work, failure("reorg"), "Observed conflicting evidence remains terminal, never a missing chunk");
+  }
+  const lateProfile = fixture({ head: 25, verification: { history: "rpc_anchor" }, handle: (rpc) => {
+    if (rpc.method === "eth_getLogs") return ok(rpc, [{ ...rawLog(9), blockTimestamp: q(1015) }]);
+    if (rpc.method === "eth_getBlockByNumber" && rpc.params[0] === q(8)) return ok(rpc, { ...header(8), timestamp: q(1016) });
+    return undefined;
+  } });
+  await assert.rejects(lateProfile.source.withBatch(request(), async (batch) => {
+    const pool = await batch.pool(0);
+    await batch.logs(pool, query("9", "9"));
+    await batch.code(pool, "8");
+    return "must not publish inverted history";
+  }), failure("invalid_response"), "Later profile headers must still be ordered against skipped log-only evidence");
 });
 
 test("scam RPC verifies log timestamps against actual final headers before publishing drafts", async () => {
@@ -353,8 +442,10 @@ test("scam RPC verifies log timestamps against actual final headers before publi
 });
 
 test("scam RPC rejects log times beyond the reference or inconsistent across chunks and cached headers", async () => {
-  for (const mode of ["future", "cross_chunk", "cached_header"]) {
-    const f = fixture({ handle: (rpc) => {
+  const cases = ["all_event_headers", "rpc_anchor"].flatMap((history) =>
+    ["future", "cross_chunk", "cached_header"].map((mode) => ({ history, mode })));
+  for (const { history, mode } of cases) {
+    const f = fixture({ verification: { history }, handle: (rpc) => {
       if (rpc.method !== "eth_getLogs") return undefined;
       if (mode === "cross_chunk") {
         const n = BigInt(rpc.params[0].fromBlock);
@@ -724,4 +815,176 @@ test("scam RPC diagnostics do not promote recovered retries or missing log chunk
   assert.equal(timedOut[0].failure.kind, "lifecycle");
   assert.equal(timedOut[0].failure.httpStatus, undefined);
   assert.equal(timedOut[0].failure.rpcCode, undefined);
+});
+
+test("scam RPC reuses complete and empty history intervals, downloads only extensions and retains original boundary evidence", async () => {
+  for (const history of [undefined, "rpc_anchor"]) for (const empty of [false, true]) {
+    let head = 25, time = NOW;
+    const f = fixture({ historyCache: historyCacheOptions(), verification: history ? { history } : undefined,
+      clock: { now: () => time }, handle: (rpc) => {
+        if (rpc.method === "eth_getBlockByNumber" && rpc.params[0] === "latest") return ok(rpc, header(head));
+        if (rpc.method !== "eth_getLogs") return undefined;
+        const { fromBlock, toBlock } = rpc.params[0];
+        return ok(rpc, (empty ? [] : [10, 14]).filter((n) => BigInt(n) >= BigInt(fromBlock) && BigInt(n) <= BigInt(toBlock))
+          .map((n) => ({ ...rawLog(n), blockTimestamp: q(n + 1_000) })));
+      } });
+    const collect = async (from, to, planId) => {
+      let finalStart;
+      const result = await f.source.withBatch(request({ planId }), async (batch) => {
+        const scan = await batch.logs(await batch.pool(0), query(from, to));
+        finalStart = f.calls.length;
+        return scan;
+      });
+      const finalHeights = f.calls.slice(finalStart).map(({ rpc }) => {
+        assert.equal(rpc.method, "eth_getBlockByNumber");
+        return BigInt(rpc.params[0]).toString();
+      });
+      assert.equal(result.metrics.preflight.finalRecheckRequests, finalHeights.length);
+      assert.equal(finalHeights.at(-1), result.reference.block.number, "The pinned reference remains the last check");
+      assert.equal(result.verification.history, history ?? "all_event_headers");
+      return { ...result, finalHeights };
+    };
+    const first = await collect("9", "12", "cache:first");
+    assert.equal(first.value.provenance, undefined);
+    const beforeReuse = f.calls.length;
+    time += 10;
+    const reused = await collect("9", "12", "cache:fresh-plan");
+    assert.equal(f.calls.slice(beforeReuse).filter(({ rpc }) => rpc.method === "eth_getLogs").length, 0);
+    assert.deepEqual(reused.value.logs, first.value.logs);
+    assert.deepEqual(reused.value.missing, []);
+    assert.deepEqual(reused.value.provenance, { reuse: "interval_cache", rawObservedAt: { fromMs: NOW, toMs: NOW } });
+    assert.equal(reused.observedAt, NOW + 10, "A raw cache hit does not reuse the preceding batch identity or time");
+    assert.ok(reused.finalHeights.includes("9") && reused.finalHeights.includes("12"));
+    assert.equal(reused.finalHeights.includes("10"), !empty && history !== "rpc_anchor",
+      "Caching preserves the configured treatment of log-only headers");
+
+    const beforeExtension = f.calls.length;
+    time += 10;
+    head = 27;
+    const extended = await collect("10", "14", "cache:new-reference");
+    assert.deepEqual(f.calls.slice(beforeExtension).filter(({ rpc }) => rpc.method === "eth_getLogs")
+      .map(({ rpc }) => [BigInt(rpc.params[0].fromBlock).toString(), BigInt(rpc.params[0].toBlock).toString()]), [["13", "14"]]);
+    assert.deepEqual(extended.value.logs.map((log) => log.blockNumber), empty ? [] : ["10", "14"]);
+    assert.deepEqual(extended.value.provenance, { reuse: "interval_cache", rawObservedAt: { fromMs: NOW, toMs: NOW + 20 } });
+    assert.ok(extended.finalHeights.includes("9") && extended.finalHeights.includes("12"),
+      "Both original cache boundaries are rechecked even when the requested interval clips the start");
+  }
+});
+
+test("scam RPC charges cached logs to the batch budget and separates cached scopes and topic filters", async () => {
+  const otherTopic = `0x${"77".repeat(32)}`;
+  const f = fixture({ head: 25, historyCache: historyCacheOptions(), limits: { maxLogs: 1 }, handle: (rpc) => {
+    if (rpc.method !== "eth_getLogs") return undefined;
+    return ok(rpc, [{ ...rawLog(10), blockTimestamp: q(1010), address: rpc.params[0].address,
+      topics: [rpc.params[0].topics[0][0]] }]);
+  } });
+  const collect = (filter) => f.source.withBatch(request(), async (batch) => batch.logs(await batch.pool(0), filter));
+  await collect(query("9", "12"));
+  const beforeOverflow = f.calls.length;
+  await assert.rejects(f.source.withBatch(request(), async (batch) => {
+    const pool = await batch.pool(0);
+    assert.equal((await batch.logs(pool, query("9", "12"))).provenance.reuse, "interval_cache");
+    return batch.logs(pool, query("9", "12"));
+  }), failure("resource_limit"));
+  assert.equal(f.calls.slice(beforeOverflow).filter(({ rpc }) => rpc.method === "eth_getLogs").length, 0,
+    "Cached entries count even when no response is downloaded");
+  for (const filter of [{ ...query("9", "12"), topics: [otherTopic] }, { ...query("9", "12"), scope: "factory" }]) {
+    const before = f.calls.length;
+    const result = await collect(filter);
+    assert.equal(result.value.provenance, undefined);
+    assert.equal(f.calls.slice(before).filter(({ rpc }) => rpc.method === "eth_getLogs").length, 1);
+    assert.equal(result.value.logs[0].address, filter.scope === "factory" ? FACTORY : POOL);
+    assert.deepEqual(result.value.logs[0].topics, filter.topics);
+  }
+});
+
+test("scam RPC invalidates cached history on boundary changes or head rollback and can subsequently fetch cold", async () => {
+  for (const mode of ["boundary", "rollback"]) {
+    let head = 25, changedBoundary = false;
+    const f = fixture({ historyCache: historyCacheOptions(), verification: { history: "rpc_anchor" }, handle: (rpc) => {
+      if (rpc.method === "eth_getBlockByNumber" && rpc.params[0] === "latest") return ok(rpc, header(head));
+      if (rpc.method === "eth_getBlockByNumber" && rpc.params[0] === q(9) && changedBoundary) {
+        return ok(rpc, { ...header(9), hash: blockHash(999) });
+      }
+      if (rpc.method === "eth_getLogs") return ok(rpc, [{ ...rawLog(10), blockTimestamp: q(1010) }]);
+      return undefined;
+    } });
+    const collect = () => f.source.withBatch(request(), async (batch) => batch.logs(await batch.pool(0), query("9", "12")));
+    await collect();
+    if (mode === "boundary") changedBoundary = true;
+    else head = 24;
+    await assert.rejects(collect(), failure("reorg"));
+    const beforeCold = f.calls.length;
+    const cold = await collect();
+    assert.equal(cold.value.provenance, undefined);
+    assert.equal(f.calls.slice(beforeCold).filter(({ rpc }) => rpc.method === "eth_getLogs").length, 1,
+      "An invalidated interval is downloaded again under the new stable reference");
+  }
+});
+
+test("scam RPC never commits earlier cache drafts or late replies from an aborted batch", async () => {
+  const entered = deferred(), late = deferred();
+  let delayedRequest, delayFactory = true;
+  const f = fixture({ head: 25, historyCache: historyCacheOptions(), handle: (rpc) => {
+    if (rpc.method !== "eth_getLogs") return undefined;
+    if (rpc.params[0].address === FACTORY && delayFactory) {
+      delayedRequest = rpc;
+      entered.resolve();
+      return late.promise;
+    }
+    return ok(rpc, [{ ...rawLog(10), address: rpc.params[0].address, blockTimestamp: q(1010) }]);
+  } });
+  const collect = async (batch) => {
+    const pool = await batch.pool(0);
+    const pair = await batch.logs(pool, query("9", "12"));
+    const factory = await batch.logs(pool, { ...query("9", "12"), scope: "factory" });
+    return [pair, factory];
+  };
+  const controller = new AbortController();
+  const rejected = assert.rejects(f.source.withBatch(request({ signal: controller.signal }), collect), failure("aborted"));
+  await entered.promise;
+  controller.abort();
+  await rejected;
+  delayFactory = false;
+  late.resolve(ok(delayedRequest, [{ ...rawLog(10), address: FACTORY, blockTimestamp: q(1010) }]));
+  await turn();
+  const beforeFresh = f.calls.length;
+  const fresh = await f.source.withBatch(request({ planId: "after-abort" }), collect);
+  assert.ok(fresh.value.every((scan) => scan.provenance === undefined));
+  assert.equal(f.calls.slice(beforeFresh).filter(({ rpc }) => rpc.method === "eth_getLogs").length, 2,
+    "Neither the completed pair draft nor the late factory response became reusable");
+});
+
+test("scam RPC prevents stale-generation batches from publishing or deleting replacement cache entries", async () => {
+  let head = 25;
+  const ready = deferred(), release = deferred();
+  const f = fixture({ historyCache: historyCacheOptions(), handle: (rpc) => {
+    if (rpc.method === "eth_getBlockByNumber" && rpc.params[0] === "latest") return ok(rpc, header(head));
+    if (rpc.method === "eth_getLogs") return ok(rpc, BigInt(rpc.params[0].fromBlock) <= 10n
+      && BigInt(rpc.params[0].toBlock) >= 10n ? [{ ...rawLog(10), blockTimestamp: q(1010) }] : []);
+    return undefined;
+  } });
+  const collect = async (batch) => batch.logs(await batch.pool(0), query("9", "12"));
+  await f.source.withBatch(request(), collect);
+  const stale = assert.rejects(f.source.withBatch(request({ planId: "old-generation" }), async (batch) => {
+    // Completing the extension creates an unpublished cache draft before the
+    // next batch invalidates its generation.
+    const scan = await batch.logs(await batch.pool(0), query("9", "13"));
+    assert.equal(scan.provenance.reuse, "interval_cache");
+    ready.resolve();
+    await release.promise;
+    return scan;
+  }), failure("reorg"));
+  await ready.promise;
+  head = 24;
+  await assert.rejects(f.source.withBatch(request({ planId: "rollback" }), collect), failure("reorg"));
+  const replacement = await f.source.withBatch(request({ planId: "new-generation" }), collect);
+  assert.equal(replacement.value.provenance, undefined);
+  release.resolve();
+  await stale;
+  const beforeReuse = f.calls.length;
+  const reused = await f.source.withBatch(request({ planId: "after-stale-failure" }), collect);
+  assert.equal(reused.value.provenance.reuse, "interval_cache");
+  assert.equal(f.calls.slice(beforeReuse).filter(({ rpc }) => rpc.method === "eth_getLogs").length, 0,
+    "Rejecting an older generation must leave the newly verified cache intact");
 });

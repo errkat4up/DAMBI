@@ -157,8 +157,8 @@ export async function buildPoolHistory(
       for (const [number, last] of perBlock) {
         let tMs: number;
         if (last.log.timestampMs !== undefined) {
-          // This value is usable only inside the unpublished draft. The raw
-          // batch still checks its hash AND time against an actual final header.
+          // Draft use does not promote an RPC log time to a header observation.
+          // The raw batch applies the configured final verification mode.
           tMs = times.logTime(last.log);
         } else {
           const block = await times.block(number);

@@ -32,10 +32,10 @@ const withTimestamp = (log) => ({ ...log, blockTimestamp: q(BigInt(log.blockNumb
 
 function fixture({ head = 20, target = subject(), token0 = target.token, token1 = target.quoteToken,
   seed = [100n, 200n], decimals = [18, 6], logs = [], maxBlocksPerQuery = 10_000,
-  headerFor = header, handle } = {}) {
+  headerFor = header, handle, verification } = {}) {
   const calls = [], preflights = [];
   const source = createScamRpcSource({ chainId: 91342, endpoint: { rpcUrl: "https://rpc.invalid/history" },
-    factories: [target.factory], quoteTokens: [target.quoteToken], clock: { now: () => NOW },
+    factories: [target.factory], quoteTokens: [target.quoteToken], clock: { now: () => NOW }, verification,
     limits: { maxRequests: 300, maxResponseBytes: 65_536, maxTotalResponseBytes: 1_000_000,
       maxLogs: 100, maxBlocksPerQuery, concurrency: 2, maxRetries: 0, retryDelayMs: 0 },
     fetch: async (_url, init) => {
@@ -157,6 +157,17 @@ test("pool history uses optional log times for identical grids while keeping act
   const mixed = fixture({ logs: [withTimestamp(logs[0]), logs[1]] });
   assert.deepEqual((await mixed.build(grids)).value, expected.value);
   assert.deepEqual(mixed.preflights, [["17"]]);
+
+  const anchorTimed = fixture({ logs: logs.map(withTimestamp), verification: { history: "rpc_anchor" } });
+  assert.deepEqual((await anchorTimed.build(grids, { maxBlockLookups: 3 })).value, expected.value);
+  const anchorMixed = fixture({ logs: [withTimestamp(logs[0]), logs[1]], verification: { history: "rpc_anchor" } });
+  assert.deepEqual((await anchorMixed.build(grids)).value, expected.value);
+  assert.deepEqual(anchorMixed.preflights, [["17"]]);
+  for (const n of [12, 17]) {
+    const reads = (f) => f.calls.filter((rpc) => rpc.method === "eth_getBlockByNumber" && rpc.params[0] === q(n)).length;
+    assert.equal(reads(anchorTimed), 0, "Anchor mode omits timestamped log-only headers without changing grids");
+    assert.equal(reads(anchorMixed), n === 17 ? 2 : 0, "Missing timestamps still need an actual header and final recheck");
+  }
 });
 
 test("pool history carries raw chunk gaps through the millisecond before a later Sync on every candidate", async () => {

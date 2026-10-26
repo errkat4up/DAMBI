@@ -32,7 +32,8 @@ export function createBlockTimeIndex(batch: ScamRpcBatch, options: BlockTimeOpti
   if (!integer(baseTime) || !hash(baseHash)) return fail("invalid_request");
   const pending = new Map<string, Promise<RpcBlock>>();
   // Log timestamps are draft evidence, not fabricated headers or cached block
-  // lookups. The raw batch must compare them with actual headers before publish.
+  // lookups. The raw batch applies the selected final verification mode; log-only
+  // timestamps are not individually header-checked in rpc_anchor mode.
   const observed: Pick<RpcBlock, "number" | "hash" | "timestampMs">[] = [];
   let terminal: ScamRpcError | undefined;
   const reject = (reason: "invalid_response" | "reorg" | "resource_limit"): never => {

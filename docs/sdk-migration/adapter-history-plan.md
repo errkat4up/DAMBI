@@ -1,8 +1,10 @@
 # 어댑터 이력 조회·검증 개선 세부 구현 계획서
 
-상태: **설계안 v0.1 / AH1 완료, AH2 미착수**. 작업 브랜치: `feat/adapter-history`. 출발 커밋: `07eb4f4` — SF4-5 provider 통합·진단 checkpoint. 날짜별 일정 대신 변경 계약, 구현 순서, 완료 기준을 정의한다.
+상태: **설계안 v0.2 / AH1·AH2·AH4 완료, AH5 통합·전체 성능 검증 대기**. 작업 브랜치: `feat/adapter-history`. 출발 커밋: `07eb4f4` — SF4-5 provider 통합·진단 checkpoint. 날짜별 일정 대신 변경 계약, 구현 순서, 완료 기준을 정의한다.
 
 이 문서는 **과거 로그를 가져오는 어댑터의 첫 조회·반복 조회 비용을 줄이는 코드 구현 계획**이다. [기존 어댑터 계획](adapter-development-plan.md)의 후속이며, [Scam Filter 계획](../scam-filter/mvp-design-plan.md)의 SF4-5에서 분리한 작업이다. 조사 근거는 [어댑터 이력 검증 개선안](</Users/spu/SDKdambi/reports/어댑터 이력 검증 개선안.md>)에 있다. 원격 자료의 변경이 이 계획의 계약을 자동으로 바꾸지는 않는다.
+
+사용자 확정 목표는 **사전 준비를 허용한 서명 직전 2.5초**다. 준비 시간과 새 기준에서 검사하는 시간을 분리하며, 첫 cold 조회를 2.5초 안에 끝냈다고 해석하지 않는다. 알고리즘을 제외한 어댑터 실측이 전체 서명 검사 성능을 증명하지는 않는다.
 
 ## 1. 해결할 문제와 판단 근거
 
@@ -74,7 +76,7 @@ type HistoryVerification = "all_event_headers" | "rpc_anchor";
 type StateBinding = "number_recheck" | "block_hash_canonical";
 ```
 
-기본값은 기존 동작인 `all_event_headers` + `number_recheck`다. 구간 재사용은 기본 비활성이다. 옵션은 `ScamRpcOptions.verification`의 `history`·`stateBinding`으로 받는다. AH1-1에서는 기존 두 값만 지원하며, 후속 모드를 지정하면 `invalid_config`로 거부한다.
+기본값은 기존 동작인 `all_event_headers` + `number_recheck`다. 구간 재사용은 기본 비활성이다. 옵션은 `ScamRpcOptions.verification`의 `history`·`stateBinding`으로 받는다. AH2부터 `rpc_anchor`를 선택할 수 있으며, `block_hash_canonical`은 AH3 구현 전까지 `invalid_config`로 거부한다.
 
 | 검사 | all_event_headers | rpc_anchor |
 | --- | --- | --- |
@@ -127,12 +129,13 @@ type StateBinding = "number_recheck" | "block_hash_canonical";
 
 ### 6.1 최소 구현 범위
 
-첫 조회 수정 후에도 반복 비용이 의미 있게 남으면 AH4를 진행한다. 저장소는 `createScamRpcSource()` 인스턴스 내부에 두고, 같은 인스턴스를 재사용한 경우에만 hit가 발생한다. **완료된 정규화 원자료 로그 구간**을 저장하며 Fact·분석 결과·grid·getReserves·getCode·decimals는 저장하지 않는다.
+AH2 실측 후 사용자가 사전 준비를 허용하여 AH4를 진행한다. `rpc.historyCache`를 명시한 경우에만 `createScamRpcSource()` 인스턴스 내부에 저장소를 두고, 같은 provider를 재사용한 경우에만 hit가 발생한다. **완료된 정규화 원자료 로그 구간**을 저장하며 Fact·분석 결과·grid·getReserves·getCode·decimals는 저장하지 않는다.
 
 - key: source 인스턴스, chain, 검증한 pool/factory 및 대상 token, scope·조회 주소·정규화한 topic 필터, codec·검증 설정 버전. source가 달라지면 공유하지 않는다.
 - value: inclusive 블록 범위, 실제 시작·끝 헤더, 로그의 hash/time과 출처, 최초 수집 시각, 수집 시 검증 방식, 완료 표시.
 - 선택 설정에 `maxBytes`, `maxEntries`, 보관 블록 범위와 TTL 상한을 명시한다. 항목 전체 단위로 퇴출하고, 큰 항목은 저장을 생략한다. 저장 공간 부족만으로 정상 조회를 실패시키지 않는다.
 - 구간 자료와 완료 표시는 하나의 항목으로 원자적으로 반영한다. 완료된 빈 구간도 유효하다. 실패·누락 범위는 완료로 저장하지 않는다. 첫 구현은 `missing=[]`인 완료 scan만 저장한다.
+- 첫 구현은 key마다 최신 완료 scan 하나를 보관한다. 전체가 재사용된 요청은 원래 구간·TTL을 유지한다. 새 구간을 합쳐 저장할 때만 보관 시각이 갱신되며 원자료 최초 관측 시각은 보존된다. 저장소 바이트 상한은 소유 JSON의 UTF-8 크기이며 JS 힙 전체의 추정치가 아니다.
 
 ### 6.2 새 기준 블록에서 사용하는 순서
 
@@ -142,7 +145,7 @@ type StateBinding = "number_recheck" | "block_hash_canonical";
 4. 저장 자료와 새 자료를 기존 정렬·중복 충돌 검사로 합친다. 성공한 빈 구간과 미수집 구간을 구분한다.
 5. 새 분석의 경계·seed·profile 상태를 조회하고 기존 builder로 새 T의 snapshot을 만든다. 과거 Fact의 reference를 바꿔 붙이지 않는다.
 6. 캐시 경계·새 근거를 포함한 같은 final selector로 preflight와 최종 검사를 수행한다.
-7. `withBatch`의 검증·취소·기한 확인이 모두 끝난 뒤 그 batch의 새 완결 구간만 저장한다. 같은 provider fetch의 뒤쪽 그룹이 실패해도 앞서 독립 검증을 마친 원자료는 남길 수 있다. **provider의 부분 FactBatch 반환은 계속 금지**한다.
+7. 저장 후보 복사·크기 계산은 최종 검사 전에 수행하고, `withBatch`의 검증·취소·기한 확인이 모두 끝난 뒤 동기 commit한다. 같은 provider fetch의 뒤쪽 그룹이나 결과 포장이 실패해도 앞서 독립 검증을 마친 원자료는 남길 수 있다. **provider의 부분 FactBatch 반환은 계속 금지**한다.
 
 새 Fact의 `observedAt`은 이번 조회·검증의 시작 시각이며 원자료 최초 수집 시각은 metadata에 별도로 보존한다. cache hit로 원자료의 나이를 덮어쓰거나 TTL만으로 체인 정합성을 주장하지 않는다.
 
@@ -159,7 +162,15 @@ type StateBinding = "number_recheck" | "block_hash_canonical";
 
 source에 무효화 세대 번호(generation)를 두고 각 batch가 시작 시 이를 고정한다. 최종 공개·저장 직전에 세대가 같은지 확인하며 달라졌으면 `reorg`로 실패시킨다. 이전 세대 batch의 늦은 재삽입뿐 아니라 이미 읽은 캐시로 만든 결과의 공개도 금지한다. 첫 버전은 진행 중 요청을 공유하는 single-flight를 넣지 않고 caller별 취소·기한을 독립 유지한다. 완료된 불변 entry만 공유한다.
 
-부분 헤더만으로 연속 부모 체인을 검증했다고 말하지 않는다. 공통 조상 탐색·깊은 reorg 부분 rollback·safe/finalized 최적화는 후속이다. `confirmDepth: 2`를 finalized와 동일시하지 않는다. IndexedDB·prepareHistory·백그라운드 준비·외부 인덱서는 이 계획의 필수 항목이 아니다.
+부분 헤더만으로 연속 부모 체인을 검증했다고 말하지 않는다. 공통 조상 탐색·깊은 reorg 부분 rollback·safe/finalized 최적화는 후속이다. `confirmDepth: 2`를 finalized와 동일시하지 않는다. IndexedDB·외부 인덱서는 이번 범위에 넣지 않는다.
+
+### 6.4 서명 전 준비와 검사
+
+`createScamFactProvider()`의 `prepare(calls, { planId, timeoutMs, signal? })`는 캐시 설정이 있는 provider에서만 동작한다. 호스트가 사전에 준비할 스캠 대상의 paired calls를 전달하며, 1~60,000ms의 별도 준비 예산을 명시한다. 기존 데이터 경로를 실행하되 계산한 Fact는 반환하지 않는다. 준비의 판정이나 만료된 Core plan을 서명에 재사용하지 않는다.
+
+서명 시에는 새 plan의 calls를 동일 provider의 기존 `fetch()`/Core `check()` 경로에서 처리한다. `limits.timeoutMs`는 여전히 2,500ms이며 최신 기준·seed·상태를 다시 읽고 원자료의 차집합을 채운다. 캐시 만료·worker 재시작·미준비 대상은 cold 경로가 될 수 있고, 제한 시간 안에 못 끝나면 명시적인 판정 불가로 남긴다. 자동으로 검증·기간·로그 상한을 낮추지 않는다. 호스트 UI 연결은 후속 통합 범위다.
+
+결과 크기 검사는 공통 JSON 검증 순회를 복사 없이 수행하고 마지막 metadata 포함 바이트 수를 재사용한다. getter·Unicode·순환·깊이·조기 크기 제한은 유지한다.
 
 ## 7. 단계별 구현·완료 기준
 
@@ -169,14 +180,14 @@ source에 무효화 세대 번호(generation)를 두고 각 batch가 시작 시 
 | --- | --- | --- | --- |
 | **AH1-1 계약·근거 연결** | §4 설정과 SDK metadata, Rust 파싱·binding, legacy 호환 의미 고정 | 잘못된·불일치 metadata 거부, 실제 근거가 verdict까지 보존; 알고리즘 wire 의미 유지 | 완료 — 사용자 실행 결과 확인 |
 | **AH1-2 최종 검증 분리** | 역할별 evidence, 공통 selector·preflight·finalizer | 기본 모드에서 기존 대상·결과 동일, 실제 선택과 비용 일치 | 완료 — 사용자 실행 결과 확인 |
-| **AH2 RPC 신뢰 모드** | 명시적 rpc_anchor, 계측·probe 옵션 | 시간 제공 로그가 늘어도 로그 전용 final 요청은 증가하지 않음; 남겨야 할 검사·실패 격리 유지 | 미착수 |
+| **AH2 RPC 신뢰 모드** | 명시적 rpc_anchor, 계측·probe 옵션 | 시간 제공 로그가 늘어도 로그 전용 final 요청은 증가하지 않음; 남겨야 할 검사·실패 격리 유지 | 완료 — 사용자 시험 통과·첫 cold 조회 partial 확인 |
 | **AH3 해시 상태 결속** | 모든 상태 selector 공통화, EIP-1898 선택 지원 | 메서드별 블록 해시 정확, 오류 fallback 없음; 실연결 지원은 별도 확인 | 미착수 / AH2와 독립 가능한 후속 |
-| **AH4-1 구간 저장·차집합** | bounded memory store, 완료·빈 구간·필터 분리 | 같은 T/증가한 T에서 필요한 누락 구간만 조회, 새 Fact 재구성 | 조건부 대기 |
-| **AH4-2 재확인·무효화** | 모드별 cache evidence, generation·원자적 저장 | reorg·취소·늦은 응답으로 자료/결과 오염 없음, 상한 유지 | 조건부 대기 |
+| **AH4-1 구간 저장·차집합** | bounded memory store, 완료·빈 구간·필터 분리, prepare API | 같은 T/증가한 T에서 필요한 누락 구간만 조회, 새 Fact 재구성 | 완료 — 사용자 시험·준비 후 단발 조회 확인 |
+| **AH4-2 재확인·무효화** | 모드별 cache evidence, generation·원자적 저장 | reorg·취소·늦은 응답으로 자료/결과 오염 없음, 상한 유지 | 완료 — 사용자 회귀 시험 통과 |
 | **AH5-1 SDK 통합** | manual evaluate/check 및 정책·수명주기 회귀 | 두 진입점의 근거 일치, 기존 deny/warn·실패 이유 보존 | 미착수 |
 | **AH5-2 실측·SF4-5 인계** | cold/동일 T/증분 비교, 실제 사용 호스트 확인 | 데이터 완료·부분·실패와 비용 구분, 제품 목표 충족 여부 명시 | 미착수 |
 
-실행 순서는 **AH1 → AH2 → 첫 cold 진단 → 필요한 경우 AH3·AH4 → AH5**다. AH3의 endpoint 지원 대기는 AH2 측정을 막지 않는다. AH4는 AH2의 비용 결과로 필요성을 판단한다. 비캐시 경로가 합의한 반복 성능까지 충족하면 AH4를 보류하고 그 이유만 남길 수 있다.
+현재 실행 순서는 **AH1 → AH2 → 첫 cold 진단 → AH4·사전 준비 → AH5**다. 사용자 확정 목표에 따라 AH4를 진행하며, AH3는 별도 후속으로 남긴다. AH3의 endpoint 지원 대기는 구간 재사용과 준비 후 2,500ms 데이터 경로 측정을 막지 않는다.
 
 AH2 모드를 구현하는 것과 제품에서 기본 활성화하는 것은 별개다. 이 계획은 **선택 기능 제공**을 권장하며 기존 기본값은 바꾸지 않는다. 제품에서 사용할 검증 수준은 실측 결과와 보장 차이를 확인한 뒤 확정한다.
 

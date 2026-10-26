@@ -14,7 +14,7 @@ export type RpcLog = {
   readonly address: `0x${string}`;
   readonly blockNumber: string;
   readonly blockHash: `0x${string}`;
-  /** Optional RPC-provided time; publication still requires a real header check. */
+  /** Optional RPC-provided time; final cross-checking follows the selected history mode. */
   readonly timestampMs?: number;
   readonly transactionHash: `0x${string}`;
   readonly transactionIndex: number;

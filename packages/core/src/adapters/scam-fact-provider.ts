@@ -4,7 +4,7 @@ import type { FactBatch, PlannedCall } from "../types/plan.js";
 import type { Address, MethodVerification, PlannedScamCall, PoolHistoryValue, Subject, TokenProfileValue, VerificationTimeSource } from "../types/scam.js";
 import { CoreError } from "../types/errors.js";
 import { ScamDataError, type ScamDataFailure } from "../types/scam-error.js";
-import { copyJson } from "../runtime/json.js";
+import { copyJson, measureJson } from "../runtime/json.js";
 import { AdapterError } from "./errors.js";
 import { callSignal } from "./http.js";
 import { address } from "./scam-rpc-codec.js";
@@ -50,6 +50,17 @@ export interface ScamFactProviderOptions {
   readonly limits: ScamProviderLimits;
   /** Data-path metrics only: excludes the algorithm and Core evaluation. */
   readonly onMetrics?: (metrics: ScamProviderMetrics) => void;
+}
+export interface ScamPreparationOptions extends CallOptions {
+  readonly planId: string;
+  /** Independent preparation budget; never replaces the fetch deadline. */
+  readonly timeoutMs: number;
+}
+export interface ScamFactProvider extends FactProvider {
+  /** Fill this provider's bounded raw-history cache before signing. No Fact or
+   * analysis result is returned; fetch still builds and checks a fresh result.
+   */
+  prepare(calls: readonly PlannedCall[], options: ScamPreparationOptions): Promise<void>;
 }
 
 type HistoryCall = Extract<PlannedScamCall, { method: "scam.pool_history" }>;
@@ -148,6 +159,7 @@ function ownConfig(input: ScamFactProviderOptions) {
     const source = createScamRpcSource(input.rpc); // Owns endpoint, headers, fetch and raw limits now.
     const now = input.rpc.clock === undefined ? Date.now : input.rpc.clock.now.bind(input.rpc.clock);
     return { limits, history, profile, factories, admins, source, now, chainId: input.rpc.chainId,
+      preparationEnabled: input.rpc.historyCache !== undefined,
       policyFetch: input.policy.fetch.bind(input.policy), onMetrics: input.onMetrics };
   } catch { throw new AdapterError("INVALID_CONFIG", "Scam Fact provider configuration is invalid."); }
 }
@@ -199,41 +211,49 @@ function ownGroups(input: readonly PlannedCall[], planId: string, config: Return
  * counting a log timestamp as an independently verified header. Both methods
  * already receive their shared reference from an actual header.
  */
+type MethodRawProvenance = Pick<MethodVerification, "timeSources" | "reuse" | "rawObservedAt">;
+
 function methodTimeSources(batch: ScamRpcBatch) {
   const sources = new Set<VerificationTimeSource>(["header"]);
+  let reuse: MethodVerification["reuse"] = "none";
+  let fromMs = batch.observedAt, toMs = batch.observedAt;
   return {
     batch: Object.freeze({ ...batch,
       async logs(pool: Parameters<ScamRpcBatch["logs"]>[0], query: Parameters<ScamRpcBatch["logs"]>[1]) {
         const scan = await batch.logs(pool, query);
         if (scan.logs.some((log) => log.timestampMs !== undefined)) sources.add("rpc_log");
+        if (scan.provenance) {
+          reuse = "interval_cache";
+          fromMs = Math.min(fromMs, scan.provenance.rawObservedAt.fromMs);
+          toMs = Math.max(toMs, scan.provenance.rawObservedAt.toMs);
+        }
         return scan;
       },
     } satisfies ScamRpcBatch),
-    snapshot: (): readonly VerificationTimeSource[] => Object.freeze([...sources]),
+    snapshot: (): MethodRawProvenance => Object.freeze({ timeSources: Object.freeze([...sources]),
+      reuse, rawObservedAt: Object.freeze({ fromMs, toMs }) }),
   };
 }
 
-function boundResult(planId: string, results: Record<string, FactResult>, maxBytes: number): void {
-  try { copyJson({ planId, results }, "INVALID_REQUEST", maxBytes); }
+function boundResult(planId: string, results: Record<string, FactResult>, maxBytes: number): number {
+  try { return measureJson({ planId, results }, "INVALID_REQUEST", maxBytes); }
   catch (error) {
     if (error instanceof CoreError && error.code === "LIMIT_EXCEEDED") throw new ScamRpcError("resource_limit");
     throw error;
   }
 }
 
-/** No cross-fetch cache, default capabilities, algorithm, or policy projection.
+/** Optional raw-history reuse, no default capabilities, algorithm or policy projection.
  * The same provider handles manual fetch/evaluate and Core.check(). Each group
  * is published only after its final canonical checks, and no partial batch is
  * returned if another group fails. RPC budgets are per group; the deadline and
  * request/result sizes bound the complete fetch.
  */
-export function createScamFactProvider(options: ScamFactProviderOptions): FactProvider {
+export function createScamFactProvider(options: ScamFactProviderOptions): ScamFactProvider {
   const config = ownConfig(options);
-  return Object.freeze({
-    async fetch(calls: readonly PlannedCall[], context: CallOptions & { readonly planId: string }): Promise<FactBatch> {
+  const execute = async (calls: readonly PlannedCall[], context: CallOptions & { readonly planId: string },
+    timeoutMs: number): Promise<FactBatch> => {
       if (!Array.isArray(calls)) return invalid();
-      // Existing policy calls stay on their original provider and error channel.
-      if (!calls.some((call) => typeof call?.method === "string" && call.method.startsWith("scam."))) return config.policyFetch(calls, context);
       const callCount = calls.length;
       const totals = { requests: 0, retries: 0, receivedBytes: 0, logChunks: 0, failedChunks: 0 };
       let started: number | undefined, targets = 0, resultBytes = 0;
@@ -246,9 +266,10 @@ export function createScamFactProvider(options: ScamFactProviderOptions): FactPr
         const planId = context?.planId, signal = callSignal(context);
         const groups = ownGroups(calls, planId, config);
         targets = groups.reduce((sum, group) => sum + group.targets.size, 0);
-        const deadlineMs = started + config.limits.timeoutMs;
+        const deadlineMs = started + timeoutMs;
         if (!Number.isSafeInteger(deadlineMs)) return invalid();
         let results: Record<string, FactResult> = Object.create(null) as Record<string, FactResult>;
+        let encodedBytes: number | undefined;
         let partial = false;
         for (const group of groups) {
           const members = [...group.targets.values()];
@@ -266,7 +287,7 @@ export function createScamFactProvider(options: ScamFactProviderOptions): FactPr
             },
           }, async (batch) => {
             const draft: Record<string, FactResult> = Object.assign(Object.create(null), results);
-            const timeSources = new Map<string, readonly VerificationTimeSource[]>();
+            const provenance = new Map<string, MethodRawProvenance>();
             // Sequential targets bound peak normalized memory and avoid detached
             // I/O after a failing target. The raw source bounds HTTP concurrency.
             for (let i = 0; i < members.length; i++) {
@@ -275,12 +296,12 @@ export function createScamFactProvider(options: ScamFactProviderOptions): FactPr
               operation = "pool_history";
               const historyTimes = methodTimeSources(batch);
               const history = await buildPoolHistory(historyTimes.batch, pool, target.history!.params, config.history);
-              timeSources.set(target.history!.callId, historyTimes.snapshot());
+              provenance.set(target.history!.callId, historyTimes.snapshot());
               operation = "token_profile";
               const profileTimes = methodTimeSources(batch);
               const profile = await buildTokenProfile(profileTimes.batch, pool, target.profile!.params, { ...config.profile,
                 factorySupport: config.factories.get(pool.subject.factory), adminSupport: config.admins.get(pool.subject.token) });
-              timeSources.set(target.profile!.callId, profileTimes.snapshot());
+              provenance.set(target.profile!.callId, profileTimes.snapshot());
               operation = "result";
               for (const [callId, value] of [[target.history!.callId, history], [target.profile!.callId, profile]] as const) {
                 draft[callId] = { value, source: `scam-rpc:eip155:${config.chainId}`, observedAt: batch.observedAt,
@@ -294,28 +315,28 @@ export function createScamFactProvider(options: ScamFactProviderOptions): FactPr
               boundResult(planId, draft, config.limits.maxResultBytes);
             }
             operation = "final_recheck";
-            return { draft, timeSources };
+            return { draft, provenance };
           });
           operation = "result";
           results = response.value.draft;
-          for (const [callId, timeSources] of response.value.timeSources) {
+          for (const [callId, provenance] of response.value.provenance) {
             const fact = results[callId];
             const value = fact.value as PoolHistoryValue | TokenProfileValue;
-            const verification: MethodVerification = Object.freeze({ version: 1, ...response.verification,
-              timeSources, reuse: "none", rawObservedAt: Object.freeze({ fromMs: response.observedAt, toMs: response.observedAt }),
+            const verification: MethodVerification = Object.freeze({ version: 1, ...response.verification, ...provenance,
               verifiedAt: response.verifiedAt });
             results[callId] = { ...fact, value: { ...value, verification } };
           }
           // The completed verification metadata belongs to the same result budget.
-          boundResult(planId, results, config.limits.maxResultBytes);
+          encodedBytes = boundResult(planId, results, config.limits.maxResultBytes);
         }
         operation = "result";
         const batch = { planId, results };
-        const encodedBytes = new TextEncoder().encode(JSON.stringify(batch)).byteLength;
-        if (encodedBytes > config.limits.maxResultBytes) throw new ScamRpcError("resource_limit");
+        // The private envelope has not changed since its last metadata-inclusive
+        // measurement. Avoid serializing and allocating a UTF-8 copy just to count it.
+        const finalBytes = encodedBytes ?? boundResult(planId, results, config.limits.maxResultBytes);
         if (signal?.aborted) throw new ScamRpcError("aborted");
         if (now() < started || now() >= deadlineMs) throw new ScamRpcError("timeout");
-        resultBytes = encodedBytes;
+        resultBytes = finalBytes;
         outcome = partial ? "partial" : "success";
         return batch;
       } catch (error) {
@@ -331,6 +352,23 @@ export function createScamFactProvider(options: ScamFactProviderOptions): FactPr
           calls: callCount, targets, resultBytes, durationMs });
         try { void Promise.resolve(config.onMetrics?.(metric)).catch(() => {}); } catch { /* Observer isolation. */ }
       }
+  };
+  return Object.freeze({
+    async fetch(calls: readonly PlannedCall[], context: CallOptions & { readonly planId: string }): Promise<FactBatch> {
+      if (!Array.isArray(calls)) return invalid();
+      // Existing policy calls stay on their original provider and error channel.
+      if (!calls.some((call) => typeof call?.method === "string" && call.method.startsWith("scam."))) return config.policyFetch(calls, context);
+      return execute(calls, context, config.limits.timeoutMs);
+    },
+    async prepare(calls: readonly PlannedCall[], context: ScamPreparationOptions): Promise<void> {
+      const timeoutMs = context?.timeoutMs;
+      if (!config.preparationEnabled || !integer(timeoutMs, 1) || timeoutMs > 60_000) {
+        throw new AdapterError("INVALID_CONFIG", "Scam history preparation requires a cache and a bounded timeout.");
+      }
+      if (!Array.isArray(calls) || calls.length === 0) return invalid();
+      // execute validates complete scam-only pairs before acquiring a reference.
+      // Discard computed Facts; only the source's verified raw cache survives.
+      await execute(calls, context, timeoutMs);
     },
   });
 }

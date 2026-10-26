@@ -9,6 +9,7 @@ const POOL = `0x${"11".repeat(20)}`;
 const FACTORY = `0x${"22".repeat(20)}`;
 const TOKEN = `0x${"33".repeat(20)}`;
 const QUOTE = `0x${"44".repeat(20)}`;
+const historyCache = () => ({ maxEntries: 8, maxBytes: 1_000_000, ttlMs: 60_000, maxBlockSpan: 10_000 });
 const context = () => ({ planId: "opaque-plan:sf4-5", signal: new AbortController().signal });
 const failure = (reason) => ({ name: "ScamDataError", reason });
 const subject = (actionPaths = ["actions[0]"]) => ({ chainId: CHAIN, venue: "uniswap_v2",
@@ -57,6 +58,96 @@ test("scam provider delegates ordinary batches unchanged and rejects mixed chann
   assert.equal(f.raw.calls.length, 0);
 });
 
+test("scam preparation requires a bounded cache budget and never delegates policy or incomplete calls", async () => {
+  const unavailable = setup();
+  await assert.rejects(unavailable.create().prepare(calls(), { ...context(), timeoutMs: 1_000 }),
+    { name: "AdapterError", code: "INVALID_CONFIG" });
+  assert.equal(unavailable.raw.calls.length, 0);
+
+  let delegated = 0;
+  const f = setup({ providerOptions: { policy: { async fetch() { delegated++; throw new Error("must not delegate"); } } } });
+  f.config.rpc = { ...f.raw.rpc, historyCache: historyCache() };
+  const provider = f.create();
+  for (const timeoutMs of [undefined, 0, -1, 1.5, 60_001]) {
+    await assert.rejects(provider.prepare(calls(), { ...context(), timeoutMs }), { name: "AdapterError", code: "INVALID_CONFIG" });
+  }
+  const ordinary = [{ callId: "policy", manifestId: "policy", method: "eth.balance", params: {}, optional: false, outputs: [] }];
+  for (const input of [[], ordinary, [...ordinary, ...calls()], calls().slice(0, 1)]) {
+    await assert.rejects(provider.prepare(input, { ...context(), timeoutMs: 1_000 }), failure("invalid_scam_input"));
+  }
+  assert.equal(delegated, 0);
+  assert.equal(f.raw.calls.length, 0, "Preparation validates complete scam-only pairs before RPC work");
+});
+
+test("scam preparation reuses raw history while a new plan rebuilds state and preserves original observation times", async () => {
+  const metrics = [];
+  const f = setup({ onMetrics: (metric) => metrics.push(metric) });
+  let now = NOW, prepared = false;
+  const originalFetch = f.raw.rpc.fetch;
+  f.config.rpc = { ...f.raw.rpc, historyCache: historyCache(), verification: { history: "rpc_anchor" },
+    clock: { now: () => now }, fetch: async (...args) => {
+      const rpc = JSON.parse(args[1].body);
+      const response = await originalFetch(...args);
+      if (prepared && rpc.method === "eth_call" && rpc.params[0].data === "0x0902f1ac") {
+        const body = await response.json();
+        body.result = `0x${1000n.toString(16).padStart(64, "0")}${2000n.toString(16).padStart(64, "0")}${"0".repeat(64)}`;
+        return new Response(JSON.stringify(body));
+      }
+      return response;
+    } };
+  const provider = f.create();
+  assert.equal(await provider.prepare(calls({ prefix: "prepared", group: "prepare-group" }),
+    { ...context(), planId: "preparation", timeoutMs: 1_000 }), undefined);
+  const before = f.raw.calls.length;
+  assert.ok(f.raw.calls.some((rpc) => rpc.method === "eth_getLogs"));
+  prepared = true;
+  now += 20;
+  const batch = await provider.fetch(calls({ prefix: "sign", group: "sign-group" }), { ...context(), planId: "fresh-sign-plan" });
+  assert.equal(batch.planId, "fresh-sign-plan");
+  assert.deepEqual(Object.keys(batch.results), ["sign:history", "sign:profile"]);
+  const history = batch.results["sign:history"], profile = batch.results["sign:profile"];
+  assert.equal(history.observedAt, NOW + 20);
+  assert.equal(profile.observedAt, NOW + 20);
+  assert.equal(history.value.referenceGroupId, "sign-group");
+  assert.equal(history.value.histories[0].history.points[0].reserveQuote, "2000",
+    "The signing fetch rebuilds snapshots from fresh state instead of returning prepared Facts");
+  assert.deepEqual(history.value.verification.rawObservedAt, { fromMs: NOW, toMs: NOW + 20 });
+  assert.equal(history.value.verification.reuse, "interval_cache");
+  assert.equal(history.value.verification.verifiedAt, NOW + 20);
+  assert.equal(profile.value.verification.reuse, "none", "A history cache hit does not mark the unrelated profile as reused");
+  assert.deepEqual(profile.value.verification.rawObservedAt, { fromMs: NOW + 20, toMs: NOW + 20 });
+  const after = f.raw.calls.slice(before);
+  assert.equal(after.filter((rpc) => rpc.method === "eth_getLogs").length, 0);
+  assert.ok(after.some((rpc) => rpc.method === "eth_call" && rpc.params[0].data === "0x0902f1ac"));
+  assert.ok(after.some((rpc) => rpc.method === "eth_getBlockByNumber"), "Cached boundaries still receive current checks");
+  assert.equal(metrics[1].resultBytes, Buffer.byteLength(JSON.stringify(batch), "utf8"));
+});
+
+test("scam preparation keeps its separate deadline and never returns or caches a failed draft", async () => {
+  const f = setup();
+  let now = NOW;
+  const originalFetch = f.raw.rpc.fetch;
+  f.config.limits.timeoutMs = 50;
+  f.config.rpc = { ...f.raw.rpc, historyCache: historyCache(), clock: { now: () => now }, fetch: (...args) => {
+    if (JSON.parse(args[1].body).method === "eth_chainId") now += 100;
+    return originalFetch(...args);
+  } };
+  const provider = f.create();
+  assert.equal(await provider.prepare(calls(), { ...context(), timeoutMs: 1_000 }), undefined);
+  await assert.rejects(provider.fetch(calls(), context()), failure("timeout"), "Preparation must not enlarge the signing-fetch budget");
+
+  const metrics = [];
+  const failing = setup({ rawFailure: "reorg", onMetrics: (metric) => metrics.push(metric) });
+  failing.config.rpc = { ...failing.raw.rpc, historyCache: historyCache() };
+  const checked = failing.create();
+  await assert.rejects(checked.prepare(calls(), { ...context(), timeoutMs: 1_000 }), failure("reorg"));
+  assert.equal(metrics[0].resultBytes, 0);
+  const before = failing.raw.calls.length;
+  const batch = await checked.fetch(calls(), { ...context(), planId: "after-failed-preparation" });
+  assert.equal(batch.results["a:history"].value.verification.reuse, "none");
+  assert.ok(failing.raw.calls.slice(before).some((rpc) => rpc.method === "eth_getLogs"), "An unverified preparation cannot seed the cache");
+});
+
 test("scam provider owns caller inputs and retains exact opaque IDs while requiring bound method pairs", async () => {
   const metrics = [];
   const f = setup({ onMetrics: (metric) => metrics.push(metric) });
@@ -102,7 +193,7 @@ test("scam provider owns caller inputs and retains exact opaque IDs while requir
   assert.equal(f.raw.calls.length, before, "Malformed pairs fail before acquiring a reference");
 });
 
-test("scam provider shares references within groups but owns one deadline across groups and has no cross-fetch cache", async () => {
+test("scam provider shares references within groups but owns one deadline across groups and disables cross-fetch cache by default", async () => {
   const metrics = [];
   const f = setup({ onMetrics: (metric) => metrics.push(metric) }), provider = f.create();
   const first = calls();
@@ -138,34 +229,36 @@ test("scam provider shares references within groups but owns one deadline across
 });
 
 test("scam provider reports per-method raw time sources only after final verification and counts metadata in its result budget", async () => {
-  const f = setup();
-  const originalFetch = f.raw.rpc.fetch;
-  let now = NOW, referenceReads = 0;
-  const verification = { history: "all_event_headers", stateBinding: "number_recheck" };
-  f.config.rpc = { ...f.raw.rpc, verification, clock: { now: () => now }, fetch: async (...args) => {
-    const rpc = JSON.parse(args[1].body);
-    const response = await originalFetch(...args);
-    if (rpc.method === "eth_getLogs") {
-      const body = await response.json();
-      const originSec = BigInt(NOW / 1_000) - 1_002n;
-      for (const log of body.result) log.blockTimestamp = `0x${(originSec + BigInt(log.blockNumber)).toString(16)}`;
-      return new Response(JSON.stringify(body));
-    }
-    if (rpc.method === "eth_getBlockByNumber" && rpc.params[0] === "0x3e8" && ++referenceReads === 2) now = NOW + 25;
-    return response;
-  } };
-  const provider = f.create();
-  verification.history = "rpc_anchor";
-  verification.stateBinding = "block_hash_canonical";
-  const batch = await provider.fetch(calls(), context());
-  const history = batch.results["a:history"].value.verification;
-  const profile = batch.results["a:profile"].value.verification;
-  const expected = { version: 1, history: "all_event_headers", stateBinding: "number_recheck",
-    reuse: "none", rawObservedAt: { fromMs: NOW, toMs: NOW }, verifiedAt: NOW + 25 };
-  assert.deepEqual(history, { ...expected, timeSources: ["header", "rpc_log"] });
-  assert.deepEqual(profile, { ...expected, timeSources: ["header"] });
-  assert.equal(referenceReads, 2, "Metadata is emitted after the reference's final read");
-  assert.ok(Object.isFrozen(history) && Object.isFrozen(history.timeSources) && Object.isFrozen(history.rawObservedAt));
+  for (const mode of ["all_event_headers", "rpc_anchor"]) {
+    const f = setup();
+    const originalFetch = f.raw.rpc.fetch;
+    let now = NOW, referenceReads = 0;
+    const verification = { history: mode, stateBinding: "number_recheck" };
+    f.config.rpc = { ...f.raw.rpc, verification, clock: { now: () => now }, fetch: async (...args) => {
+      const rpc = JSON.parse(args[1].body);
+      const response = await originalFetch(...args);
+      if (rpc.method === "eth_getLogs") {
+        const body = await response.json();
+        const originSec = BigInt(NOW / 1_000) - 1_002n;
+        for (const log of body.result) log.blockTimestamp = `0x${(originSec + BigInt(log.blockNumber)).toString(16)}`;
+        return new Response(JSON.stringify(body));
+      }
+      if (rpc.method === "eth_getBlockByNumber" && rpc.params[0] === "0x3e8" && ++referenceReads === 2) now = NOW + 25;
+      return response;
+    } };
+    const provider = f.create();
+    verification.history = mode === "rpc_anchor" ? "all_event_headers" : "rpc_anchor";
+    verification.stateBinding = "block_hash_canonical";
+    const batch = await provider.fetch(calls(), context());
+    const history = batch.results["a:history"].value.verification;
+    const profile = batch.results["a:profile"].value.verification;
+    const expected = { version: 1, history: mode, stateBinding: "number_recheck",
+      reuse: "none", rawObservedAt: { fromMs: NOW, toMs: NOW }, verifiedAt: NOW + 25 };
+    assert.deepEqual(history, { ...expected, timeSources: ["header", "rpc_log"] });
+    assert.deepEqual(profile, { ...expected, timeSources: ["header"] });
+    assert.equal(referenceReads, 2, "Metadata is emitted after the reference's final read");
+    assert.ok(Object.isFrozen(history) && Object.isFrozen(history.timeSources) && Object.isFrozen(history.rawObservedAt));
+  }
 
   // A response that would fit without verification must still be rejected
   // when the complete SDK wrapper exceeds the caller's byte budget.

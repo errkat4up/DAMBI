@@ -94,8 +94,8 @@ export interface FixedReference {
   readonly observedConfirmDepth: number;
 }
 /** Provider-declared consistency checks, not cryptographic source verification.
- * The built-in RPC provider currently implements only all_event_headers and
- * number_recheck; other declared modes are reserved for explicit later support.
+ * The built-in RPC provider supports both history modes with number_recheck;
+ * block_hash_canonical is reserved for explicit later support.
  */
 export type HistoryVerification = "all_event_headers" | "rpc_anchor";
 export type StateBinding = "number_recheck" | "block_hash_canonical";

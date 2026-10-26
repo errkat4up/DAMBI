@@ -1,6 +1,6 @@
 /** Internal raw RPC boundary. No Fact projection, normalization or algorithm.
- * A future scam provider shares one batch across history/profile and publishes
- * its result only after the reference and every evidence block are rechecked.
+ * The scam provider shares one batch across history/profile and publishes its
+ * result only after the selected verification mode's final checks pass.
  */
 import type { Clock } from "../ports/clock.js";
 import type { Address, FixedReference, HistoryVerification, StateBinding, Subject } from "../types/scam.js";
@@ -8,6 +8,7 @@ import type { EvmRpcEndpoint } from "./fact-provider.js";
 import { AdapterError } from "./errors.js";
 import { decodeQuantity, readRpcResult, RpcResponseError } from "./evm-rpc.js";
 import { callSignal, fetchText } from "./http.js";
+import { createScamHistoryStore, type ScamHistoryEntry, type ScamHistoryStoreOptions } from "./scam-history-store.js";
 import {
   address, hash, quantity, decodeAddressWord, decodeBlock, decodeCode,
   decodeDecimals, decodeLogs, decodeReserves, type RpcBlock, type RpcLog,
@@ -40,9 +41,11 @@ export interface ScamRpcLimits {
   readonly maxRetryDelayMs?: number;
 }
 export interface ScamVerificationOptions {
-  /** AH1 supports all_event_headers only. Other declared modes fail configuration. */
+  /** Default all_event_headers. rpc_anchor explicitly trusts log-only evidence
+   * without an individual final header comparison; actual header reads remain checked.
+   */
   readonly history?: HistoryVerification;
-  /** AH1 supports number_recheck only; unsupported choices never silently fall back. */
+  /** Supports number_recheck only; unsupported choices never silently fall back. */
   readonly stateBinding?: StateBinding;
 }
 export interface ScamRpcOptions {
@@ -52,6 +55,8 @@ export interface ScamRpcOptions {
   readonly quoteTokens: readonly Address[];
   readonly limits: ScamRpcLimits;
   readonly verification?: ScamVerificationOptions;
+  /** Optional source-local completed raw-log storage. No Fact or state-value cache. */
+  readonly historyCache?: ScamHistoryStoreOptions;
   readonly fetch?: typeof globalThis.fetch;
   readonly clock?: Clock;
 }
@@ -79,6 +84,10 @@ export interface RawLogRange {
 export interface RawLogScan {
   readonly logs: readonly RpcLog[];
   readonly missing: readonly RawLogRange[];
+  readonly provenance?: {
+    readonly reuse: "interval_cache";
+    readonly rawObservedAt: Readonly<{ fromMs: number; toMs: number }>;
+  };
 }
 export interface ScamRpcBatch {
   readonly planId: string;
@@ -161,12 +170,12 @@ interface FinalCheck {
 }
 
 /** One selection policy for budget projections and actual final verification.
- * AH1 keeps every observed block. No weaker mode is implemented by this step.
  * Pending headers project future work without inventing hash/time evidence.
+ * rpc_anchor omits only log-only evidence, after pending header roles are merged.
  */
 function selectFinalChecks(evidence: ReadonlyMap<string, BlockEvidence>, mode: HistoryVerification,
   referenceNumber: string, pendingHeaders: Iterable<string> = []): readonly FinalCheck[] {
-  if (mode !== "all_event_headers") return fail("invalid_config");
+  if (mode !== "all_event_headers" && mode !== "rpc_anchor") return fail("invalid_config");
   const selected = new Map<string, FinalCheck>();
   for (const [number, entry] of evidence) {
     selected.set(number, { number, hash: entry.hash, timestampMs: entry.timestampMs, roles: [...entry.roles] });
@@ -176,6 +185,11 @@ function selectFinalChecks(evidence: ReadonlyMap<string, BlockEvidence>, mode: H
     const roles = new Set<EvidenceRole>(existing?.roles);
     roles.add("queried_header");
     selected.set(number, { ...existing, number, roles: [...roles] });
+  }
+  if (mode === "rpc_anchor") {
+    for (const [number, entry] of selected) {
+      if (entry.roles.length === 1 && entry.roles[0] === "log") selected.delete(number);
+    }
   }
   const reference = selected.get(referenceNumber);
   if (!reference || !reference.roles.includes("reference")) return fail("invalid_request");
@@ -245,8 +259,8 @@ function ownOptions(supplied: ScamRpcOptions) {
       history: requested?.history === undefined ? "all_event_headers" : requested.history,
       stateBinding: requested?.stateBinding === undefined ? "number_recheck" : requested.stateBinding,
     } satisfies Required<ScamVerificationOptions>);
-    // Keep the existing implementation truthful until the later modes exist.
-    if (verification.history !== "all_event_headers" || verification.stateBinding !== "number_recheck") throw new Error();
+    if ((verification.history !== "all_event_headers" && verification.history !== "rpc_anchor")
+        || verification.stateBinding !== "number_recheck") throw new Error();
     const limits = { ...supplied.limits,
       minRequestIntervalMs: supplied.limits.minRequestIntervalMs === undefined ? 0 : supplied.limits.minRequestIntervalMs,
       maxRetryDelayMs: supplied.limits.maxRetryDelayMs === undefined ? Math.max(30_000, supplied.limits.retryDelayMs) : supplied.limits.maxRetryDelayMs };
@@ -284,7 +298,10 @@ function ownOptions(supplied: ScamRpcOptions) {
     const fetcher = injected ?? globalThis.fetch.bind(globalThis);
     const now = clock === undefined ? Date.now : clock.now.bind(clock);
     if (typeof fetcher !== "function") throw new Error();
-    return { chainId, url: url.href, headers, fetcher, now, limits, verification,
+    const historyCache = supplied.historyCache === undefined ? undefined : { ...supplied.historyCache };
+    const historyStore = historyCache === undefined ? undefined : createScamHistoryStore(historyCache);
+    return { chainId, url: url.href, headers, fetcher, now, limits, verification, historyStore,
+      cacheMaxBlockSpan: historyCache?.maxBlockSpan,
       factories: new Set(factories.map((v) => v.toLowerCase())),
       quotes: new Set(quoteTokens.map((v) => v.toLowerCase())) };
   } catch { return fail("invalid_config"); }
@@ -317,6 +334,8 @@ function ownRequest(input: ScamRpcRequest, config: ReturnType<typeof ownOptions>
 export function createScamRpcSource(options: ScamRpcOptions) {
   const config = ownOptions(options);
   let sequence = 0n;
+  let batchOrder = 0;
+  let newestHead: { order: number; number: bigint; hash: string } | undefined;
   // One endpoint per source. Keep actual dispatch spacing/cooldown across
   // groups and fetches, but do not reserve future slots for waiting callers.
   // Monotonic scheduling is separate from the plan's wall-clock deadline.
@@ -347,6 +366,9 @@ export function createScamRpcSource(options: ScamRpcOptions) {
       };
       const run = async () => {
       const request = ownRequest(input, config);
+      const order = ++batchOrder;
+      const cacheGeneration = config.historyStore?.generation;
+      const cacheDrafts: ScamHistoryEntry[] = [];
       if (typeof collect !== "function") return fail("invalid_request");
       const now = (): number => {
         try { const value = config.now(); if (integer(value)) return value; } catch { /* sanitized below */ }
@@ -359,6 +381,9 @@ export function createScamRpcSource(options: ScamRpcOptions) {
       let closed = false;
       let terminalFailure: ScamRpcError | undefined;
       const stop = (reason: "resource_limit" | "reorg" | "invalid_response"): never => {
+        // Only the batch from the current generation may invalidate it. An old
+        // failing batch cannot erase entries prepared after another reorg.
+        if (reason === "reorg" && config.historyStore?.generation === cacheGeneration) config.historyStore?.invalidateAll();
         terminalFailure ??= new ScamRpcError(reason);
         controller.abort();
         throw terminalFailure;
@@ -368,6 +393,7 @@ export function createScamRpcSource(options: ScamRpcOptions) {
         if (request.signal?.aborted) return fail("aborted");
         if (timedOut || now() >= request.deadlineMs) return fail("timeout");
         if (terminalFailure) throw terminalFailure;
+        if (config.historyStore && config.historyStore.generation !== cacheGeneration) return stop("reorg");
         if (closed || controller.signal.aborted) return fail("aborted");
       };
       check();
@@ -530,7 +556,9 @@ export function createScamRpcSource(options: ScamRpcOptions) {
         } catch (error) { throw diagnosticError(error, "preflight"); }
       };
       const verifyFinalChecks = async (checks: readonly FinalCheck[]): Promise<void> => {
-        const verifiedTimes: [string, number][] = [];
+        // Retain log-only times too: later profile headers must not hide a
+        // timestamp-order conflict merely because those logs are not rechecked.
+        const verifiedTimes = new Map(collectedTimes());
         for (const target of checks) {
           if (target.hash === undefined) return fail("invalid_request");
           const current = await readBlock(BigInt(target.number), "final_recheck");
@@ -538,14 +566,20 @@ export function createScamRpcSource(options: ScamRpcOptions) {
           if (target.timestampMs !== undefined && current.timestampMs !== target.timestampMs) return stop("invalid_response");
           // Header times complete the private verification set only. Do not
           // collect new roles/blocks or change the already selected targets.
-          verifiedTimes.push([target.number, current.timestampMs]);
+          verifiedTimes.set(target.number, current.timestampMs);
         }
-        validateTimes(verifiedTimes);
+        validateTimes([...verifiedTimes]);
       };
       try {
         stage = "reference";
         if (await rpc("reference", "eth_chainId", [], decodeQuantity) !== BigInt(config.chainId)) return fail("chain_mismatch");
         const head = await rpc("reference", "eth_getBlockByNumber", ["latest", false], decodeBlock);
+        if (config.historyStore && (!newestHead || order > newestHead.order)) {
+          const previous = newestHead;
+          newestHead = { order, number: BigInt(head.number), hash: head.hash };
+          if (previous && (BigInt(head.number) < previous.number
+              || BigInt(head.number) === previous.number && head.hash !== previous.hash)) return stop("reorg");
+        }
         const baseHeight = BigInt(head.number) - BigInt(request.confirmDepth);
         if (baseHeight < 0n) return fail("invalid_response");
         const base = request.confirmDepth === 0 ? head : await readBlock(baseHeight, "reference");
@@ -657,12 +691,36 @@ export function createScamRpcSource(options: ScamRpcOptions) {
             if (!["pair", "factory", "token"].includes(scope) || from > to || to > baseHeight
                 || !topics.length || topics.length > 16 || !topics.every(hash)) return fail("invalid_request");
             const target = scope === "pair" ? pool.subject.pool : scope === "factory" ? pool.subject.factory : pool.subject.token;
+            const key = JSON.stringify([config.chainId, config.verification.history, config.verification.stateBinding,
+              "scam-rpc-logs/1", pool.subject.factory, pool.subject.pool, pool.subject.token, pool.subject.quoteToken,
+              scope, target, [...new Set(topics.map((topic) => topic.toLowerCase()))].sort()]);
+            const hit = config.historyStore?.get(key, fromBlock, toBlock, base.number, now());
+            if (hit) {
+              // Prior verified boundary headers are draft evidence, not fresh
+              // reads. Both are rechecked before any result can be returned.
+              for (const boundary of [hit.entry.start, hit.entry.end]) {
+                remember(boundary.number, boundary.hash, "cache_boundary", boundary.timestampMs);
+              }
+              if (hit.logs.length > config.limits.maxLogs - logCount) return stop("resource_limit");
+              logCount += hit.logs.length;
+              for (const log of hit.logs) {
+                remember(log.blockNumber, log.blockHash, "log", log.timestampMs);
+                logBlocks.add(log.blockNumber);
+                if (log.timestampMs !== undefined) timestampedLogBlocks.add(log.blockNumber);
+              }
+            }
             const step = BigInt(config.limits.maxBlocksPerQuery);
-            const count = (to - from) / step + 1n;
+            const ranges = hit?.missing ?? [{ fromBlock, toBlock }];
+            const count = ranges.reduce((sum, range) => sum + (BigInt(range.toBlock) - BigInt(range.fromBlock)) / step + 1n, 0n);
             if (count > BigInt(config.limits.maxRequests)) return stop("resource_limit");
             const chunks: { from: bigint; to: bigint }[] = [];
-            for (let start = from; start <= to; start += step) chunks.push({ from: start, to: start + step - 1n < to ? start + step - 1n : to });
-            const logs: RpcLog[] = [], missing: RawLogRange[] = [];
+            for (const range of ranges) {
+              const end = BigInt(range.toBlock);
+              for (let start = BigInt(range.fromBlock); start <= end; start += step) {
+                chunks.push({ from: start, to: start + step - 1n < end ? start + step - 1n : end });
+              }
+            }
+            const logs: RpcLog[] = [...(hit?.logs ?? [])], missing: RawLogRange[] = [];
             let next = 0;
             await Promise.all(Array.from({ length: Math.min(config.limits.concurrency, chunks.length) }, async () => {
               while (next < chunks.length) {
@@ -694,8 +752,20 @@ export function createScamRpcSource(options: ScamRpcOptions) {
             logs.sort((a, b) => BigInt(a.blockNumber) < BigInt(b.blockNumber) ? -1
               : BigInt(a.blockNumber) > BigInt(b.blockNumber) ? 1 : a.transactionIndex - b.transactionIndex || a.logIndex - b.logIndex);
             missing.sort((a, b) => BigInt(a.fromBlock) < BigInt(b.fromBlock) ? -1 : 1);
+            const rawObservedAt = Object.freeze({ fromMs: hit ? Math.min(observedAt, hit.entry.rawObservedAt.fromMs) : observedAt,
+              toMs: hit ? Math.max(hit.entry.rawObservedAt.toMs, chunks.length ? observedAt : hit.entry.rawObservedAt.toMs) : observedAt });
+            const fullyReused = hit && !chunks.length;
+            if (config.historyStore && missing.length === 0 && !fullyReused
+                && to - from + 1n <= BigInt(config.cacheMaxBlockSpan!)) {
+              // Store whole completed scans, including empty scans. Their exact
+              // boundaries join this batch's final checks before cache commit.
+              const start = await historicalBlock(fromBlock), end = await historicalBlock(toBlock);
+              cacheDrafts.push({ key, fromBlock, toBlock, start, end, logs: Object.freeze(logs),
+                rawObservedAt, storedAt: now() });
+            }
             validateTimes(collectedTimes());
-            return { logs, missing };
+            return Object.freeze({ logs: Object.freeze(logs), missing: Object.freeze(missing),
+              ...(hit ? { provenance: Object.freeze({ reuse: "interval_cache" as const, rawObservedAt }) } : {}) });
           },
         });
         let collecting = true;
@@ -730,6 +800,12 @@ export function createScamRpcSource(options: ScamRpcOptions) {
         collecting = false;
         check();
         if (operations !== 0 || pending !== 0) return fail("invalid_request");
+        // Copy and size cache candidates before the final checks/deadline gate.
+        // No failed or timed-out batch may install even its earlier drafts.
+        const stagedCache = cacheDrafts.flatMap((entry) => {
+          const staged = config.historyStore?.stage(entry);
+          return staged ? [staged] : [];
+        });
         // Recompute after every method/target has collected its evidence. The
         // immutable list used for this last budget check is executed unchanged.
         const finalChecks = selectFinalChecks(evidence, config.verification.history, base.number);
@@ -741,6 +817,7 @@ export function createScamRpcSource(options: ScamRpcOptions) {
         const verifiedAt = now();
         if (verifiedAt < observedAt || verifiedAt >= request.deadlineMs) return fail("timeout");
         check();
+        if (config.historyStore && !config.historyStore.commit(stagedCache, cacheGeneration!)) return stop("reorg");
         return { value, reference, observedAt, verification: config.verification, verifiedAt,
           metrics: Object.freeze({ ...metrics, durationMs: verifiedAt - observedAt }) };
       } catch (error) {

@@ -265,13 +265,42 @@ and whole-fetch `limits` (`timeoutMs`, `maxCalls`, `maxTargets`, `maxRequestByte
 `maxResultBytes`). Share Core's clock if overriding it. RPC request/byte/log caps
 apply per reference group; the deadline and output-size cap cover all groups.
 Each history/profile pair shares a fixed reference and is withheld until the
-final block-hash checks pass. There is no cross-fetch cache.
+final block-hash checks pass. Cross-fetch raw-log reuse is opt-in through
+`rpc.historyCache: { maxEntries, maxBytes, ttlMs, maxBlockSpan }`; all four limits
+must be positive integers. The cache belongs to this provider instance and stores
+complete log scans, including empty scans, rather than Facts, state values or grids.
+`maxBytes` bounds serialized entry bytes, not JavaScript heap usage.
 
-`rpc.verification` is copied at provider creation. Its supported defaults are
+With the cache enabled, `await provider.prepare(scamCalls, { planId, timeoutMs,
+signal })` prepares history using a separate 1–60,000ms budget. Supply complete
+history/profile call pairs from a preparation plan. The call returns no analysis
+or Facts. Before signing, create a **new plan** and fetch through the same provider;
+the ordinary fetch still uses its configured deadline (e.g. 2,500ms). Preparation
+is an explicit host action, not an automatic background task or a deadline extension.
+Preparation and fetch use the same verification mode and resource caps.
+
+A later fetch downloads only missing log ranges, rereads current reference/state,
+rebuilds snapshots and rechecks the original cache boundaries. Complete hits do
+not extend the entry's TTL. Reorgs invalidate the cache; cancelled or failed raw
+batches cannot publish drafts. An independently verified raw scan can survive a
+later provider-level result-size failure. Expiry, capacity eviction or an absent
+overlap requires cold work and can still exhaust the signing deadline.
+
+`rpc.verification` is copied at provider creation. Its defaults are
 `{ history: "all_event_headers", stateBinding: "number_recheck" }`.
-The future `rpc_anchor` and `block_hash_canonical` choices are currently rejected
-as invalid configuration; they are never silently substituted or advertised as
-implemented checks. This is a provider execution contract, not a new Core policy.
+Opt into `history: "rpc_anchor"` to omit final header reads for blocks known only
+from logs. Checked head, reference, queried headers and state-read blocks still
+receive final hash/time checks. Pending timestamp-header lookups count toward
+both their initial reads and final checks. Log scope, identity, conflicts and
+overall timestamp ordering remain checked in both modes.
+
+`rpc_anchor` trusts the endpoint's log-only hashes and timestamps without comparing
+each against a header. It can miss an internally consistent log from a different
+branch; neither mode independently proves log completeness or authenticates log
+contents. Missing timestamps, boundary searches and profile events can still
+require many actual header reads. There is no automatic mode switch on error or
+budget exhaustion. `block_hash_canonical` remains unsupported and is rejected as
+invalid configuration. This is a provider execution contract, not a new Core policy.
 
 Successful built-in method values include version-1 `verification` metadata:
 the modes, raw timestamp source kinds (`header` / `rpc_log`), reuse status,
@@ -279,7 +308,10 @@ original collection time range and final verification time. `timeSources`
 describes raw evidence supplied to each method, not the source of every output
 grid point; a final header check does not erase an original log timestamp source.
 Current fresh batches use `reuse: "none"` and their original `observedAt` for
-both collection-range endpoints. Metadata is included in the output-size limit.
+both collection-range endpoints. A method reusing logs declares
+`reuse: "interval_cache"`, preserving the original raw collection range while its
+Fact and final verification are fresh. Reuse is recorded independently for history
+and profile. Metadata is included in the output-size limit.
 
 Core retains the declarations in `binding.verification` with status `declared`.
 Legacy inputs omitting metadata on both methods produce `legacy_unspecified`;
@@ -315,10 +347,12 @@ errors are not terminal causes, and success/partial runs omit this field.
 
 Pool history can use optional RPC log timestamps to form an unpublished draft.
 Missing timestamps retain the original header lookup; malformed or inconsistent
-times are not substituted. Before publication, every evidence block still needs
-an actual canonical header with the matching hash and any recorded timestamp.
-This avoids the first of two event-header reads where log times are available;
-it does not remove final verification or guarantee cold-history completion.
+times are not substituted. Before publication, `all_event_headers` compares every
+evidence block against an actual header with the matching hash and any recorded
+timestamp. `rpc_anchor` omits that comparison for log-only blocks, retaining
+comparisons for actual header/state reads and the reference points. All collected
+timestamps still participate in the final ordering check. Neither mode guarantees
+cold-history completion within the configured budget.
 
 `onMetrics.preflight` records the last known-work budget check in `preflightGroup`
 (one-based reference group). It counts unique log blocks, timestamped blocks,
@@ -339,6 +373,35 @@ after building TypeScript from the repository root:
 ```sh
 node scripts/sdk/scam-data-probe.mjs
 ```
+
+The probe keeps `all_event_headers` as its default. To explicitly diagnose the
+`rpc_anchor` cold path with the same history window and resource caps:
+
+```sh
+SCAM_HISTORY_VERIFICATION=rpc_anchor SCAM_TIMEOUT_MS=60000 SCAM_REPEATS=1 \
+  node scripts/sdk/scam-data-probe.mjs
+```
+
+The 60-second budget is diagnostic, not the product's 2,500 ms acceptance budget.
+Reports distinguish requested verification settings from each returned method's
+performed modes. The last preflight's `finalRecheckRequests` is its selected
+target count; `additionalHeaderRequests` is pending work, not cumulative timestamp
+fallback requests. It is zero at the final checkpoint after collection completes.
+
+To measure preparation separately from a subsequent 2,500ms data fetch:
+
+```sh
+SCAM_HISTORY_VERIFICATION=rpc_anchor SCAM_HISTORY_CACHE=1 \
+SCAM_PREPARE_TIMEOUT_MS=60000 SCAM_TIMEOUT_MS=2500 SCAM_REPEATS=1 \
+  node scripts/sdk/scam-data-probe.mjs
+```
+
+The probe uses bounded in-memory storage (8 entries, 16,000,000 serialized bytes,
+120-second TTL, 100,000-block maximum span). `preparation` is excluded from the
+fetch trials and `summary.targetBudget`; a preparation failure skips fetch trials.
+Read each returned method's `verification.reuse` to confirm an actual hit. A
+`partial` fetch within budget is still incomplete coverage. These measurements
+exclude the algorithm and Core evaluation and cannot establish the full signing SLA.
 
 The probe defaults to GIWA Sepolia, one known pool, a 24-hour window plus one-hour
 warm-up, a 2,500 ms budget and one uncached attempt. Defaults are diagnostic inputs,
