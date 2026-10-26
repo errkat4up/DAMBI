@@ -194,6 +194,10 @@ node --test \
 
 준비 후 첫 실측: GIWA Sepolia 풀 1개, 24시간+warm-up 1시간, 10초/60초 그리드, `rpc_anchor + number_recheck`, 요청 간격 100ms. 준비는 **4,402.92ms·29요청·로그 9청크·partial**, 다음 조회는 **2,326.89ms·23요청·로그 1청크·partial**, 재시도/실패/timeout은 모두 0이었다. 수신 바이트는 준비 971,909·조회 37,544이며, 조회 기준 블록은 39,647,949다. history는 실제 `interval_cache` 재사용·결측/미지원 0·snapshot 9,000/1,500개이고, profile은 새 조회(`reuse=none`)이나 capability 미설정으로 나이 unknown·관리자 구간 결측 1·미지원 필드 1이다. 관리자 이벤트 0건을 부재 확인으로 해석하지 않는다. **단발 데이터 조회는 2,500ms 안에 완료했으며 여유는 약 173ms다.** `allAttemptsCompleteWithinBudget=false`는 이번 결과가 완전 지원 성공이 아닌 partial이기 때문이다. AH4 기능 검증은 통과했으나 반복 성능·실제 확장/호스트 연결·알고리즘과 Core를 포함한 서명 직전 전체 2.5초는 미확인이다.
 
+### AH5-1 — 준비 후 SDK 통합·전체 check 시간 측정
+
+`7e341d7` 이후 변경: 실제 provider→Runtime→Rust/WASM 경로의 준비 후 새 plan/manual/check 근거, 재검증 reorg·Runtime timeout의 Cedar deny/warn 보존, 최종 recheck 중 abort/dispose를 확인하는 통합 시험 3개를 추가했다. 호스트 예제의 `checkWithTiming()`은 전체 check의 반환·거절 시간을 별도로 측정하며 기존 판정과 오류를 유지한다. **사용자 실행 확인: 측정·observer 격리 3개와 SDK 통합 3개, 합계 6개 통과·실패/취소/건너뜀 0개.** 합성 RPC·명시적 stub 경로의 `checkDurationMs`는 11.03ms였으며 SDK 측정 연결만 확인한다. 실제 알고리즘/확장/전체 2.5초 성능은 미확인이다. production Core/Rust·WASM 계약과 기존 deadline은 변경하지 않았다.
+
 ## 번들 B1-1 — Universal Router
 
 2026-10-12, `main 7387536` 이후 B1-1 변경 검증: **Native 원문 2개 시험과 패키지 WASM 3개 시험 통과, 최종 WASM 로그 3 통과·0 실패.** 저장된 snapshot은 801개이며 기존 799개 내용 보존·UR 2개 추가·digest/bytes 일치를 확인했다. source-context 제외 30,484개와 Aave 거절 3개는 유지한다. 별도 `decoder_snapshot` target의 전체 결과는 공유되지 않았다. 대표 UR 경로의 편입·검증을 마쳤으며 다음은 B1-2 Aave다.

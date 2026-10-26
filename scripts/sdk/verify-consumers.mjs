@@ -121,7 +121,7 @@ try {
   const consumer = join(temporary, "consumer");
   await mkdir(consumer);
   // Copy public example sources only, never incidental local credential files.
-  for (const name of ["package.json", "tsconfig.json", "consumer-types.ts", "client.mjs", "node.mjs", "browser.mjs", "index.html"]) {
+  for (const name of ["package.json", "tsconfig.json", "consumer-types.ts", "client.mjs", "check-timing.mjs", "node.mjs", "browser.mjs", "index.html"]) {
     await cp(join(root, "examples/sdk-adapters", name), join(consumer, name));
   }
   await cp(new URL("./consumer-cases.mjs", import.meta.url), join(consumer, "consumer-cases.mjs"));

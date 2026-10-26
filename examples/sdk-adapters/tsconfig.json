@@ -11,5 +11,5 @@
     "types": [],
     "skipLibCheck": false
   },
-  "include": ["consumer-types.ts", "client.mjs"]
+  "include": ["consumer-types.ts", "client.mjs", "check-timing.mjs"]
 }

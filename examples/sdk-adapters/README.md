@@ -54,3 +54,35 @@ not validate a production deployment's CORS or RPC authenticity. A verdict with
 returned successfully; inspect `decision`, `source`, and `diagnostics` together.
 For the repository's verification command and tool setup, see
 [Standalone Node and browser consumers](../../packages/core/README.md#standalone-node-and-browser-consumers).
+
+## Measuring a complete SDK check
+
+`check-timing.mjs` measures one `core.check()` call with `performance.now()`. It
+includes planning, policy/scam Fact work, evaluation and synchronous notifications
+through the returned verdict or rejection. Initialization, any earlier
+`provider.prepare()`, asynchronous notification work, reporting and UI rendering
+are outside this interval. Node prints the measurement separately to stderr and
+keeps the verdict on stdout; the browser displays timing beside the result.
+
+```js
+import { checkWithTiming } from "./check-timing.mjs";
+
+// Use the same already-configured Core/provider that prepared the history.
+const verdict = await checkWithTiming(core, request, { signal }, (measurement) => {
+  console.info(measurement);
+});
+```
+
+The helper returns the original verdict or throws the original error. It reports
+each invocation once; observer failures cannot replace the result. The 2,500ms
+`targetBudgetMs` and `withinBudget` fields compare elapsed time only. They neither
+change SDK deadlines nor certify a successful or complete risk analysis. Inspect
+`outcome`, `source`, `scamStatus` and `analysisModes` together: `stub`, incomplete
+data or a failed evaluation cannot establish actual-algorithm performance.
+
+The default `createAdapterCore()` example configures ordinary policy adapters;
+it does not install a Scam Filter bundle or algorithm. The same timing helper
+works with a separately configured Scam Filter Core. AH5 integration tests use
+the explicit test WASM/stub and synthetic RPC, so their durations demonstrate the
+measurement boundary, not live signing performance. The existing
+`scam-data-probe.mjs` still measures only provider work.

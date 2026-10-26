@@ -6,6 +6,7 @@ import { CoreError } from "@dambi/core";
 import { createScamFactProvider } from "@dambi/core/adapters";
 import { initializeCoreForScamTest } from "../dist/runtime/core-runtime.js";
 import { scamProviderRpcFixture } from "./adapters/helpers/scam-provider-fixture.mjs";
+import { checkWithTiming } from "../../../examples/sdk-adapters/check-timing.mjs";
 
 // Explicit, separately built feature artifact. This suite never builds, fetches
 // RPC, falls back to an engine mock, or installs its stub in the product WASM.
@@ -238,6 +239,10 @@ function deferred() {
   return { promise, resolve };
 }
 const tick = () => new Promise((resolve) => setImmediate(resolve));
+const waitForFinalRecheck = (paused, pending) => Promise.race([
+  paused.started,
+  pending.then(() => assert.fail("The check settled before reaching the expected final recheck")),
+]);
 const code = (expected) => (error) => error instanceof CoreError && error.code === expected;
 const reasons = (verdict) => [...verdict.scam.reasons, ...verdict.scam.targets.flatMap((target) => target.reasons)];
 const options = { timeout: 10_000 };
@@ -269,6 +274,68 @@ function sf45Provider(setup, failure) {
   setup.setScamFetch((calls, context) => provider.fetch(calls, context));
   setup.setPolicyFetch((calls, context) => provider.fetch(calls, context));
   return { provider, raw, policyCalls };
+}
+
+// Keep SF4-5's default-mode fixture unchanged. This wrapper advances its raw
+// chain by one block after preparation and controls the final reference read.
+// Builders, the provider, Runtime and WASM remain real; the algorithm is a stub.
+function ah5Provider(setup) {
+  const raw = scamProviderRpcFixture({ now: NOW, chainId: CHAIN, factory: FACTORY,
+    pool: POOL, token: TOKEN, quoteToken: WETH });
+  let now = NOW, referenceReads = 0, finalRecheck;
+  const policyCalls = [];
+  const provider = createScamFactProvider({
+    rpc: { ...raw.rpc, clock: { now: () => now }, verification: { history: "rpc_anchor" },
+      historyCache: { maxEntries: 8, maxBytes: 1_000_000, ttlMs: 60_000, maxBlockSpan: 10_000 },
+      async fetch(url, init) {
+        const rpc = JSON.parse(init.body);
+        if (rpc.method === "eth_chainId") referenceReads = 0;
+        const response = await raw.rpc.fetch(url, init);
+        if (now === NOW) return response;
+        const body = await response.json();
+        if (rpc.method === "eth_getBlockByNumber") {
+          if (rpc.params[0] === "latest") {
+            body.result = { number: "0x3eb", hash: `0x${word(11_003)}`,
+              parentHash: `0x${word(11_002)}`, timestamp: `0x${BigInt(now / 1_000).toString(16)}` };
+          } else if (BigInt(rpc.params[0]) === 1_001n && ++referenceReads === 2) {
+            const action = finalRecheck;
+            finalRecheck = undefined;
+            if (action) await action(body, init.signal);
+          }
+        } else if (rpc.method === "eth_call" && rpc.params[0].data === "0x0902f1ac") {
+          // The new window starts at a different block and must read its seed.
+          body.result = `0x${word(1_000)}${word(2_000)}${word(0)}`;
+        }
+        return new Response(JSON.stringify(body));
+      } },
+    history: raw.history, profile: raw.profile, factorySupport: raw.factorySupport,
+    policy: { async fetch(calls, context) {
+      policyCalls.push({ calls, context });
+      return policyBatch(calls, context, now);
+    } },
+    limits: { timeoutMs: 2_000, maxCalls: 16, maxTargets: 8,
+      maxRequestBytes: 100_000, maxResultBytes: 100_000 },
+  });
+  setup.setScamFetch((calls, context) => provider.fetch(calls, context));
+  setup.setPolicyFetch((calls, context) => provider.fetch(calls, context));
+  return {
+    provider, raw, policyCalls,
+    advance() { now = NOW + 1_000; setup.setNow(now); },
+    reorgFinalRecheck() {
+      finalRecheck = (body) => { body.result.hash = `0x${"ee".repeat(32)}`; };
+    },
+    pauseFinalRecheck() {
+      const entered = deferred(), reply = deferred();
+      const paused = { started: entered.promise, release: reply.resolve, signal: undefined };
+      finalRecheck = async (_body, signal) => {
+        paused.signal = signal;
+        entered.resolve();
+        // Deliberately return the late raw reply even if cancellation arrived.
+        await reply.promise;
+      };
+      return paused;
+    },
+  };
 }
 
 test("unconfigured, disabled and missing-module paths never silently install the fixed algorithm", options, async (t) => {
@@ -718,5 +785,148 @@ test("SF4-5 provider reorg and timeout preserve explicit scam failure and the or
     assert.ok(reasons(verdict).includes(failure), failure);
     assert.equal(verdict.reasons.some((reason) => reason.policyId === "__scam::risk"), false,
       "A provider failure is not a detected scam or a replacement policy verdict");
+  }
+});
+
+test("AH5 prepared raw history crosses fresh manual/check plans and preserves cache provenance through WASM", options, async (t) => {
+  const setup = harness({ policy: policyWithFact(), limits: { planTtlMs: 500 } });
+  const { provider, raw, policyCalls, advance } = ah5Provider(setup);
+  const { core } = await open(t, setup, sf45Fixture());
+  const preparation = await core.plan(observedEthSwap);
+  assert.equal(await provider.prepare(preparation.scamCalls,
+    { planId: preparation.planId, timeoutMs: 1_000 }), undefined);
+  const afterPreparation = raw.calls.length;
+  advance();
+  assert.throws(() => core.evaluate(preparation, policyBatch(preparation.calls, preparation)), code("PLAN_EXPIRED"));
+
+  const plan = await core.plan(observedEthSwap);
+  assert.notEqual(plan.planId, preparation.planId);
+  const context = { planId: plan.planId };
+  const policyFacts = await provider.fetch(plan.calls, context);
+  const scamFacts = await provider.fetch(plan.scamCalls, context);
+  assert.equal(scamFacts.planId, plan.planId);
+  const byMethod = Object.fromEntries(plan.scamCalls.map((call) => [call.method, scamFacts.results[call.callId]]));
+  const history = byMethod["scam.pool_history"], profile = byMethod["scam.token_profile"];
+  assert.equal(history.observedAt, NOW + 1_000);
+  assert.equal(profile.observedAt, NOW + 1_000);
+  assert.deepEqual(history.value.reference, profile.value.reference);
+  assert.equal(history.value.reference.block.number, "1001");
+  assert.equal(history.value.reference.block.timestampMs, T + 1_000);
+  assert.equal(history.value.reference.checkedHead.number, "1003");
+  assert.equal(history.value.referenceGroupId, plan.scamCalls[0].params.referenceGroupId);
+  assert.equal(history.value.histories[0].history.points[0].reserveQuote, "2000",
+    "A fresh seed rebuilds the new window instead of returning a prepared Fact");
+  assert.equal(history.value.verification.history, "rpc_anchor");
+  assert.equal(history.value.verification.stateBinding, "number_recheck");
+  assert.equal(history.value.verification.reuse, "interval_cache");
+  assert.deepEqual(history.value.verification.rawObservedAt, { fromMs: NOW, toMs: NOW + 1_000 });
+  assert.equal(history.value.verification.verifiedAt, NOW + 1_000);
+  assert.equal(profile.value.verification.reuse, "none");
+  assert.deepEqual(profile.value.verification.rawObservedAt, { fromMs: NOW + 1_000, toMs: NOW + 1_000 });
+  const extension = raw.calls.slice(afterPreparation).filter((call) =>
+    call.method === "eth_getLogs" && call.params[0].address === POOL);
+  assert.deepEqual(extension.map(({ params }) => [params[0].fromBlock, params[0].toBlock]), [["0x3e9", "0x3e9"]],
+    "The new reference downloads only the block beyond the prepared raw interval");
+
+  const manual = core.evaluate(plan, policyFacts, scamFacts);
+  const beforeCheck = raw.calls.length;
+  const measurements = [];
+  const checked = await checkWithTiming(core, observedEthSwap, undefined, (value) => { measurements.push(value); });
+  assert.equal(manual.decision, "warn");
+  assert.equal(manual.source, "evaluated");
+  assert.equal(manual.scam.status, "warn");
+  assert.equal(manual.scam.targets[0].analysisMode, "stub", "This integration uses an explicit fixed algorithm fixture");
+  assert.equal(manual.scam.targets[0].binding.planId, plan.planId);
+  assert.deepEqual(manual.scam.targets[0].binding.verification, {
+    status: "declared", poolHistory: history.value.verification, tokenProfile: profile.value.verification,
+  }, "Cache observations survive the real TypeScript/Rust/WASM boundary");
+  assert.deepEqual(comparable(checked.scam), comparable(manual.scam));
+  assert.notEqual(checked.scam.targets[0].binding.planId, plan.planId);
+  assert.equal(checked.scam.targets[0].binding.planId, setup.fetches.find(({ scam }) => scam).context.planId);
+  assert.equal(raw.calls.slice(beforeCheck).some((call) =>
+    call.method === "eth_getLogs" && call.params[0].address === POOL), false);
+  assert.ok(raw.calls.slice(beforeCheck).some((call) =>
+    call.method === "eth_call" && call.params[0].data === "0x0902f1ac"), "check still reads the current window's seed");
+  assert.equal(policyCalls.length, 2, "Preparation does not fetch policy Facts");
+  assert.equal(measurements.length, 1);
+  assert.equal(measurements[0].outcome, "completed");
+  assert.ok(Number.isFinite(measurements[0].checkDurationMs) && measurements[0].checkDurationMs >= 0);
+  assert.equal(measurements[0].decision, checked.decision);
+  assert.equal(measurements[0].source, checked.source);
+  assert.equal(measurements[0].scamStatus, "warn");
+  assert.deepEqual(measurements[0].analysisModes, ["stub"]);
+  t.diagnostic(`AH5 synthetic RPC / stub: checkDurationMs=${measurements[0].checkDurationMs.toFixed(2)}; performance acceptance is not evaluated`);
+});
+
+test("AH5 prepared-cache reorg and Runtime timeout preserve Cedar deny/warn without publishing scam data", options, async (t) => {
+  const warnId = "ah5-existing-warning";
+  const warningPolicy = signedPolicy({ extra: [{ id: warnId,
+    policy: `@id("${warnId}") @severity("warn") forbid(principal, action == Amm::Action::"Swap", resource);`,
+    manifest: { id: warnId, schema_version: 2, trigger: { where: { "action.tag": { eq: "swap" } } } } }] });
+  for (const [failure, policy, request, decision, policyId] of [
+    ["reorg", initialPolicy, redirectedSwap(), "deny", "swap-recipient-not-self-deny"],
+    ["timeout", warningPolicy, swap, "warn", warnId],
+  ]) {
+    const setup = harness({ policy, scamLimits: { scamTimeoutMs: 500 } });
+    const f = ah5Provider(setup);
+    const { core } = await open(t, setup, sf45Fixture());
+    const preparation = await core.plan(request);
+    await f.provider.prepare(preparation.scamCalls, { planId: preparation.planId, timeoutMs: 1_000 });
+    f.advance();
+    const paused = failure === "timeout" ? f.pauseFinalRecheck() : undefined;
+    if (failure === "reorg") f.reorgFinalRecheck();
+    try {
+      const pending = core.check(request);
+      if (paused) await waitForFinalRecheck(paused, pending);
+      const verdict = await pending;
+      assert.equal(verdict.decision, decision, failure);
+      assert.equal(verdict.source, "evaluated", failure);
+      assert.ok(verdict.reasons.some((reason) => reason.policyId === policyId), failure);
+      assert.equal(verdict.scam.status, "insufficient", failure);
+      assert.ok(reasons(verdict).includes(failure), failure);
+      assert.ok(verdict.scam.targets.every((target) => target.binding === undefined), failure);
+      assert.equal(verdict.reasons.some((reason) => reason.policyId === "__scam::risk"), false);
+      if (paused) assert.equal(paused.signal.aborted, true, "The Core timeout cancels the actual provider's final RPC");
+    } finally { paused?.release(); }
+    await tick();
+  }
+});
+
+test("AH5 abort and disposal during a prepared-cache final recheck retain lifecycle semantics and reject late publication", options, async (t) => {
+  for (const mode of ["abort", "dispose"]) {
+    const published = [];
+    const setup = harness({ scamLimits: { scamTimeoutMs: 1_000 } });
+    setup.config.hooks = { onVerdict(value) { published.push(value); } };
+    const f = ah5Provider(setup);
+    const { core } = await open(t, setup, sf45Fixture());
+    const preparation = await core.plan(swap);
+    await f.provider.prepare(preparation.scamCalls, { planId: preparation.planId, timeoutMs: 1_000 });
+    f.advance();
+    const paused = f.pauseFinalRecheck();
+    const controller = new AbortController();
+    const pending = core.check(swap, { signal: controller.signal });
+    const disposed = mode === "dispose" ? assert.rejects(pending, code("DISPOSED")) : undefined;
+    try {
+      await waitForFinalRecheck(paused, pending);
+      assert.equal(published.length, 0, "Prepared data cannot publish before the current final recheck");
+      if (mode === "abort") {
+        controller.abort();
+        const verdict = await pending;
+        assert.equal(verdict.decision, "deny");
+        assert.equal(verdict.source, "fail_closed");
+        assert.ok(verdict.diagnostics.some(({ code }) => code === "aborted"));
+      } else { core.dispose(); await disposed; }
+      assert.equal(paused.signal.aborted, true, mode);
+    } finally { paused.release(); }
+    await tick();
+    assert.equal(published.length, mode === "abort" ? 1 : 0, "The late raw reply cannot publish another verdict");
+    if (mode === "dispose") await assert.rejects(core.check(swap), code("DISPOSED"));
+    else {
+      const beforeRetry = f.raw.calls.length;
+      assert.equal((await core.check(swap)).scam.status, "warn");
+      assert.ok(f.raw.calls.slice(beforeRetry).some((call) => call.method === "eth_getLogs"
+        && call.params[0].address === POOL && call.params[0].fromBlock === "0x3e9"),
+      "The aborted extension was not committed; the previously prepared interval remains reusable");
+    }
   }
 });
