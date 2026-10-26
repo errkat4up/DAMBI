@@ -142,32 +142,43 @@ pub fn zigzag_switches(series: &[Sample], theta: f64, kind: SwitchKind) -> Vec<i
     out
 }
 
-/// `x <= (1 - i) * max(values in effect during [t - window_ms, t])`, within a segment.
+/// `x <= (1 - i) * max(values in effect during [t - window_ms, t])`, within a segment: the value
+/// in effect at `t - window_ms` (the last point at or before it) and every point after it.
 pub fn drop_events(series: &[Sample], i: f64, window_ms: i64) -> Vec<i64> {
     let mut out = Vec::new();
+    // Points after the left edge, values decreasing from the front.
     let mut dq: VecDeque<(i64, f64)> = VecDeque::new();
-    for &(t, x) in series {
+    let mut seg = 0usize;
+    // Index of the value in effect at the left edge, if the segment started before it.
+    let mut eff: Option<usize> = None;
+    for (k, &(t, x)) in series.iter().enumerate() {
         let Some(x) = x else {
             dq.clear();
+            seg = k.saturating_add(1);
+            eff = None;
             continue;
         };
         while dq.back().is_some_and(|&(_, v)| v <= x) {
             dq.pop_back();
         }
         dq.push_back((t, x));
-        // Keep the value in effect at t - window: drop the front only once the next one is
-        // itself at or before the left edge.
-        while dq.len() > 1
-            && dq
-                .get(1)
-                .is_some_and(|&(tn, _)| tn <= t.saturating_sub(window_ms))
-        {
+        let left = t.saturating_sub(window_ms);
+        let mut next = eff.map_or(seg, |e| e.saturating_add(1));
+        while next < k && series.get(next).is_some_and(|&(tn, _)| tn <= left) {
+            eff = Some(next);
+            next = next.saturating_add(1);
+        }
+        while dq.front().is_some_and(|&(tf, _)| tf <= left) {
             dq.pop_front();
         }
-        if let Some(&(_, mx)) = dq.front() {
-            if mx > 0.0 && x <= (1.0 - i) * mx {
-                out.push(t);
-            }
+        let in_effect = eff.and_then(|e| series.get(e)).and_then(|&(_, v)| v);
+        let mx = match (dq.front().map(|&(_, v)| v), in_effect) {
+            (Some(a), Some(b)) => a.max(b),
+            (Some(a), None) | (None, Some(a)) => a,
+            (None, None) => continue,
+        };
+        if mx > 0.0 && x <= (1.0 - i) * mx {
+            out.push(t);
         }
     }
     out
