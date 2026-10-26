@@ -1,4 +1,11 @@
 import Browser from "webextension-polyfill";
+import { scamConfirmKey } from "@lib/scam-display";
+import {
+  readStoredScamDisplay,
+  renderScamCard,
+  renderScamLoading,
+  unavailableScamDisplay,
+} from "./scam-card";
 import "./styles.css";
 import "../tokens.css"; // DEEP 토큰: 마지막 import → :root DEEP 값이 styles.css 옛값을 덮음
 
@@ -36,10 +43,25 @@ const requestId = params.get("requestId") ?? "";
 const hostname = params.get("hostname") ?? "";
 const verdictRaw = params.get("verdict") ?? '{"kind":"fail"}';
 const detailsRaw = params.get("details") ?? "";
+const scamRequested = params.get("scam") === "1";
+const reviewRequired = params.get("review") === "1";
 
 let verdict: VerdictDto;
 try {
-  verdict = JSON.parse(verdictRaw) as VerdictDto;
+  const parsed: unknown = JSON.parse(verdictRaw);
+  if (!parsed || typeof parsed !== "object" ||
+      !("kind" in parsed) || !["pass", "warn", "fail"].includes(String(parsed.kind))) {
+    throw new Error("Invalid confirmation verdict");
+  }
+  const candidate = parsed as VerdictDto;
+  verdict = {
+    kind: candidate.kind,
+    matched: Array.isArray(candidate.matched)
+      ? candidate.matched.filter((item) => item && typeof item === "object" &&
+          typeof item.policy_id === "string" && typeof item.severity === "string" &&
+          typeof item.origin === "string" && (item.reason == null || typeof item.reason === "string"))
+      : [],
+  };
 } catch {
   verdict = { kind: "fail" };
 }
@@ -160,6 +182,33 @@ function renderDetails(details: ConfirmDetails | null): HTMLElement | null {
   return el("section", { class: "sig-preview" }, children);
 }
 
+async function loadScamCard(slot: HTMLElement): Promise<void> {
+  const key = scamConfirmKey(requestId);
+  let readTimeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    // Only the race winner renders: a late storage reply cannot replace the
+    // unavailable card after the user has already reviewed it.
+    const stored = await Promise.race([
+      Browser.storage.session.get(key),
+      new Promise<never>((_resolve, reject) => {
+        readTimeout = setTimeout(() => reject(new Error("Scam display read timed out")), 2_500);
+      }),
+    ]);
+    const display = readStoredScamDisplay(stored[key], requestId, Date.now());
+    slot.replaceChildren(renderScamCard(display));
+  } catch {
+    slot.replaceChildren(renderScamCard(unavailableScamDisplay()));
+  } finally {
+    if (readTimeout !== undefined) clearTimeout(readTimeout);
+    // One request owns one display payload. Reading it never changes a decision.
+    try {
+      void Browser.storage.session.remove(key).catch(() => {});
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
 function render(): void {
   const root = document.getElementById("root");
   if (!root) return;
@@ -167,7 +216,11 @@ function render(): void {
   const kind = verdict.kind;
   const isFail = kind === "fail";
   const isWarn = kind === "warn";
-  const c = COPY[kind] ?? COPY.fail;
+  const isPassReview = kind === "pass" && (scamRequested || reviewRequired);
+  const visualKind = isPassReview ? "review" : kind;
+  const c = isPassReview
+    ? { head: "서명 전 검사 결과", sub: "정책 판정과 Scam Filter 검사 정보를 확인한 뒤 진행 여부를 선택하세요." }
+    : COPY[kind] ?? COPY.fail;
 
   // ── top bar (navy) ──
   const mk = document.createElement("img");
@@ -190,16 +243,16 @@ function render(): void {
 
   // ── guard hero ──
   const face = document.createElement("img");
-  face.src = STATE_MARTEN[kind] ?? STATE_MARTEN.pass;
+  face.src = isPassReview ? markWhite : STATE_MARTEN[kind] ?? STATE_MARTEN.fail;
   face.alt = "";
-  const guard = el("div", { class: `guard ${kind}` }, [
+  const guard = el("div", { class: `guard ${visualKind}` }, [
     el("div", { class: "ring" }),
     el("div", { class: "face" }, [face]),
   ]);
-  guard.appendChild(svgSpan("badge", BADGE[kind] ?? BADGE.fail));
-  const hero = el("div", { class: `hero ${kind}` }, [
+  guard.appendChild(svgSpan("badge", isPassReview ? SVG.info : BADGE[kind] ?? BADGE.fail));
+  const hero = el("div", { class: `hero ${visualKind}` }, [
     guard,
-    el("div", { class: `headline ${kind}`, text: c.head }),
+    el("div", { class: `headline ${visualKind}`, text: c.head }),
     el("div", { class: "sub", text: c.sub }),
   ]);
 
@@ -222,6 +275,12 @@ function render(): void {
   }
   const detailsCard = renderDetails(details);
   if (detailsCard) body.appendChild(detailsCard);
+  let scamSlot: HTMLElement | null = null;
+  if (scamRequested) {
+    scamSlot = el("div", { class: "scam-slot" }, [renderScamLoading()]);
+    scamSlot.setAttribute("aria-live", "polite");
+    body.appendChild(scamSlot);
+  }
 
   const matched = verdict.matched ?? [];
   if (matched.length === 0) {
@@ -267,11 +326,13 @@ function render(): void {
   });
   cancelBtn.addEventListener("click", () => void reply(false));
   footer.appendChild(cancelBtn);
-  if (isWarn) {
-    const approveBtn = el("button", {
+  let approveBtn: HTMLButtonElement | null = null;
+  if (isWarn || (kind === "pass" && reviewRequired)) {
+    approveBtn = el("button", {
       class: "btn-approve",
-      text: "Trust and proceed",
+      text: isWarn ? "Trust and proceed" : "Continue",
     });
+    approveBtn.disabled = scamRequested;
     approveBtn.addEventListener("click", () => void reply(true));
     footer.appendChild(approveBtn);
   }
@@ -280,10 +341,14 @@ function render(): void {
   root.appendChild(hero);
   root.appendChild(body);
   root.appendChild(footer);
+  // Storage must never delay the existing cancel/deny controls.
+  if (scamSlot) void loadScamCard(scamSlot).finally(() => {
+    if (approveBtn) approveBtn.disabled = false;
+  });
 }
 
 // On window close (X button), treat as cancel — already-failed verdicts
-// just dismiss; warn verdicts treat close as "user did not approve".
+// just dismiss; requests awaiting review treat close as "user did not approve".
 window.addEventListener("beforeunload", () => {
   // Persist a final "decided: ok=false" so the SW poll loop sees the
   // close intent if the runtime message racing with unload doesn't land.

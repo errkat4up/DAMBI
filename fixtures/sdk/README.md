@@ -214,6 +214,10 @@ GIWA Sepolia 풀 1개, 24시간+warm-up 1시간, `rpc_anchor + number_recheck`, 
 
 `1bd37ca` 이후 변경: 로컬 발행기 → 독립 Registry API/HTTP source → Runtime → Native/WASM 검증·원자적 설치를 연결했다. 별도 역할 키·scope·유효기간·sequence·호환성 검사, 실패한 갱신의 정책/기존 스캠 상태 보존, 계획별 snapshot 고정과 취소를 다룬다. **SF5-1 구현·사용자 검증 완료.** 사용자 제공 로그에서 production/시험용 WASM 빌드 성공, SDK HTTP·서명 번들 통합 19개, 기존 스캠 회귀 18개, 발행기 4개, Registry API 59개 사례를 확인했다. **확인한 시험 합계 100개·남은 실패 0개**이며 첨부에서 생략된 Native 시험 개별 건수는 합산하지 않았다. API 최초 58개 통과 후 불변 sequence의 미발행 404 기대값을 기존 `no-store` 규칙에 맞췄고, 해당 1개 재시험도 통과했다. 재시험의 31개 skipped는 이름 필터로 제외한 사례다. 운영 키 생성·서비스 배포·실제 알고리즘 연결은 실행하지 않았으며 SF5-2 화면 연결과 SF6 전체 분석 성능 검증은 남아 있다. 사용법은 [Core README](../../packages/core/README.md#signed-scam-filter-bundles-sf5-1-development)에 둔다.
 
+## SF5-2 — 확장 서명 전 최소 표시
+
+SF5-1 로컬 커밋 `d192866` 후 SF5-2 변경 범위: 명시적인 로컬 시연 설정으로 기존 정책 엔진과 SDK 검사를 병행하고, 별도 세션 저장을 통해 서명 전 카드에 상태·기준 블록·규칙 근거·누락·검사 범위를 표시한다. 기존 차단·취소를 보존하고 무설정 호스트는 기존 흐름을 유지한다. classic MV3 Service Worker 소비를 위해 SDK의 generated JS를 정적으로 번들링하고 WASM 초기화는 지연한다. **사용자 자동 시험 검증 완료: 중복 제외 84개 통과·남은 실패 0개(오케스트레이터 57·확인 화면 8·카드 9·Worker 번들 1·호스트 9). 개발용 확장 빌드도 pages·Service Worker·dashboard 모두 성공했다.** 운영용 `REGISTRY_BASE_URL` 미설정으로 중단됐던 빌드 안내를 기존 개발용 일회성 경로로 정정했다. 산출물에 legacy/Core WASM 두 파일과 확인 화면·대시보드가 포함됐고, Vite 경고의 `picture/dambi-glyph-navy.png`도 실제 출력 폴더에 있다. chunk 크기 경고는 남는다. 에이전트는 빌드·시험·RPC를 실행하지 않았다. 로컬 시연 설정 연결·실제 서명 전 화면 확인, 실제 알고리즘 인수 및 전체 검사 2.5초 달성은 미검증이다. 실행·설정 절차는 [로컬 시연 안내](../../browser-extension/docs/scam-filter-local-demo.md)에 둔다.
+
 ## 번들 B1-1 — Universal Router
 
 2026-10-12, `main 7387536` 이후 B1-1 변경 검증: **Native 원문 2개 시험과 패키지 WASM 3개 시험 통과, 최종 WASM 로그 3 통과·0 실패.** 저장된 snapshot은 801개이며 기존 799개 내용 보존·UR 2개 추가·digest/bytes 일치를 확인했다. source-context 제외 30,484개와 Aave 거절 3개는 유지한다. 별도 `decoder_snapshot` target의 전체 결과는 공유되지 않았다. 대표 UR 경로의 편입·검증을 마쳤으며 다음은 B1-2 Aave다.

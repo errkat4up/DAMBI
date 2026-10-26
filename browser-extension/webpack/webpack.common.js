@@ -16,6 +16,7 @@ const targetBrowser = process.env.TARGET_BROWSER || "chrome";
 const distTarget = process.env.DAMBI_EXTENSION_DIST_TARGET || targetBrowser;
 const extRoot = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(extRoot, "..");
+const coreDist = path.join(repoRoot, "packages", "core", "dist");
 const mode = buildMode();
 
 // Load the mode-specific env file into Node's `process.env` BEFORE config-time
@@ -45,6 +46,10 @@ const stripConsole = process.env.DAMBI_STRIP_CONSOLE === "1";
 const sharedResolve = {
   extensions: [".ts", ".tsx", ".js", ".json"],
   alias: {
+    // Build the SDK first; consume only its public, production package entries.
+    "@dambi/core$": path.join(coreDist, "index.js"),
+    "@dambi/core/adapters$": path.join(coreDist, "adapters", "index.js"),
+    "@dambi/core/decoders$": path.join(coreDist, "decoders.js"),
     "@lib": path.join(backendDir, "lib"),
     "@background": path.join(backendDir, "service-worker"),
   },

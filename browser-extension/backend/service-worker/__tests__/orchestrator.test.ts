@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuditEntry } from "../storage";
 import type { TransactionDecoding } from "../wasm-bridge";
+import { scamConfirmKey, type ScamDisplay } from "@lib/scam-display";
 import {
   RequestType,
   isUntypedSignature,
@@ -32,6 +33,7 @@ const mocks = vi.hoisted(() => {
   const localStore = new Map<string, unknown>();
   const runtimeMessageListeners: Array<(message: unknown) => void> = [];
   const windowRemovedListeners: Array<(windowId: number) => void> = [];
+  const cancelScam = vi.fn(() => undefined);
 
   const readStore = async (
     store: Map<string, unknown>,
@@ -61,6 +63,11 @@ const mocks = vi.hoisted(() => {
     localStore,
     runtimeMessageListeners,
     windowRemovedListeners,
+    cancelScam,
+    beginScamCheck: vi.fn<(...args: unknown[]) => { promise: Promise<ScamDisplay | undefined>; cancel(): void }>(
+      () => ({ promise: Promise.resolve(undefined), cancel: cancelScam }),
+    ),
+    shouldWarnModal: vi.fn(() => true),
     ensureDefaultPoliciesInstalled: vi.fn(async () => undefined),
     pendingPut: vi.fn(async () => undefined),
     pendingDelete: vi.fn(async () => undefined),
@@ -116,6 +123,9 @@ const mocks = vi.hoisted(() => {
             for (const [key, value] of Object.entries(entries))
               sessionStore.set(key, value);
           }),
+          remove: vi.fn(async (keys: string | string[]) => {
+            for (const key of typeof keys === "string" ? [keys] : keys) sessionStore.delete(key);
+          }),
         },
         local: {
           get: vi.fn((keys?: string | string[] | Record<string, unknown>) =>
@@ -158,6 +168,11 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("webextension-polyfill", () => ({ default: mocks.browser }));
+vi.mock("../scam-filter", () => ({ beginScamCheck: mocks.beginScamCheck }));
+vi.mock("../notify-settings", () => ({
+  ensureLoaded: vi.fn(async () => undefined),
+  shouldWarnModal: mocks.shouldWarnModal,
+}));
 vi.mock("../policies-loader", () => ({
   ensureDefaultPoliciesInstalled: mocks.ensureDefaultPoliciesInstalled,
 }));
@@ -377,6 +392,14 @@ function approve(requestId: string, ok: boolean): void {
   }
 }
 
+function lastConfirmUrl(): URL {
+  const call = mocks.browser.windows.create.mock.calls.at(-1) as unknown as
+    | [{ url: string }]
+    | undefined;
+  expect(call).toBeDefined();
+  return new URL(call![0].url);
+}
+
 describe("inferActor — per-actor lock key (venue coverage)", () => {
   it("returns the tx `from` for a transaction", () => {
     expect(inferActor(txMessage())).toBe(OWNER);
@@ -436,6 +459,10 @@ describe("orchestrator", () => {
     mocks.localStore.clear();
     mocks.runtimeMessageListeners.length = 0;
     mocks.windowRemovedListeners.length = 0;
+    mocks.beginScamCheck.mockImplementation(() => ({
+      promise: Promise.resolve(undefined), cancel: mocks.cancelScam,
+    }));
+    mocks.shouldWarnModal.mockReturnValue(true);
     // v3 route default: miss → fail-closed path. The v2 plan/dispatch/evaluate
     // mocks resolve to inert pass-shaped values; only the v2-path cases below
     // override the v3 route to a hit.
@@ -481,6 +508,73 @@ describe("orchestrator", () => {
       decoderId: "registry-v2.uniswap/v3/exactInputSingle",
     },
   };
+
+  const scamDisplay: ScamDisplay = {
+    version: 1, kind: "report", holding: "unknown",
+    report: {
+      status: "insufficient", reasons: ["algorithm_unavailable"], targets: [],
+      scopeNotice: "patterns_only_no_sellability_guarantee",
+    },
+  };
+
+  it("SF5-2: an otherwise passing request waits for Scam review and respects cancel or approval", async () => {
+    for (const ok of [false, true]) {
+      mocks.tryDeclarativeRouteV3.mockResolvedValueOnce(v3HitOutcome);
+      mocks.beginScamCheck.mockReturnValueOnce({ promise: Promise.resolve(scamDisplay), cancel: mocks.cancelScam });
+      const message = txMessage(`scam-pass-${ok}`);
+      const onAwaitingUser = vi.fn();
+      let settled = false;
+      const pending = decideMessage(message, { onAwaitingUser }).then((result) => { settled = true; return result; });
+      await vi.waitFor(() => expect(onAwaitingUser).toHaveBeenCalledOnce());
+      expect(settled).toBe(false);
+      const url = lastConfirmUrl();
+      expect(url.searchParams.get("scam")).toBe("1");
+      expect(url.searchParams.get("review")).toBe("1");
+      expect(JSON.parse(url.searchParams.get("verdict")!)).toEqual({ kind: "pass" });
+      expect(url.toString()).not.toContain("algorithm_unavailable");
+      expect(mocks.sessionStore.get(scamConfirmKey(message.requestId))).toMatchObject({
+        requestId: message.requestId, display: scamDisplay, expiresAtMs: expect.any(Number),
+      });
+      approve(message.requestId, ok);
+      expect(await pending).toMatchObject({ ok, verdict: { kind: "pass" } });
+    }
+    expect(mocks.cancelScam).toHaveBeenCalledTimes(2);
+  });
+
+  it("SF5-2: Scam information never makes a policy denial approvable", async () => {
+    mocks.tryDeclarativeRouteV3.mockResolvedValueOnce(v3HitOutcome);
+    const verdict = { kind: "fail", matched: [{ policy_id: "deny-1", reason: "blocked", severity: "deny", origin: "action" }] };
+    mocks.evaluateActionV2.mockResolvedValueOnce(verdict);
+    mocks.beginScamCheck.mockReturnValueOnce({ promise: Promise.resolve(scamDisplay), cancel: mocks.cancelScam });
+    const onAwaitingUser = vi.fn();
+    const result = await decideMessage(txMessage("scam-deny"), { onAwaitingUser });
+    expect(result).toEqual({ ok: false, verdict });
+    expect(onAwaitingUser).not.toHaveBeenCalled();
+    expect(mocks.runtimeMessageListeners).toHaveLength(0);
+    expect(lastConfirmUrl().searchParams.get("scam")).toBe("1");
+    expect(lastConfirmUrl().searchParams.has("review")).toBe(false);
+  });
+
+  it("SF5-2: disabling ordinary warning modals does not skip an opted-in Scam review", async () => {
+    mocks.shouldWarnModal.mockReturnValue(false);
+    mocks.beginScamCheck.mockReturnValueOnce({ promise: Promise.resolve(scamDisplay), cancel: mocks.cancelScam });
+    const result = await decideAndApprove(txMessage("scam-warn-modal-disabled"), false);
+    expect(result).toMatchObject({ ok: false, verdict: { kind: "warn" } });
+    expect(lastConfirmUrl().searchParams.get("review")).toBe("1");
+    expect(mocks.browser.windows.create).toHaveBeenCalledOnce();
+  });
+
+  it("SF5-2: a legacy route_failed fallback pass still requires Scam review", async () => {
+    mocks.tryDeclarativeRouteV3.mockResolvedValueOnce(v3HitOutcome);
+    mocks.resolveBundlesForWallet.mockRejectedValueOnce(new mocks.MockEngineError("route_failed", "legacy route miss"));
+    mocks.beginScamCheck.mockReturnValueOnce({ promise: Promise.resolve(scamDisplay), cancel: mocks.cancelScam });
+    const result = await decideAndApprove(txMessage("scam-legacy-pass"), false);
+    expect(result).toMatchObject({ ok: false, verdict: { kind: "pass" } });
+    expect(mocks.evaluateActionV2).not.toHaveBeenCalled();
+    expect(lastConfirmUrl().searchParams.get("scam")).toBe("1");
+    expect(lastConfirmUrl().searchParams.get("review")).toBe("1");
+    expect(mocks.cancelScam).toHaveBeenCalledOnce();
+  });
 
   it("p2: v3 hit with a real ActionBody drives the v2 verdict (verdictSource=declarative-v2)", async () => {
     mocks.tryDeclarativeRouteV3.mockResolvedValueOnce(v3HitOutcome);

@@ -17,6 +17,9 @@
     "outDir": "dist",
     "baseUrl": ".",
     "paths": {
+      "@dambi/core": ["../packages/core/dist/index.d.ts"],
+      "@dambi/core/adapters": ["../packages/core/dist/adapters/index.d.ts"],
+      "@dambi/core/decoders": ["../packages/core/dist/decoders.d.ts"],
       "@lib/*": ["backend/lib/*"],
       "@background/*": ["backend/service-worker/*"]
     }

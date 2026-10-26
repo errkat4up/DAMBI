@@ -1,4 +1,7 @@
 import Browser from "webextension-polyfill";
+import type { ScamDisplay } from "@lib/scam-display";
+import { beginScamCheck } from "./scam-filter";
+import { storeScamDisplay } from "./scam-confirm";
 import { markPhase, captureTimeout } from "./diagnostics";
 import {
   tryDeclarativeRouteV3,
@@ -243,7 +246,12 @@ async function decideInner(
   };
   await pendingPut(pending);
 
+  let scamCheck: ReturnType<typeof beginScamCheck> | undefined;
+  let decided: DecisionResult | undefined;
   try {
+    // Independent analysis runs within its own deadline, alongside the existing
+    // policy lifecycle. Its SDK policy verdict never replaces the user's policy.
+    scamCheck = beginScamCheck(message);
     const { result: lifecycle, timedOut } = await withTimeout(
       runLifecycle(message),
       HARD_TIMEOUT_MS,
@@ -263,6 +271,7 @@ async function decideInner(
       await captureTimeout(message.requestId, txSummaryForDiag(message));
     }
     const { verdict } = lifecycle;
+    const scam = await scamCheck.promise;
 
     // 표시 전용 advisory 데스크톱 알림 — 라이브 위험(fail|warn) verdict 에서만.
     // fire-and-forget: `ok`·confirm 창·`dambi:verdict-decision` 채널 어디에도
@@ -297,13 +306,15 @@ async function decideInner(
     }
 
     let ok = false;
-    // user_decision is only meaningful for WARN — PASS auto-passes and FAIL's
-    // popup is informational only. WARN's `ok` boolean (trust vs. cancel/X)
-    // is mapped to the storage enum and persisted on the audit row so the
-    // history view can render agree/deny without round-tripping.
+    // An opted-in scam check also requires review of an otherwise passing
+    // transaction. The original policy verdict remains unchanged.
     let userDecision: "trusted" | "cancelled" | null = null;
     if (verdict.kind === "pass") {
-      ok = true;
+      ok = scam === undefined || await openVerdictWindowAndAwait(
+        message.requestId, message.data.hostname, verdict,
+        confirmDetailsForMessage(message), options.onAwaitingUser, scam,
+      );
+      if (scam !== undefined) userDecision = ok ? "trusted" : "cancelled";
     } else if (verdict.kind === "fail") {
       // Surface the matched policies in a popup so the user understands
       // why the dApp's transaction returned 4001. The popup is
@@ -313,21 +324,23 @@ async function decideInner(
         message.data.hostname,
         verdict,
         confirmDetailsForMessage(message),
+        scam,
       );
     } else {
-      // Warn: 설정(modal)에 따라 인터셉트 모달을 띄울지 결정. modal="both" 면
+      // 별도 스캠 검토가 없을 때 Warn 설정(modal)에 따라 모달을 띄운다. modal="both" 면
       // 모달을 열어 사용자 Trust/Cancel 을 기다리고, modal="block"(차단만) 이면
       // 경고로 흐름을 막지 않고 자동 진행한다(ok=true) — advisory 데스크톱 알림 ·
       // 토스트는 onRiskyVerdict 경로에서 별도로 발사되므로 사용자는 여전히 통지받음.
       // FAIL 차단에는 영향 없음(위 분기에서 항상 모달+차단).
       await ensureNotifySettings();
-      if (shouldWarnModal()) {
+      if (scam !== undefined || shouldWarnModal()) {
         ok = await openVerdictWindowAndAwait(
           message.requestId,
           message.data.hostname,
           verdict,
           confirmDetailsForMessage(message),
           options.onAwaitingUser,
+          scam,
         );
         userDecision = ok ? "trusted" : "cancelled";
       } else {
@@ -337,6 +350,7 @@ async function decideInner(
       }
     }
 
+    decided = { ok, verdict };
     await appendAudit(
       message,
       pending.type,
@@ -348,6 +362,8 @@ async function decideInner(
     );
     return { ok, verdict };
   } catch (err) {
+    // An audit write failure must not undo a completed cancellation or approval.
+    if (decided) return decided;
     const errInfo =
       err instanceof Error
         ? {
@@ -396,13 +412,29 @@ async function decideInner(
       });
     }
     const verdict = engineErrorVerdict(err);
-    await appendAudit(message, pending.type, verdict);
+    const scam = await scamCheck?.promise;
+    let ok = verdict.kind === "pass";
+    let userDecision: "trusted" | "cancelled" | null = null;
+    // A legacy route miss can become pass here. It must still display an
+    // opted-in scam result instead of silently bypassing pre-sign review.
+    if (scam !== undefined) {
+      if (verdict.kind === "fail") {
+        await openVerdictWindow(message.requestId, message.data.hostname,
+          verdict, confirmDetailsForMessage(message), scam);
+      } else {
+        ok = await openVerdictWindowAndAwait(message.requestId, message.data.hostname,
+          verdict, confirmDetailsForMessage(message), options.onAwaitingUser, scam);
+        userDecision = ok ? "trusted" : "cancelled";
+      }
+    }
+    await appendAudit(message, pending.type, verdict, undefined, undefined, undefined, userDecision);
     // `engineErrorVerdict` may downgrade some failures (e.g. route_failed)
     // to a pass — in that case the inpage proxy must be told to forward the
     // request to the wallet, so `ok` has to track the verdict, not be
     // hard-coded to false.
-    return { ok: verdict.kind === "pass", verdict };
+    return { ok, verdict };
   } finally {
+    scamCheck?.cancel();
     await pendingDelete(message.requestId);
   }
 }
@@ -1942,8 +1974,10 @@ async function openVerdictWindow(
   hostname: string,
   verdict: VerdictDto,
   details: ConfirmDetails | null = null,
+  scam?: ScamDisplay,
 ): Promise<void> {
-  const url = buildConfirmUrl(requestId, hostname, verdict, details);
+  if (scam) await storeScamDisplay(requestId, scam);
+  const url = buildConfirmUrl(requestId, hostname, verdict, details, scam !== undefined);
   try {
     await Browser.windows.create({
       url,
@@ -1964,8 +1998,8 @@ async function openVerdictWindow(
 }
 
 /**
- * Open the verdict modal and await the user's choice. Used for Warn
- * verdicts. Survives SW restart via storage.session decision durability.
+ * Open the verdict modal for a policy warning or an opted-in scam review.
+ * Survives SW restart via storage.session decision durability.
  */
 async function openVerdictWindowAndAwait(
   requestId: string,
@@ -1973,6 +2007,7 @@ async function openVerdictWindowAndAwait(
   verdict: VerdictDto,
   details: ConfirmDetails | null = null,
   onAwaitingUser?: () => void,
+  scam?: ScamDisplay,
 ): Promise<boolean> {
   const all =
     ((
@@ -1986,7 +2021,8 @@ async function openVerdictWindowAndAwait(
   all[requestId] = { verdict, status: "awaiting" };
   await Browser.storage.session.set({ [PENDING_DECISION_KEY]: all });
 
-  const url = buildConfirmUrl(requestId, hostname, verdict, details);
+  if (scam) await storeScamDisplay(requestId, scam);
+  const url = buildConfirmUrl(requestId, hostname, verdict, details, scam !== undefined);
   let win: Browser.Windows.Window;
   try {
     win = await Browser.windows.create({
@@ -2066,6 +2102,7 @@ function buildConfirmUrl(
   hostname: string,
   verdict: VerdictDto,
   details: ConfirmDetails | null = null,
+  hasScam = false,
 ): string {
   const params = new URLSearchParams({
     requestId,
@@ -2073,6 +2110,10 @@ function buildConfirmUrl(
     verdict: JSON.stringify(verdict),
   });
   if (details) params.set("details", JSON.stringify(details));
+  if (hasScam) {
+    params.set("scam", "1");
+    if (verdict.kind !== "fail") params.set("review", "1");
+  }
   return Browser.runtime.getURL(`confirm.html?${params.toString()}`);
 }
 

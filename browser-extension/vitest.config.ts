@@ -19,14 +19,26 @@ export default defineConfig({
     exclude: ["**/node_modules/**", "**/node_modules.nosync/**", "**/dist/**"],
   },
   resolve: {
-    alias: {
-      "@lib": path.resolve(__dirname, "backend/lib"),
-      "@background": path.resolve(__dirname, "backend/service-worker"),
+    alias: [
+      {
+        find: /^@dambi\/core$/,
+        replacement: path.resolve(__dirname, "../packages/core/dist/index.js"),
+      },
+      {
+        find: /^@dambi\/core\/adapters$/,
+        replacement: path.resolve(__dirname, "../packages/core/dist/adapters/index.js"),
+      },
+      {
+        find: /^@dambi\/core\/decoders$/,
+        replacement: path.resolve(__dirname, "../packages/core/dist/decoders.js"),
+      },
+      { find: "@lib", replacement: path.resolve(__dirname, "backend/lib") },
+      { find: "@background", replacement: path.resolve(__dirname, "backend/service-worker") },
       // Dashboard tests resolve `@dambi/sdk` the same way the dashboard
       // Vite build does (see `dashboard/vite.config.ts`). Keeping the
       // alias here lets `dashboard/**/*.test.tsx` files run under the
       // single root vitest config.
-      "@dambi/sdk": path.resolve(__dirname, "sdk/extension-client.ts"),
-    },
+      { find: "@dambi/sdk", replacement: path.resolve(__dirname, "sdk/extension-client.ts") },
+    ],
   },
 });

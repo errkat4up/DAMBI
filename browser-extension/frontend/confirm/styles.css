@@ -45,7 +45,8 @@ body {
 }
 
 #root {
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--white);
@@ -165,6 +166,10 @@ body {
 .guard.pass .badge {
   background: var(--pass-500);
 }
+.guard.review .face,
+.guard.review .badge {
+  background: var(--brand-700);
+}
 
 .headline {
   font-size: 19px;
@@ -194,6 +199,7 @@ body {
 /* ── body ── */
 .body {
   flex: 1 1 auto;
+  min-height: 0;
   padding: 6px 16px 16px;
   display: flex;
   flex-direction: column;
@@ -271,6 +277,86 @@ body {
   margin-top: 6px;
   font-size: 10px;
   color: var(--slate-400);
+}
+
+/* Scam evidence stays separate from the policy verdict and its controls. */
+.scam-card {
+  border: 1px solid var(--hair);
+  border-radius: var(--r-md);
+  padding: 11px;
+  background: var(--fog);
+  overflow-wrap: anywhere;
+}
+.scam-warn {
+  background: #fdf8ec;
+  border-color: #f2dda6;
+}
+.scam-title,
+.scam-target h3,
+.scam-rule h4 {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.scam-title {
+  font-size: 14px;
+}
+.scam-status {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 6px 0;
+}
+.scam-warn > .scam-status {
+  color: var(--warn-700);
+}
+.scam-meta,
+.scam-note,
+.scam-scope,
+.scam-test-mode {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--slate-600);
+}
+.scam-scope,
+.scam-test-mode {
+  padding: 8px;
+  border: 1px solid var(--hair);
+  border-radius: 7px;
+  background: var(--white);
+}
+.scam-test-mode {
+  font-weight: 700;
+  color: var(--warn-700);
+  border-color: #f2dda6;
+}
+.scam-target,
+.scam-rule {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hair);
+}
+.scam-rule-fired h4 {
+  color: var(--warn-700);
+}
+.scam-evidence {
+  margin-top: 7px;
+  font-size: 11px;
+}
+.scam-evidence summary {
+  cursor: pointer;
+  color: var(--slate-600);
+}
+.scam-evidence pre {
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 8px;
+  border-radius: 7px;
+  border: 1px solid var(--hair);
+  background: var(--white);
+  font: 10px/1.5 var(--ff-mono);
 }
 
 .matched-label {
@@ -410,4 +496,9 @@ button:active {
 }
 .btn-approve:hover {
   background: var(--warn-600);
+}
+.btn-approve:disabled {
+  opacity: 0.5;
+  cursor: wait;
+  background: var(--warn-500);
 }
