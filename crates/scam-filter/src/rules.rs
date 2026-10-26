@@ -1,8 +1,14 @@
 //! Rule evaluation on the window `(B, T]`, `B = max(T - X1, pool creation)`.
 //!
 //! Outcomes: `fired` when the observed events alone meet the threshold; `clear` only when the
-//! whole window is observed (and, for R1/R2, the warm-up state is complete); `incomplete`
-//! otherwise; `not_evaluable` when the rule cannot run at this resolution or has no data.
+//! whole window is observed and the rule's warm-up is met; `incomplete` otherwise;
+//! `not_evaluable` when the rule cannot run at this resolution or has no data.
+//!
+//! Pool-history rules need the host's `warmup.complete` (a faithful block-level record) to be
+//! `clear`, and observed history before `B` (cut at pool creation): cumulative R1 and R2 need
+//! [`WARMUP_SEC`], window_drop needs `windowSec`, step R1 none. event_count needs neither.
+//! With the warm-up met, cumulative R1 and R2 approximate the full-history result; the other
+//! rules match it exactly.
 use crate::generators::{cumulative_events, drop_events, step_events, zigzag_switches, Sample};
 use crate::series::{coverage_bps, metric_series};
 use crate::types::*;
@@ -10,6 +16,10 @@ use crate::{AlgorithmPort, CONTRACT_VERSION};
 
 /// Longest lookback the MVP supports (24 h).
 pub const MAX_LOOKBACK_SEC: u64 = 86_400;
+
+/// Observed history required before the window start for the stateful generators (cumulative
+/// R1, R2), unless the history reaches pool creation.
+pub const WARMUP_SEC: u64 = 86_400;
 
 /// The MVP window-rule algorithm.
 #[derive(Clone, Copy, Debug, Default)]
@@ -92,8 +102,8 @@ struct Finding {
     events: Vec<EvidenceEvent>,
     /// (coverage bps of the window, undefined point inside the window)
     coverage: (u32, bool),
-    /// R1/R2 depend on the generator state at the window start.
-    needs_warmup: bool,
+    /// Why the pool history does not support `clear` (unverified, or warm-up too short).
+    warm: Option<Reason>,
 }
 
 struct Ctx<'a> {
@@ -104,10 +114,14 @@ struct Ctx<'a> {
 
 impl Ctx<'_> {
     fn window_start(&self, lookback_ms: i64) -> i64 {
-        let b = self.t.saturating_sub(lookback_ms);
+        self.window_floor(self.t.saturating_sub(lookback_ms))
+    }
+
+    /// `t` raised to the pool creation time when it is known.
+    fn window_floor(&self, t: i64) -> i64 {
         match self.req.token_profile.pool_created_ms {
-            Some(c) => b.max(c),
-            None => b,
+            Some(c) => t.max(c),
+            None => t,
         }
     }
 
@@ -126,6 +140,18 @@ impl Ctx<'_> {
         (cov, undefined_inside)
     }
 
+    /// Pool-history check: the host vouches for the history (`warmup.complete`) and
+    /// `(max(b - need_ms, pool creation), b]` is observed (nothing more when `need_ms` is 0).
+    fn warm(&self, series: &[Sample], b: i64, need_ms: i64) -> Option<Reason> {
+        if !self.req.pool_history.warmup.complete {
+            return Some(Reason::HistoryUnverified);
+        }
+        let start = self.window_floor(b.saturating_sub(need_ms));
+        let first = series.first().map(|s| s.0);
+        (need_ms > 0 && coverage_bps(start, b, first, &self.req.pool_history.missing) < 10_000)
+            .then_some(Reason::WarmupIncomplete)
+    }
+
     fn result(&self, rule: &RuleSpec, f: Finding) -> RuleResult {
         let Finding {
             fired,
@@ -134,19 +160,18 @@ impl Ctx<'_> {
             window,
             events,
             coverage,
-            needs_warmup,
+            warm,
         } = f;
-        let warmup = self.req.pool_history.warmup.complete;
         let (cov, undefined_inside) = coverage;
         let full = cov == 10_000 && !undefined_inside;
         let (outcome, reason) = if fired {
             (Outcome::Fired, None)
-        } else if full && (warmup || !needs_warmup) {
-            (Outcome::Clear, None)
         } else if !full {
             (Outcome::Incomplete, Some(Reason::PartialCoverage))
+        } else if let Some(r) = warm {
+            (Outcome::Incomplete, Some(r))
         } else {
-            (Outcome::Incomplete, Some(Reason::WarmupIncomplete))
+            (Outcome::Clear, None)
         };
         RuleResult {
             rule_id: rule.id().to_string(),
@@ -157,7 +182,7 @@ impl Ctx<'_> {
             window,
             events,
             coverage_bps: cov,
-            warmup_complete: warmup,
+            warmup_complete: warm.is_none(),
         }
     }
 
@@ -213,7 +238,7 @@ impl Ctx<'_> {
                     window,
                     events: ev_out,
                     coverage: (cov, false),
-                    needs_warmup: false,
+                    warm: None,
                 },
             ));
         }
@@ -237,6 +262,11 @@ impl Ctx<'_> {
                 mode,
                 ..
             } => {
+                let need = match mode {
+                    ChangeMode::Step => 0,
+                    ChangeMode::Cumulative => secs_to_ms(WARMUP_SEC)?,
+                };
+                let warm = self.warm(&series, b, need);
                 let i = frac(*min_change_bps);
                 let all = match mode {
                     ChangeMode::Step => step_events(&series, i, *direction),
@@ -253,7 +283,7 @@ impl Ctx<'_> {
                         window,
                         events: evidence(&ev, "change", cap),
                         coverage: cov,
-                        needs_warmup: true,
+                        warm,
                     },
                 )
             }
@@ -265,6 +295,7 @@ impl Ctx<'_> {
             } => {
                 let all = zigzag_switches(&series, frac(*reversal_bps), *switch_kind);
                 let x2 = secs_to_ms(*window_sec)?;
+                let warm = self.warm(&series, b, secs_to_ms(WARMUP_SEC)?);
                 match r2_evidence(&all, x2, b, self.t) {
                     Some((n, lo, end)) => {
                         let ev = in_window(&all, lo, end);
@@ -281,7 +312,7 @@ impl Ctx<'_> {
                                 window: w,
                                 events: evidence(&ev, "switch", cap),
                                 coverage: cov,
-                                needs_warmup: true,
+                                warm,
                             },
                         )
                     }
@@ -294,7 +325,7 @@ impl Ctx<'_> {
                             window,
                             events: Vec::new(),
                             coverage: cov,
-                            needs_warmup: true,
+                            warm,
                         },
                     ),
                 }
@@ -320,7 +351,7 @@ impl Ctx<'_> {
                         window: w.or(window),
                         events: evidence(&ev, "drop", cap),
                         coverage: cov,
-                        needs_warmup: false,
+                        warm: self.warm(&series, b, x2),
                     },
                 )
             }

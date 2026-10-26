@@ -33,6 +33,19 @@ fn generator_examples() {
 }
 
 #[test]
+fn drop_uses_the_value_in_effect_at_the_window_start() {
+    // 100 is replaced by 50 at 10 s, so during [15 s, 75 s] the values in effect are 50, 80, 45:
+    // 45 is not a 50 % drop from 80 (the old 100 no longer counts).
+    let d = s(&[
+        (0, Some(100.0)),
+        (10_000, Some(50.0)),
+        (70_000, Some(80.0)),
+        (75_000, Some(45.0)),
+    ]);
+    assert_eq!(drop_events(&d, 0.5, 60_000), vec![10_000]);
+}
+
+#[test]
 fn zero_and_undefined_values() {
     let liq = s(&[
         (0, Some(10.0)),
@@ -151,6 +164,12 @@ fn request(
     }
 }
 
+/// The history starts at pool creation (a young pool): every warm-up requirement is met.
+fn young(mut req: AnalysisRequest) -> AnalysisRequest {
+    req.token_profile.pool_created_ms = Some(req.pool_history.from_ms);
+    req
+}
+
 fn r2(window_sec: u64) -> RuleSpec {
     RuleSpec::SwitchDensity {
         id: "r2".into(),
@@ -211,15 +230,20 @@ fn drain_to_zero_fires_and_clear_needs_full_coverage() {
     assert_eq!(drained.rules[0].outcome, Outcome::Fired);
 
     let flat = ["10", "10", "10", "10", "10"];
-    let clear = run(&request(&flat, vec![drop_rule(30)], vec![], true));
+    let clear = run(&young(request(&flat, vec![drop_rule(30)], vec![], true)));
     assert_eq!(clear.rules[0].outcome, Outcome::Clear);
     assert_eq!(clear.rules[0].coverage_bps, 10_000);
+
+    // history starts at B but the pool is older: the 30 s before B are unobserved
+    let cold = run(&request(&flat, vec![drop_rule(30)], vec![], true));
+    assert_eq!(cold.rules[0].outcome, Outcome::Incomplete);
+    assert_eq!(cold.rules[0].reason, Some(Reason::WarmupIncomplete));
 
     let gap = vec![TimeRange {
         from_ms: T - 25_000,
         to_ms: T - 15_000,
     }];
-    let partial = run(&request(&flat, vec![drop_rule(30)], gap, true));
+    let partial = run(&young(request(&flat, vec![drop_rule(30)], gap, true)));
     assert_eq!(partial.rules[0].outcome, Outcome::Incomplete);
     assert_eq!(partial.rules[0].reason, Some(Reason::PartialCoverage));
     assert_eq!(partial.rules[0].coverage_bps, 7_500);
@@ -229,23 +253,69 @@ fn drain_to_zero_fires_and_clear_needs_full_coverage() {
     assert_eq!(short.rules[0].outcome, Outcome::NotEvaluable);
 }
 
-#[test]
-fn quiet_r1_needs_warmup() {
-    let r1 = RuleSpec::ChangeCount {
+fn r1(mode: ChangeMode) -> RuleSpec {
+    RuleSpec::ChangeCount {
         id: "r1".into(),
         metric: Metric::Price,
         lookback_sec: 40,
         min_change_bps: 500,
         direction: Direction::Both,
-        mode: ChangeMode::Step,
+        mode,
         min_count: 2,
-    };
+    }
+}
+
+#[test]
+fn quiet_r1_needs_warmup() {
     let flat = ["100", "100", "100", "100", "100"];
-    let ok = run(&request(&flat, vec![r1.clone()], vec![], true));
+    // step compares neighbouring points only: no warm-up beyond the window ...
+    let step = run(&request(&flat, vec![r1(ChangeMode::Step)], vec![], true));
+    assert_eq!(step.rules[0].outcome, Outcome::Clear);
+    // ... but still needs a history the host vouches for
+    let step = run(&request(&flat, vec![r1(ChangeMode::Step)], vec![], false));
+    assert_eq!(step.rules[0].outcome, Outcome::Incomplete);
+    assert_eq!(step.rules[0].reason, Some(Reason::HistoryUnverified));
+
+    // cumulative needs 24 h of observed history before B, or history from pool creation
+    let cum = vec![r1(ChangeMode::Cumulative)];
+    let ok = run(&young(request(&flat, cum.clone(), vec![], true)));
     assert_eq!(ok.rules[0].outcome, Outcome::Clear);
-    let no_warmup = run(&request(&flat, vec![r1], vec![], false));
-    assert_eq!(no_warmup.rules[0].outcome, Outcome::Incomplete);
-    assert_eq!(no_warmup.rules[0].reason, Some(Reason::WarmupIncomplete));
+    assert!(ok.rules[0].warmup_complete);
+    let short = run(&request(&flat, cum.clone(), vec![], true));
+    assert_eq!(short.rules[0].outcome, Outcome::Incomplete);
+    assert_eq!(short.rules[0].reason, Some(Reason::WarmupIncomplete));
+    assert!(!short.rules[0].warmup_complete);
+    let host_says_no = run(&young(request(&flat, cum, vec![], false)));
+    assert_eq!(host_says_no.rules[0].outcome, Outcome::Incomplete);
+    assert_eq!(
+        host_says_no.rules[0].reason,
+        Some(Reason::HistoryUnverified)
+    );
+}
+
+#[test]
+fn cumulative_warmup_is_24h_of_observed_history() {
+    // one point per hour from B - 24 h to B, then every 10 s to T; the pool is older than that
+    let b = T - 40_000;
+    let mut req = request(&[], vec![r1(ChangeMode::Cumulative)], vec![], true);
+    req.pool_history.points = (0..=24)
+        .map(|h| b - (24 - h) * 3_600_000)
+        .chain((1..=4).map(|k| b + k * 10_000))
+        .map(|t| point(t, "100", "1000"))
+        .collect();
+    req.pool_history.from_ms = req.pool_history.points[0].t_ms;
+    let first = req.pool_history.points[0].t_ms;
+    assert!(first <= T - 40_000 - 86_400_000);
+    assert_eq!(run(&req).rules[0].outcome, Outcome::Clear);
+
+    // a gap inside the 24 h before B breaks the warm-up
+    req.pool_history.missing = vec![TimeRange {
+        from_ms: T - 40_000 - 7_200_000,
+        to_ms: T - 40_000 - 3_600_000,
+    }];
+    let out = run(&req);
+    assert_eq!(out.rules[0].outcome, Outcome::Incomplete);
+    assert_eq!(out.rules[0].reason, Some(Reason::WarmupIncomplete));
 }
 
 #[test]
@@ -343,4 +413,110 @@ fn wire_format_is_camel_case() {
     let out = run(&request(&["1", "1"], vec![drop_rule(30)], vec![], true));
     let json = serde_json::to_string(&out).expect("json");
     assert!(json.contains("\"coverageBps\"") && json.contains("\"analysisMode\":\"real\""));
+}
+
+fn cumulative_liquidity_up(id: &str) -> RuleSpec {
+    RuleSpec::ChangeCount {
+        id: id.into(),
+        metric: Metric::Liquidity,
+        lookback_sec: 40,
+        min_change_bps: 5_000,
+        direction: Direction::Up,
+        mode: ChangeMode::Cumulative,
+        min_count: 1,
+    }
+}
+
+#[test]
+fn fired_and_incomplete_are_kept_side_by_side() {
+    // a gap in the window: the drain still fires, the rule that saw nothing stays incomplete
+    let gap = vec![TimeRange {
+        from_ms: T - 25_000,
+        to_ms: T - 15_000,
+    }];
+    let out = run(&young(request(
+        &["10", "10", "10", "10", "0"],
+        vec![drop_rule(30), cumulative_liquidity_up("rise")],
+        gap,
+        true,
+    )));
+    assert_eq!(out.rules.len(), 2);
+    assert_eq!(out.rules[0].rule_id, "drain");
+    assert_eq!(out.rules[0].outcome, Outcome::Fired);
+    assert_eq!(out.rules[1].rule_id, "rise");
+    assert_eq!(out.rules[1].outcome, Outcome::Incomplete);
+    assert_eq!(out.rules[1].reason, Some(Reason::PartialCoverage));
+    assert_eq!(out.rules[1].coverage_bps, 7_500);
+}
+
+#[test]
+fn evidence_cap_keeps_observed_and_outcome() {
+    let rule = RuleSpec::EventCount {
+        id: "admin".into(),
+        kinds: vec![AdminEventKind::OwnerChanged],
+        lookback_sec: 40,
+        min_count: 3,
+    };
+    let mut req = request(&["1", "1"], vec![rule], vec![], true);
+    req.token_profile.admin_events = (1..=5)
+        .map(|k| AdminEvent {
+            t_ms: T - 35_000 + k * 5_000,
+            kind: AdminEventKind::OwnerChanged,
+        })
+        .collect();
+    let full = run(&req);
+    let capped = WindowRules
+        .analyze(
+            &req,
+            &Limits {
+                max_evidence_events: 2,
+                ..Limits::default()
+            },
+        )
+        .expect("analyze");
+    for r in [&full.rules[0], &capped.rules[0]] {
+        assert_eq!(r.outcome, Outcome::Fired);
+        assert_eq!(r.observed, Some(5));
+    }
+    assert_eq!(full.rules[0].events.len(), 5);
+    let kept: Vec<i64> = capped.rules[0].events.iter().map(|e| e.t_ms).collect();
+    assert_eq!(kept, vec![T - 15_000, T - 10_000]); // the latest two
+}
+
+#[test]
+fn rule_and_admin_event_limits_fail_the_request() {
+    let req = request(
+        &["1", "1"],
+        vec![drop_rule(30), cumulative_liquidity_up("rise")],
+        vec![],
+        true,
+    );
+    let one_rule = Limits {
+        max_rules: 1,
+        ..Limits::default()
+    };
+    assert_eq!(
+        WindowRules.analyze(&req, &one_rule),
+        Err(AlgorithmError::LimitExceeded("rules"))
+    );
+
+    let mut req = request(&["1", "1"], vec![drop_rule(30)], vec![], true);
+    req.token_profile.admin_events = vec![
+        AdminEvent {
+            t_ms: T - 2_000,
+            kind: AdminEventKind::Paused,
+        },
+        AdminEvent {
+            t_ms: T - 1_000,
+            kind: AdminEventKind::Unpaused,
+        },
+    ];
+    let one_event = Limits {
+        max_admin_events: 1,
+        ..Limits::default()
+    };
+    assert_eq!(
+        WindowRules.analyze(&req, &one_event),
+        Err(AlgorithmError::LimitExceeded("adminEvents"))
+    );
 }

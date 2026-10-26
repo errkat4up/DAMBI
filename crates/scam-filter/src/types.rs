@@ -144,6 +144,10 @@ pub struct PoolPoint {
 #[serde(rename_all = "camelCase")]
 pub struct Warmup {
     pub from_ms: i64,
+    /// The host vouches that the points from `fromMs` are a faithful record: every block that
+    /// changed the reserves is represented and unobserved spans are listed in `missing`. Without
+    /// it no pool-history rule is `clear`. The algorithm checks the required length itself (see
+    /// `rules::WARMUP_SEC`).
     pub complete: bool,
 }
 
@@ -236,6 +240,8 @@ pub enum Reason {
     NoUsableSegment,
     ResolutionTooCoarse,
     MetricUnavailable,
+    /// The host does not vouch for the pool history (`warmup.complete = false`).
+    HistoryUnverified,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -267,6 +273,7 @@ pub struct RuleResult {
     pub window: Option<EvidenceWindow>,
     pub events: Vec<EvidenceEvent>,
     pub coverage_bps: u32,
+    /// The rule's warm-up requirement is met (always true for rules without one).
     pub warmup_complete: bool,
 }
 
