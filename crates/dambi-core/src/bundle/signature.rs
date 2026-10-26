@@ -86,7 +86,10 @@ impl TrustedKeys {
 
     /// Independent bundle channels may require their own role without adding
     /// a policy key to that channel's local trust configuration.
-    pub(crate) fn for_role(config: &[VerificationKey], required: KeyRole) -> Result<Self, SignatureError> {
+    pub(crate) fn for_role(
+        config: &[VerificationKey],
+        required: KeyRole,
+    ) -> Result<Self, SignatureError> {
         let invalid = |message| SignatureError::new(SignatureErrorKind::InvalidConfig, message);
         let mut keys: Vec<TrustedKey> = Vec::with_capacity(config.len());
         for entry in config {
@@ -155,7 +158,12 @@ impl TrustedKeys {
     }
 
     pub(crate) fn shares_key_with(&self, other: &Self) -> bool {
-        self.keys.iter().any(|left| other.keys.iter().any(|right| left.public_key == right.public_key))
+        self.keys.iter().any(|left| {
+            other
+                .keys
+                .iter()
+                .any(|right| left.public_key == right.public_key)
+        })
     }
 }
 

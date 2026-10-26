@@ -670,14 +670,11 @@ pub fn build_action_body(
                         // calldata route (e.g. native ETH's pool-side WETH).
                         // Do not seed other live values or infer missing paths.
                         // Invalid explicit routes reach the typed serde check.
-                        let route_value = match (
-                            domain.as_deref(),
-                            action.as_deref(),
-                            field_name.as_str(),
-                        ) {
-                            (Some("amm"), Some("swap"), "route") => src_payload.get("value"),
-                            _ => None,
-                        };
+                        let route_value =
+                            match (domain.as_deref(), action.as_deref(), field_name.as_str()) {
+                                (Some("amm"), Some("swap"), "route") => src_payload.get("value"),
+                                _ => None,
+                            };
                         let wrapped = wrap_live_field(
                             ctx,
                             domain.as_deref(),

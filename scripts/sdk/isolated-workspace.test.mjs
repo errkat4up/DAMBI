@@ -5,6 +5,39 @@ import { join } from "node:path";
 import test from "node:test";
 import { markIsolatedWorkspacePrepared, openIsolatedWorkspace } from "./isolated-workspace.mjs";
 
+test("isolated Cargo workspace supplies every inherited member dependency with the repository declaration", async () => {
+  const root = new URL("../../", import.meta.url);
+  const isolated = await readFile(new URL("./isolated/Cargo.toml", import.meta.url), "utf8");
+  const repository = await readFile(new URL("Cargo.toml", root), "utf8");
+  // These source manifests use single-line dependency declarations. Keep the
+  // check source-only: missing inheritance must fail before Cargo is invoked.
+  const declarations = (manifest) => {
+    const section = manifest.split("[workspace.dependencies]\n")[1]?.split(/^\[/m)[0];
+    assert.ok(section, "workspace.dependencies is required");
+    return new Map([...section.matchAll(/^([\w-]+)\s*=\s*(.+)$/gm)]
+      .map(([, name, value]) => [name, value.trim()]));
+  };
+  const expected = declarations(repository);
+  const actual = declarations(isolated);
+  const members = isolated.match(/members\s*=\s*\[([\s\S]*?)\]/)?.[1];
+  assert.ok(members, "isolated workspace members are required");
+  let dependencies = 0;
+  for (const [, member] of members.matchAll(/"([^"]+)"/g)) {
+    const manifest = await readFile(new URL(`${member}/Cargo.toml`, root), "utf8");
+    for (const [, header, body] of manifest.matchAll(/^\[([^\]\n]+)\]\n([\s\S]*?)(?=^\[|(?![\s\S]))/gm)) {
+      if (!/(?:^|\.)(?:dev-|build-)?dependencies$/.test(header)) continue;
+      for (const line of body.split("\n").filter((line) => /\bworkspace\s*=\s*true\b/.test(line))) {
+        const name = line.match(/^([\w-]+)(?:\.workspace\s*=\s*true|\s*=\s*\{[^}]*\bworkspace\s*=\s*true\b)/)?.[1];
+        assert.ok(name, `unsupported inherited dependency declaration in ${member}: ${line}`);
+        assert.ok(actual.has(name), `${member} inherits ${name}, missing from isolated workspace`);
+        assert.equal(actual.get(name), expected.get(name), `${member}: isolated ${name} differs from repository`);
+        dependencies++;
+      }
+    }
+  }
+  assert.ok(dependencies > 0, "check must inspect inherited dependencies");
+});
+
 async function fixture(t) {
   const base = await mkdtemp(join(tmpdir(), "sdk-isolation-test-"));
   t.after(() => rm(base, { recursive: true, force: true }));

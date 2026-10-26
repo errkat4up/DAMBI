@@ -87,9 +87,10 @@ impl WasmCore {
         clock: &js_sys::Function,
     ) -> String {
         envelope(integer(now_ms, "nowMs").and_then(|now| {
-            self.session.evaluate_scam(
-                plan_id, facts_json, scam_input_json, now, &mut || read_clock(clock),
-            )
+            self.session
+                .evaluate_scam(plan_id, facts_json, scam_input_json, now, &mut || {
+                    read_clock(clock)
+                })
         }))
     }
 
@@ -104,23 +105,37 @@ impl WasmCore {
     ) -> String {
         envelope(integer(now_ms, "nowMs").and_then(|now| {
             self.session.evaluate_check_scam(
-                plan_id, facts_json, scam_input_json, now, failure, &mut || read_clock(clock),
+                plan_id,
+                facts_json,
+                scam_input_json,
+                now,
+                failure,
+                &mut || read_clock(clock),
             )
         }))
     }
 
     pub fn set_scam_settings(&mut self, settings_json: &str) -> String {
-        envelope(self.session.set_scam_settings(settings_json).map(|()| Value::Null))
+        envelope(
+            self.session
+                .set_scam_settings(settings_json)
+                .map(|()| Value::Null),
+        )
     }
 
     pub fn begin_scam_refresh(&mut self) -> String {
-        envelope(self.session.begin_scam_refresh().map(|ticket| json!(ticket)))
+        envelope(
+            self.session
+                .begin_scam_refresh()
+                .map(|ticket| json!(ticket)),
+        )
     }
 
     pub fn commit_scam_refresh(&mut self, ticket: f64, envelope_json: &str, now_ms: f64) -> String {
         envelope(integer(ticket, "ticket").and_then(|ticket| {
             let now = integer(now_ms, "nowMs")?;
-            self.session.commit_scam_refresh(ticket, envelope_json, now)?;
+            self.session
+                .commit_scam_refresh(ticket, envelope_json, now)?;
             Ok(Value::Null)
         }))
     }

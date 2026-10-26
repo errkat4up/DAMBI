@@ -428,7 +428,9 @@ pub struct MethodVerification {
 }
 
 fn deserialize_verification_version<'de, D>(deserializer: D) -> Result<u32, D::Error>
-where D: serde::Deserializer<'de> {
+where
+    D: serde::Deserializer<'de>,
+{
     let version = u32::deserialize(deserializer)?;
     if version != 1 {
         return Err(serde::de::Error::custom("unsupported verification version"));
@@ -439,11 +441,18 @@ where D: serde::Deserializer<'de> {
 impl MethodVerification {
     pub(crate) fn validate(&self) -> Result<(), FailureReason> {
         const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
-        if self.version != 1 || self.time_sources.is_empty() || self.time_sources.len() > 2
-            || self.time_sources.iter().enumerate().any(|(i, source)| self.time_sources[..i].contains(source))
+        if self.version != 1
+            || self.time_sources.is_empty()
+            || self.time_sources.len() > 2
+            || self
+                .time_sources
+                .iter()
+                .enumerate()
+                .any(|(i, source)| self.time_sources[..i].contains(source))
             || self.raw_observed_at.from_ms > self.raw_observed_at.to_ms
             || self.raw_observed_at.to_ms > self.verified_at
-            || self.verified_at > MAX_SAFE_INTEGER {
+            || self.verified_at > MAX_SAFE_INTEGER
+        {
             return Err(FailureReason::InvalidScamInput);
         }
         Ok(())
@@ -451,7 +460,12 @@ impl MethodVerification {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case", rename_all_fields = "camelCase", deny_unknown_fields)]
+#[serde(
+    tag = "status",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum AnalysisVerification {
     #[default]
     LegacyUnspecified,
@@ -463,12 +477,17 @@ pub enum AnalysisVerification {
 
 impl AnalysisVerification {
     pub(crate) fn validate(&self) -> Result<(), FailureReason> {
-        if let Self::Declared { pool_history, token_profile } = self {
+        if let Self::Declared {
+            pool_history,
+            token_profile,
+        } = self
+        {
             pool_history.validate()?;
             token_profile.validate()?;
             if pool_history.history != token_profile.history
                 || pool_history.state_binding != token_profile.state_binding
-                || pool_history.version != token_profile.version {
+                || pool_history.version != token_profile.version
+            {
                 return Err(FailureReason::InvalidScamInput);
             }
         }
