@@ -11,6 +11,9 @@ export interface NativeCore {
   evaluate_scam(planId: string, factsJson: string, scamInputJson: string, nowMs: number, clock: () => number): string;
   evaluate_check_scam(planId: string, factsJson: string, scamInputJson: string, nowMs: number, failure: string, clock: () => number): string;
   set_scam_settings(settingsJson: string): string;
+  begin_scam_refresh(): string;
+  commit_scam_refresh(ticket: number, bundleJson: string, nowMs: number): string;
+  cancel_scam_refresh(ticket: number): string;
   /** Exists only in explicitly built, non-default test-fixture WASM. */
   install_scam_fixture?(fixtureJson: string, nowMs: number): string;
   begin_refresh(): string;
@@ -37,6 +40,7 @@ export interface NativePlan {
 const codes = new Set<CoreErrorCode>([
   "NOT_IMPLEMENTED", "INVALID_CONFIG", "DISPOSED", "ABORTED", "TIMEOUT",
   "POLICY_FETCH_FAILED", "INVALID_POLICY_BUNDLE", "INVALID_SIGNATURE",
+  "SCAM_FETCH_FAILED", "INVALID_SCAM_BUNDLE", "SCAM_SCOPE_MISMATCH", "SCAM_EXPIRED", "SCAM_SEQUENCE_REJECTED",
   "UNSUPPORTED_REGISTRY_REF", "POLICY_SCOPE_MISMATCH", "POLICY_EXPIRED",
   "POLICY_SEQUENCE_REJECTED", "INVALID_DECODER_SNAPSHOT", "DECODER_INTEGRITY_MISMATCH",
   "INVALID_REQUEST", "UNSUPPORTED_REQUEST", "LIMIT_EXCEEDED", "INVALID_PLAN",

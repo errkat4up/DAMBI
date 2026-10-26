@@ -207,7 +207,7 @@ function harness({ configured = true, enabled = true, policy = initialPolicy, sc
   };
   if (configured) config.scam = { settings: settings(enabled),
     trust: { env: "staging", profile: "default", keys: [{ keyId: "sf3-only-scam",
-      role: "scam", publicKeySpkiBase64: keys.policy.public_key_spki_b64 }] },
+      role: "scam", publicKeySpkiBase64: keys.decoder.public_key_spki_b64 }] },
     limits: { scamTimeoutMs: 500, scamEvalReserveMs: 20, maxBundleBytes: 100_000,
       maxResultBytes: 100_000, maxCalls: 16, maxTargets: 8, maxRules: 16,
       maxLogs: 1_000, maxPoints: 1_000, maxAlgorithmWorkUnits: 100_000, ...scamLimits } };

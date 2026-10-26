@@ -210,6 +210,10 @@ GIWA Sepolia 풀 1개, 24시간+warm-up 1시간, `rpc_anchor + number_recheck`, 
 
 확장 재시작 절차 후 새 SW 세션 `4aad31a3-2434-4944-9bb6-093ed3faed68`에서 `prepared=false`, **4,311.30ms·29요청·partial**을 확인했다. 기준 블록 39,653,927의 history는 `reuse=none`, 결측/미지원 0, snapshot 9,000/1,500개다. 사전 준비 없는 조회는 명시한 60초 진단 한도이며 준비 후 2.5초 성능에 합산하지 않는다. **AH5-2의 Node/SW 데이터 경로·재사용·재시작 확인 완료.** 자연 idle 종료나 production 거래 연결·완전 지원·실제 알고리즘 포함 전체 2.5초는 검증하지 않았다. SF5 연결 시 worker 재시작 후 사전 준비를 다시 해야 한다는 메모리 수명 조건을 인계한다. 실제 절차는 [Core README](../../packages/core/README.md)에 둔다.
 
+## SF5-1 — 서명 스캠 번들 발행·설치·독립 갱신
+
+`1bd37ca` 이후 변경: 로컬 발행기 → 독립 Registry API/HTTP source → Runtime → Native/WASM 검증·원자적 설치를 연결했다. 별도 역할 키·scope·유효기간·sequence·호환성 검사, 실패한 갱신의 정책/기존 스캠 상태 보존, 계획별 snapshot 고정과 취소를 다룬다. **SF5-1 구현·사용자 검증 완료.** 사용자 제공 로그에서 production/시험용 WASM 빌드 성공, SDK HTTP·서명 번들 통합 19개, 기존 스캠 회귀 18개, 발행기 4개, Registry API 59개 사례를 확인했다. **확인한 시험 합계 100개·남은 실패 0개**이며 첨부에서 생략된 Native 시험 개별 건수는 합산하지 않았다. API 최초 58개 통과 후 불변 sequence의 미발행 404 기대값을 기존 `no-store` 규칙에 맞췄고, 해당 1개 재시험도 통과했다. 재시험의 31개 skipped는 이름 필터로 제외한 사례다. 운영 키 생성·서비스 배포·실제 알고리즘 연결은 실행하지 않았으며 SF5-2 화면 연결과 SF6 전체 분석 성능 검증은 남아 있다. 사용법은 [Core README](../../packages/core/README.md#signed-scam-filter-bundles-sf5-1-development)에 둔다.
+
 ## 번들 B1-1 — Universal Router
 
 2026-10-12, `main 7387536` 이후 B1-1 변경 검증: **Native 원문 2개 시험과 패키지 WASM 3개 시험 통과, 최종 WASM 로그 3 통과·0 실패.** 저장된 snapshot은 801개이며 기존 799개 내용 보존·UR 2개 추가·digest/bytes 일치를 확인했다. source-context 제외 30,484개와 Aave 거절 3개는 유지한다. 별도 `decoder_snapshot` target의 전체 결과는 공유되지 않았다. 대표 UR 경로의 편입·검증을 마쳤으며 다음은 B1-2 Aave다.

@@ -62,13 +62,16 @@ export interface DambiCore {
   setScamSettings(settings: ScamSettings): void;
   /** Validates fully before atomic replacement; failure preserves current state. */
   refreshPolicies(options?: CallOptions): Promise<void>;
+  /** Independent signed scam bundle refresh; failure preserves policy and the last valid scam bundle. */
+  refreshScam(options?: CallOptions): Promise<void>;
   /** Idempotent; cancels I/O and releases plans, cache and WASM resources. */
   dispose(): void;
 }
 
 /**
- * Returns only a fully authenticated and initialized instance. Failures release
- * partial state. check coordinates plan, Fact fetch/cache and evaluation.
+ * Authenticates the policy instance; initialization failure releases partial state.
+ * An optional scam-source failure emits a diagnostic and retains policy service.
+ * check coordinates plan, Fact fetch/cache and evaluation.
  */
 export async function createCore(
   config: CoreConfig,

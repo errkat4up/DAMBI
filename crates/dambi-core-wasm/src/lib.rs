@@ -113,6 +113,25 @@ impl WasmCore {
         envelope(self.session.set_scam_settings(settings_json).map(|()| Value::Null))
     }
 
+    pub fn begin_scam_refresh(&mut self) -> String {
+        envelope(self.session.begin_scam_refresh().map(|ticket| json!(ticket)))
+    }
+
+    pub fn commit_scam_refresh(&mut self, ticket: f64, envelope_json: &str, now_ms: f64) -> String {
+        envelope(integer(ticket, "ticket").and_then(|ticket| {
+            let now = integer(now_ms, "nowMs")?;
+            self.session.commit_scam_refresh(ticket, envelope_json, now)?;
+            Ok(Value::Null)
+        }))
+    }
+
+    pub fn cancel_scam_refresh(&mut self, ticket: f64) -> String {
+        envelope(integer(ticket, "ticket").and_then(|ticket| {
+            self.session.cancel_scam_refresh(ticket)?;
+            Ok(Value::Null)
+        }))
+    }
+
     /// Deliberately absent from default production WASM builds.
     #[cfg(feature = "scam-test-fixtures")]
     pub fn install_scam_fixture(&mut self, fixture_json: &str, now_ms: f64) -> String {

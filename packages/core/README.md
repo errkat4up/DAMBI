@@ -6,7 +6,7 @@ responses; Core decodes requests, plans Fact calls and returns allow/warn/deny.
 ## Status: 0.1.0
 
 First runtime release. `createCore`, `check`, `plan`, `evaluate`,
-`refreshPolicies` and `dispose` run on this package's Rust/WASM runtime.
+`refreshPolicies`, `refreshScam` and `dispose` run on this package's Rust/WASM runtime.
 `check()` coordinates planning, Fact fetching, bounded in-memory cache and
 evaluation. A Registry decoder snapshot ships as `@dambi/core/decoders`, and
 policies are served signed by the Dambi API (see
@@ -366,8 +366,9 @@ latency or retries. Impossible request or pacing budgets fail with `resource_lim
 at stage `preflight`, before the corresponding header reads. The separate builder
 header-lookup cap and all existing deadlines still apply.
 
-This adapter neither installs a scam bundle nor provides an algorithm. Production
-bundle/module integration remains separate. For manual read-only RPC measurement,
+This data adapter neither installs a scam bundle nor provides an algorithm.
+Bundle installation uses the separate signed source described below; actual
+algorithm linking remains separate. For manual read-only RPC measurement,
 after building TypeScript from the repository root:
 
 ```sh
@@ -489,6 +490,68 @@ without deployment capabilities. Use `SCAM_RPC_URL`, `SCAM_REPEATS` (1–20),
 endpoint credentials to tracked files. Reports omit endpoints and headers;
 failures remain in the denominator and small-sample percentiles are not production
 performance claims. Node reachability does not establish extension reachability.
+
+## Signed Scam Filter bundles (SF5-1, development)
+
+The signed configuration channel is separate from policy snapshots and market
+data. Compose it with the existing policy source and retain local `scam.settings`,
+`scam.limits` and `scam.trust` configuration:
+
+```ts
+import { createPolicyApiSource, createScamBundleApiSource } from "@dambi/core/adapters";
+
+const policySource = {
+  ...createPolicyApiSource({ baseUrl: hostApiOrigin, maxResponseBytes: 2_000_000 }),
+  ...createScamBundleApiSource({ baseUrl: hostApiOrigin, maxResponseBytes: 2_000_000,
+    env: "staging", profile: "default" }),
+};
+// CoreConfig.ports.policy = policySource; CoreConfig.scam = localScamConfig.
+// createCore attempts an initial scam fetch only when both are configured.
+await core.refreshScam(); // Subsequent refresh; separately cancellable from refreshPolicies.
+```
+
+`GET /v1/scam-bundle?env=staging&profile=default` selects latest; optional
+`sequence` is a canonical decimal string. The HTTP wrapper is
+`{payload, signature, key_id?}`; the SDK retains the original payload string and
+maps `key_id` to telemetry-only `keyId`. HTTP ETags are independent per source.
+The new endpoint must be deployed before using it remotely; this change does not
+publish a service, register a production key or issue an onchain attestation.
+
+Core verifies original UTF-8 bytes using P-256/SHA-256 and padded Base64 P1363
+signatures against locally configured `scam` role keys, distinct from policy and
+Decoder trust keys. It checks scope, validity, compatibility, rules, resource
+bounds and sequence before replacing the snapshot. Compatibility accepts `*` or
+the exact version; the current builder is `dambi-v2/1`. Lower sequences and changed
+payload bytes at the same sequence are rejected. Identical payload bytes at the
+same sequence are idempotent. New plans receive the replacement; existing plans
+retain their snapshot and still enforce its expiry. Sequence memory is scoped to
+the current Core instance.
+
+`refreshScam()` uses `policyTimeoutMs` for bundle retrieval, not `scamTimeoutMs`
+for market analysis. A failed refresh leaves policy and the previous scam
+snapshot unchanged; expiry still makes scam evaluation `insufficient`. Initial
+scam-source failures emit `scam_bundle_unavailable` and preserve policy service.
+Caller cancellation still rejects initialization. Missing scam configuration
+performs no scam fetch. Bundle installation does not supply an algorithm:
+active supported rules with no module report `algorithm_unavailable`, never
+`quiet`. Uncalibrated R1/R2 remain disabled in default-purpose presets; explicit
+demo-purpose presets may enable them.
+
+Local issuance uses `registryV2/scripts/publish-scam-bundle.ts` with an explicit
+scam-only key path/ID and a complete payload draft:
+
+```sh
+SCAM_SIGNING_KEY_PATH=/explicit/scam.hex SCAM_SIGNING_KEY_ID=scam-staging-1 \
+  npm --prefix registryV2 run publish:scam-bundle -- \
+  --input /absolute/draft.json --env staging --profile default --out /absolute/output
+```
+
+This writes immutable `scam-bundles/<env>/<profile>/<sequence>.json` plus an
+atomically replaced `latest.json`; it does not upload files or generate keys.
+The publisher checks basic draft structure; the consuming Core remains the
+authority for full rule/compatibility validation. The Registry API serves those
+paths verbatim with independent cache keys. Production deployment and key
+provisioning require their own configured environment.
 
 ## Standalone Node and browser consumers
 

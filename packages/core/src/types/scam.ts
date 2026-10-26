@@ -528,8 +528,8 @@ export interface ScamBundlePayloadDraft {
   readonly model: null;
 }
 
-// Handoff compatibility aliases. Runtime surfaces are exported separately;
-// signed bundle transport/refresh remains future work. Handles stay single-use.
+// Handoff compatibility aliases. Signed bundle transport/refresh is also present
+// on the public PolicySource and DambiCore. Handles stay single-use.
 export type CorePlanScamDraft = CorePlan & { readonly scamCalls: readonly PlannedScamCall[] };
 export type VerdictScamDraft = Verdict & { readonly scam?: ScamReport };
 export interface EvaluateScamDraft {

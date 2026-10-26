@@ -11,6 +11,7 @@ export type { CorePlan, PlannedCall, FactBatch } from "./types/plan.js";
 export type { PolicySource, SignedPolicyBundle, FactProvider, FactResult, Clock } from "./ports/index.js";
 export type {
   ScamConfig, ScamSettings, ScamLimits, LocalScamTrust, RuleSpec, RuleOverride,
+  SignedScamBundle, ScamBundlePayloadDraft,
   PlannedScamCall, ScamFactBatch, ScamReport, ScamReportStatus, TargetReport,
   RuleResult, ScamFailureReason, PoolHistoryValue, TokenProfileValue,
   DataCoverage, FixedReference, Subject, PoolAge,

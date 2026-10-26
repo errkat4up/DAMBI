@@ -21,6 +21,7 @@ import {
   type PolicySource,
   type Ports,
   type SignedPolicyBundle,
+  type SignedScamBundle,
   type UnsupportedRequest,
   type Verdict,
   type AnalysisVerification,
@@ -31,6 +32,7 @@ import { decoderSnapshot, decoderSnapshotInfo } from "@dambi/core/decoders";
 import {
   AdapterError,
   createPolicyApiSource,
+  createScamBundleApiSource,
   createEvmFactProvider,
   createScamFactProvider,
   ScamDataError,
@@ -58,6 +60,13 @@ const policyApiOptions: PolicyApiSourceOptions = {
 };
 const policyApi: PolicySource = createPolicyApiSource(policyApiOptions);
 const fetchedPolicy: Promise<SignedPolicyBundle> = policyApi.fetch({ signal: new AbortController().signal });
+const scamApi = createScamBundleApiSource({ baseUrl: "https://scam.example", env: "staging",
+  profile: "default", sequence: "9007199254740993", maxResponseBytes: 1_000_000 });
+const combinedSource: PolicySource = { ...policyApi, ...scamApi };
+const fetchedScam: Promise<SignedScamBundle> = scamApi.fetchScam();
+// @ts-expect-error Scam sequences are lossless decimal strings, not JS numbers.
+createScamBundleApiSource({ baseUrl: "https://scam.example", env: "staging", maxResponseBytes: 1000, sequence: 1 });
+void [combinedSource, fetchedScam];
 // @ts-expect-error Response size must be an explicit host decision.
 createPolicyApiSource({ baseUrl: "https://policies.example" });
 // @ts-expect-error Only the currently supported policy profile is accepted.
@@ -336,6 +345,7 @@ async function consume(): Promise<void> {
   audit(await core.check(transaction, options));
   audit(await core.check(unsupported, options));
   await core.refreshPolicies(options);
+  await core.refreshScam(options);
   core.dispose();
 
   // @ts-expect-error plan accepts only known request variants.

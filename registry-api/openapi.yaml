@@ -226,6 +226,49 @@ paths:
           content:
             application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } }
 
+  /v1/scam-bundle:
+    get:
+      tags: [bundle]
+      summary: Fetch an independently signed Scam Filter bundle
+      description: |
+        SF5-1 local implementation; availability requires separately publishing
+        a signed object and deploying this route. No policy bundle or key fallback.
+        Reads scam-bundles/<env>/<profile>/<sequence>.json, or latest.json when
+        sequence is omitted. Duplicate or unknown query parameters return 404.
+        The API serves bytes unchanged; the Core checks its local scam-role keys,
+        signed environment/profile, sequence, expiry and compatibility.
+      parameters:
+        - name: env
+          in: query
+          required: true
+          schema: { type: string, enum: [staging, production] }
+        - name: profile
+          in: query
+          required: false
+          schema: { type: string, default: default, pattern: "^[a-z0-9-]{1,128}$" }
+        - name: sequence
+          in: query
+          required: false
+          description: Canonical decimal string, including zero; omit to request latest.
+          schema: { type: string, pattern: "^(0|[1-9][0-9]{0,77})$" }
+      responses:
+        "200":
+          description: Signed scam bundle
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control:
+              schema: { type: string }
+              description: Immutable when sequence was supplied; short mutable cache for latest.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SignedScamBundle" }
+        "304":
+          description: Wrapper unchanged since If-None-Match; Core still checks signed expiry.
+        "404":
+          description: Invalid request or no bundle for the requested environment/profile/sequence.
+        "429":
+          description: Rate limited.
+
   /v1/audit:
     post:
       tags: [audit]
@@ -309,6 +352,20 @@ components:
           description: JCS (RFC 8785) canonical JSON text of a `BundlePayload`. Verify first, then parse — never parse-then-reserialize.
         signature: { type: string, description: base64, P1363 r‖s, ECDSA P-256 over SHA-256 of the UTF-8 bytes of `payload` }
         key_id: { type: string, description: Telemetry only — the SDK verifies against its own configured trust key(s), never a key named in the response. Policy bundles are signed with a dedicated key, separate from the decoder-bundle key; the SDK pins both. }
+
+    SignedScamBundle:
+      type: object
+      required: [payload, signature]
+      properties:
+        payload:
+          type: string
+          description: >-
+            Original JCS UTF-8 payload text. Scam schema 0.1 includes kind scam_bundle,
+            decimal-string sequence, required issuedAtMs/expiresAtMs in Unix milliseconds,
+            environment/profile, compatibility, support, presets, templates and model null.
+            Verify the string bytes before parsing; never reserialize before verification.
+        signature: { type: string, description: Padded Base64 P1363 r||s; ECDSA P-256/SHA-256. }
+        key_id: { type: string, description: Informational only; not a source of trust or a remote key selector. }
 
     BundlePayload:
       type: object

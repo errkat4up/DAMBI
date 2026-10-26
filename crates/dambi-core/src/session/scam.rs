@@ -5,16 +5,19 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use alloy_primitives::U256;
+use base64::{engine::general_purpose::STANDARD, Engine};
 use policy_state::token::TokenKey;
 use policy_transition::action::{amm::{AmmAction, AmmVenue}, ActionBody};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use crate::scam::{self as algorithm, *};
+use crate::scam::*;
+use crate::bundle::{KeyRole, TrustedKeys, VerificationKey};
 use super::{parse_json, Node, SessionError, MAX_SAFE_INTEGER};
 
 const NOTICE: &str = "patterns_only_no_sellability_guarantee";
+const BUILDER_VERSION: &str = "dambi-v2/1";
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -75,7 +78,26 @@ impl Config {
                 || !keys.insert(&key.key_id)
             { return Err(config_error("invalid scam role key")); }
         }
+        self.trusted_keys()?;
         validate_settings(&self.settings, l)
+    }
+
+    fn trusted_keys(&self) -> Result<TrustedKeys, SessionError> {
+        let keys: Vec<_> = self.trust.keys.iter().map(|key| VerificationKey {
+            key_id: key.key_id.clone(), role: KeyRole::Scam,
+            public_key_spki_base64: key.public_key_spki_base64.clone(),
+        }).collect();
+        TrustedKeys::for_role(&keys, KeyRole::Scam)
+            .map_err(|error| SessionError::new(error.code(), error.message))
+    }
+
+    pub(super) fn validate_separate_keys(&self, policy_keys: &[VerificationKey]) -> Result<(), SessionError> {
+        let policy = TrustedKeys::new(policy_keys)
+            .map_err(|error| SessionError::new(error.code(), error.message))?;
+        if self.trusted_keys()?.shares_key_with(&policy) {
+            return Err(config_error("scam keys must be distinct from policy and Decoder keys"));
+        }
+        Ok(())
     }
 }
 
@@ -149,10 +171,92 @@ struct Installed {
     module: Option<Arc<dyn AlgorithmModule>>,
 }
 
-pub(super) struct State { config: Config, installed: Option<Arc<Installed>> }
+pub(super) struct State {
+    config: Config,
+    trusted: TrustedKeys,
+    installed: Option<Arc<Installed>>,
+}
 
 impl State {
-    pub(super) fn new(config: Config) -> Self { Self { config, installed: None } }
+    pub(super) fn new(config: Config) -> Result<Self, SessionError> {
+        let trusted = config.trusted_keys()?;
+        Ok(Self { config, trusted, installed: None })
+    }
+
+    /// Authenticate original bytes, then validate completely before replacing
+    /// the installed Arc. Response keyId is telemetry and never selects trust.
+    pub(super) fn install_signed(&mut self, input: &str, now: u64) -> Result<(), SessionError> {
+        let limit = self.config.limits.max_bundle_bytes;
+        if input.len() as u64 > limit.saturating_mul(6).saturating_add(4096) {
+            return Err(SessionError::new("LIMIT_EXCEEDED", "scam bundle wrapper is too large"));
+        }
+        let value = parse_json(input, "INVALID_SCAM_BUNDLE")?;
+        if value.get("keyId").is_some_and(|key| !key.is_string()) {
+            return Err(SessionError::new("INVALID_SCAM_BUNDLE", "keyId must be a string when present"));
+        }
+        let envelope: SignedBundle = serde_json::from_value(value)
+            .map_err(|_| SessionError::new("INVALID_SCAM_BUNDLE", "invalid scam bundle envelope"))?;
+        if envelope.payload.is_empty() {
+            return Err(SessionError::new("INVALID_SCAM_BUNDLE", "scam payload must not be empty"));
+        }
+        if envelope.payload.len() as u64 > limit {
+            return Err(SessionError::new("LIMIT_EXCEEDED", "scam payload exceeds maxBundleBytes"));
+        }
+        // An exact padded Base64 P1363 encoding is required, never DER.
+        if envelope.signature.len() != 88 {
+            return Err(SessionError::new("INVALID_SIGNATURE", "scam signature must be padded Base64 P1363"));
+        }
+        let signature = STANDARD.decode(&envelope.signature)
+            .map_err(|_| SessionError::new("INVALID_SIGNATURE", "invalid scam signature encoding"))?;
+        if STANDARD.encode(&signature) != envelope.signature {
+            return Err(SessionError::new("INVALID_SIGNATURE", "invalid scam signature encoding"));
+        }
+        let signature: [u8; 64] = signature.try_into()
+            .map_err(|_| SessionError::new("INVALID_SIGNATURE", "scam signature must be P1363"))?;
+        self.trusted.verify_bytes(KeyRole::Scam, envelope.payload.as_bytes(), &signature)
+            .map_err(|error| SessionError::new(error.code(), error.message))?;
+        let value = parse_json(&envelope.payload, "INVALID_SCAM_BUNDLE")?;
+        if value.get("model").is_none() || value.pointer("/compatibility/algorithm").is_none() {
+            return Err(SessionError::new("INVALID_SCAM_BUNDLE", "missing explicit model or algorithm field"));
+        }
+        let bundle: Bundle = serde_json::from_value(value)
+            .map_err(|_| SessionError::new("INVALID_SCAM_BUNDLE", "invalid scam payload structure"))?;
+        if bundle.env != self.config.trust.env || bundle.profile != self.config.trust.profile {
+            return Err(SessionError::new("SCAM_SCOPE_MISMATCH", "scam bundle scope does not match local trust"));
+        }
+        if bundle.issued_at_ms > MAX_SAFE_INTEGER || bundle.expires_at_ms > MAX_SAFE_INTEGER
+            || bundle.issued_at_ms >= bundle.expires_at_ms {
+            return Err(SessionError::new("INVALID_SCAM_BUNDLE", "invalid scam bundle lifetime"));
+        }
+        if bundle.issued_at_ms > now || now >= bundle.expires_at_ms {
+            return Err(SessionError::new("SCAM_EXPIRED", "scam bundle is not currently valid"));
+        }
+        let invalid_bundle = |error: SessionError| SessionError::new("INVALID_SCAM_BUNDLE", error.message);
+        validate_bundle(&bundle, &self.config, BUILDER_VERSION, now).map_err(invalid_bundle)?;
+        for pair in &bundle.presets {
+            if pair.purpose == "default" && [&pair.new_market, &pair.established].iter()
+                .flat_map(|preset| &preset.rules).any(|rule| rule.enabled()
+                    && matches!(rule, RuleSpec::ChangeCount { .. } | RuleSpec::SwitchDensity { .. })) {
+                return Err(SessionError::new("INVALID_SCAM_BUNDLE", "default R1/R2 require explicit demo opt-in in this MVP"));
+            }
+        }
+        effective_pair(&bundle, &self.config.settings, &self.config.limits).map_err(invalid_bundle)?;
+        let digest = format!("0x{}", hex::encode(Sha256::digest(envelope.payload.as_bytes())));
+        if let Some(installed) = &self.installed {
+            let incoming = decimal(&bundle.sequence).ok_or_else(|| SessionError::new("INVALID_SCAM_BUNDLE", "invalid scam sequence"))?;
+            let previous = decimal(&installed.bundle.sequence).ok_or_else(|| SessionError::new("INVALID_SCAM_BUNDLE", "invalid installed sequence"))?;
+            if incoming < previous || incoming == previous && digest != installed.digest {
+                return Err(SessionError::new("SCAM_SEQUENCE_REJECTED", "scam bundle sequence rollback or equivocation"));
+            }
+            if incoming == previous { return Ok(()); }
+        }
+        // Module linking is a separate integration step. Never copy a test
+        // fixture module into an authenticated production bundle installation.
+        self.installed = Some(Arc::new(Installed {
+            bundle, digest, builder_version: BUILDER_VERSION.into(), module: None,
+        }));
+        Ok(())
+    }
 
     pub(super) fn set_settings(&mut self, input: &str) -> Result<(), SessionError> {
         if input.len() as u64 > self.config.limits.max_bundle_bytes {
@@ -523,7 +627,6 @@ fn algorithm_limits(limits: &Limits) -> AlgorithmLimits {
         max_work_units: limits.max_algorithm_work_units }
 }
 
-#[cfg(feature = "scam-test-fixtures")]
 fn validate_bundle(bundle: &Bundle, config: &Config, builder: &str, now: u64) -> Result<(), SessionError> {
     let compat = &bundle.compatibility;
     if bundle.kind != "scam_bundle" || bundle.schema != "0.1" || decimal(&bundle.sequence).is_none()
@@ -534,13 +637,13 @@ fn validate_bundle(bundle: &Bundle, config: &Config, builder: &str, now: u64) ->
         || !(compat.builder_range == "*" || compat.builder_range == builder)
         || compat.algorithm.as_ref().is_some_and(|a| a.id.is_empty() || a.version.is_empty() || a.contract_version != 1)
         || bundle.presets.is_empty() || bundle.support.is_empty()
-    { return Err(config_error("invalid SF3 fixture bundle")); }
+    { return Err(config_error("invalid scam bundle")); }
     let mut presets = BTreeSet::new();
     for preset in &bundle.presets {
         if preset.id.is_empty() || !presets.insert(&preset.id) || !matches!(preset.purpose.as_str(), "default" | "demo")
             || preset.selection.age_threshold_sec == 0 || preset.selection.age_threshold_sec > MAX_SAFE_INTEGER / 1000
             || preset.selection.unknown_age != "new_provisional_insufficient" {
-            return Err(config_error("invalid fixture preset selection"));
+            return Err(config_error("invalid scam preset selection"));
         }
         validate_preset(&preset.new_market, &config.limits)?;
         validate_preset(&preset.established, &config.limits)?;
@@ -552,10 +655,19 @@ fn validate_bundle(bundle: &Bundle, config: &Config, builder: &str, now: u64) ->
             || support.allowed_bucket_ms.is_empty() || support.confirm_depth > MAX_SAFE_INTEGER
             || support.factories.iter().chain(&support.quote_tokens).chain(&support.exempt_tokens).any(|a| !is_hex(a,20))
             || support.allowed_bucket_ms.iter().any(|v| *v == 0 || *v > MAX_SAFE_INTEGER) {
-            return Err(config_error("invalid fixture support scope"));
+            return Err(config_error("invalid scam support scope"));
         }
     }
     Ok(())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SignedBundle {
+    payload: String,
+    signature: String,
+    #[serde(rename = "keyId")]
+    _key_id: Option<String>,
 }
 
 #[cfg(feature = "scam-test-fixtures")]
@@ -589,7 +701,7 @@ impl AlgorithmModule for FixedModule {
             contract_version: self.identity.contract_version, analysis_mode: AnalysisMode::Stub,
             binding: AlgorithmBinding { chain_id: request.subject.chain_id, pool: request.subject.pool.clone(),
                 as_of_block: request.as_of.block.clone(), as_of_block_hash: request.as_of.block_hash.clone(),
-                rules_hash: algorithm::rules_hash(&request.rules).map_err(|_| AlgorithmError::InvalidInput)? },
+                rules_hash: crate::scam::rules_hash(&request.rules).map_err(|_| AlgorithmError::InvalidInput)? },
             rules: self.results.clone(),
         })
     }

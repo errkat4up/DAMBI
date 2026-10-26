@@ -5,7 +5,7 @@ import type { CallOptions } from "../types/options.js";
 import type { CorePlan, FactBatch, PlannedCall } from "../types/plan.js";
 import type { CheckRequest, UnsupportedRequest } from "../types/request.js";
 import type { Verdict, VerdictMetadata } from "../types/verdict.js";
-import type { ScamConfig, ScamFactBatch, ScamSettings, NativeScamInputDraft } from "../types/scam.js";
+import type { ScamConfig, ScamFactBatch, ScamSettings, SignedScamBundle, NativeScamInputDraft } from "../types/scam.js";
 import { ScamDataError } from "../types/scam-error.js";
 import type { SignedPolicyBundle } from "../ports/policy.js";
 import type { FactResult } from "../ports/fact.js";
@@ -22,6 +22,7 @@ interface OwnedConfig {
   readonly limits: CoreLimits;
   readonly now: () => number;
   readonly fetchPolicy: (options: CallOptions) => Promise<SignedPolicyBundle>;
+  readonly fetchScamBundle?: (options: CallOptions) => Promise<SignedScamBundle>;
   readonly fetchFacts: (calls: readonly PlannedCall[], options: CallOptions & { planId: string }) => Promise<FactBatch>;
   readonly fetchScamFacts: (calls: readonly PlannedCall[], options: CallOptions & { planId: string }) => Promise<FactBatch>;
   readonly hooks: HookDispatcher;
@@ -45,7 +46,9 @@ const scamLimitNames = [
 ] as const;
 
 /** Capture port/clock methods once while preserving their original receiver. */
-function method(receiver: unknown, name: string): (...args: unknown[]) => unknown {
+function method(receiver: unknown, name: string, optional?: false): (...args: unknown[]) => unknown;
+function method(receiver: unknown, name: string, optional: true): ((...args: unknown[]) => unknown) | undefined;
+function method(receiver: unknown, name: string, optional = false): ((...args: unknown[]) => unknown) | undefined {
   if ((typeof receiver !== "object" || receiver === null) && typeof receiver !== "function") {
     throw new CoreError("INVALID_CONFIG", "A configured port or clock is missing.");
   }
@@ -53,6 +56,7 @@ function method(receiver: unknown, name: string): (...args: unknown[]) => unknow
   for (let depth = 0; owner !== null && depth < 128; depth++) {
     const descriptor = Object.getOwnPropertyDescriptor(owner, name);
     if (descriptor) {
+      if (optional && "value" in descriptor && descriptor.value === undefined) return undefined;
       if (!("value" in descriptor) || typeof descriptor.value !== "function") {
         throw new CoreError("INVALID_CONFIG", "Ports and clocks require callable data methods.");
       }
@@ -61,6 +65,7 @@ function method(receiver: unknown, name: string): (...args: unknown[]) => unknow
     }
     owner = Object.getPrototypeOf(owner) as object | null;
   }
+  if (optional && owner === null) return undefined;
   throw new CoreError("INVALID_CONFIG", "A configured port or clock method is missing.");
 }
 
@@ -110,7 +115,9 @@ function ownConfig(input: CoreConfig): OwnedConfig {
     };
     const nativeJson = JSON.stringify(copyJson(nativeConfig, "INVALID_CONFIG", Number.MAX_SAFE_INTEGER));
     const ports = record(field(source, "ports", true, "INVALID_CONFIG"), "INVALID_CONFIG");
-    const fetch = method(field(ports, "policy", true, "INVALID_CONFIG"), "fetch");
+    const policyPort = field(ports, "policy", true, "INVALID_CONFIG");
+    const fetch = method(policyPort, "fetch");
+    const fetchScam = scam === undefined ? undefined : method(policyPort, "fetchScam", true);
     const fetchFacts = method(field(ports, "fact", true, "INVALID_CONFIG"), "fetch");
     const clock = field(source, "clock", false, "INVALID_CONFIG");
     const getNow = clock === undefined ? Date.now : method(clock, "now");
@@ -132,6 +139,10 @@ function ownConfig(input: CoreConfig): OwnedConfig {
         try { return await fetch(options) as SignedPolicyBundle; }
         catch { throw new CoreError("POLICY_FETCH_FAILED", "The policy source could not return a bundle."); }
       },
+      ...(fetchScam === undefined ? {} : { fetchScamBundle: async (options: CallOptions) => {
+        try { return await fetchScam(options) as SignedScamBundle; }
+        catch { throw new CoreError("SCAM_FETCH_FAILED", "The scam source could not return a bundle."); }
+      } }),
       fetchFacts: async (calls, options) => {
         try { return await fetchFacts(calls, options) as FactBatch; }
         catch { throw new FactFetchFailure(); }
@@ -168,6 +179,25 @@ function policyJson(input: SignedPolicyBundle, maxBytes: number): string {
   } catch (error) {
     if (error instanceof CoreError) throw error;
     throw new CoreError("INVALID_POLICY_BUNDLE", "Policy data could not be copied safely.");
+  }
+}
+
+function scamBundleJson(input: SignedScamBundle, maxBytes: number): string {
+  try {
+    const source = record(input, "INVALID_SCAM_BUNDLE");
+    const payload = field(source, "payload", true, "INVALID_SCAM_BUNDLE");
+    const signature = field(source, "signature", true, "INVALID_SCAM_BUNDLE");
+    const keyId = field(source, "keyId", false, "INVALID_SCAM_BUNDLE");
+    if (typeof payload !== "string" || typeof signature !== "string" || signature.length !== 88
+        || (keyId !== undefined && (typeof keyId !== "string" || keyId.length > 512))) {
+      throw new CoreError("INVALID_SCAM_BUNDLE", "Scam payload, P1363 signature and key ID are malformed.");
+    }
+    textBytes(payload, "INVALID_SCAM_BUNDLE", maxBytes);
+    // Preserve exact signed payload bytes. Native validates UTF-8, signature and semantics.
+    return JSON.stringify(keyId === undefined ? { payload, signature } : { payload, signature, keyId });
+  } catch (error) {
+    if (error instanceof CoreError) throw error;
+    throw new CoreError("INVALID_SCAM_BUNDLE", "Scam bundle could not be copied safely.");
   }
 }
 
@@ -248,6 +278,7 @@ class CoreRuntime implements DambiCore {
   #evaluationDepth = 0;
   readonly #handles = new WeakMap<object, HandleState>();
   #refresh: PendingOperation<string> | undefined;
+  #scamRefresh: PendingOperation<string> | undefined;
   readonly #checks = new Set<PendingOperation<unknown>>();
   readonly #cache: FactCache;
   #cacheEpoch = 0;
@@ -409,6 +440,43 @@ class CoreRuntime implements DambiCore {
     }
   }
 
+  async refreshScam(options?: CallOptions): Promise<void> {
+    this.#live();
+    const signal = signalFrom(options);
+    checkAbort(signal);
+    this.#live();
+    const config = this.#config.scam, fetch = this.#config.fetchScamBundle;
+    if (!config) throw new CoreError("INVALID_CONFIG", "Scam Filter is not configured.");
+    if (!fetch) throw new CoreError("SCAM_FETCH_FAILED", "No scam bundle source is configured.");
+    const ticket = invoke<number>(() => this.#native.begin_scam_refresh());
+    if (!Number.isSafeInteger(ticket) || ticket < 1) {
+      throw new CoreError("ENGINE_ERROR", "The Core engine returned an invalid scam refresh ticket.");
+    }
+    const previous = this.#scamRefresh;
+    const operation = startOperation(async (internal) => {
+      const bundle = await fetch({ signal: internal });
+      checkAbort(internal);
+      return scamBundleJson(bundle, config.limits.maxBundleBytes);
+    }, this.#config.limits.policyTimeoutMs, signal);
+    this.#scamRefresh = operation;
+    previous?.cancel(new CoreError("ABORTED", "A newer scam refresh superseded this operation."));
+    try {
+      const bundle = await operation.promise;
+      this.#live();
+      checkAbort(signal);
+      const now = this.#config.now();
+      this.#live();
+      checkAbort(signal);
+      invoke<unknown>(() => this.#native.commit_scam_refresh(ticket, bundle, now));
+      // Policy snapshots and their Fact cache belong to the other refresh channel.
+    } finally {
+      if (this.#scamRefresh === operation) this.#scamRefresh = undefined;
+      if (!this.#disposed) {
+        try { invoke<unknown>(() => this.#native.cancel_scam_refresh(ticket)); } catch { /* Stale/completed ticket. */ }
+      }
+    }
+  }
+
   async check(request: CheckRequest | UnsupportedRequest, options?: CallOptions): Promise<Verdict> {
     this.#live();
     let plan: CorePlan | undefined;
@@ -536,6 +604,8 @@ class CoreRuntime implements DambiCore {
     this.#disposed = true;
     this.#refresh?.cancel(new CoreError("DISPOSED", "The Core instance has been disposed."));
     this.#refresh = undefined;
+    this.#scamRefresh?.cancel(new CoreError("DISPOSED", "The Core instance has been disposed."));
+    this.#scamRefresh = undefined;
     for (const operation of this.#checks) operation.cancel(new CoreError("DISPOSED", "The Core instance has been disposed."));
     this.#checks.clear();
     this.#cache.clear();
@@ -572,7 +642,19 @@ async function initializeOwnedCore(
   try {
     native = new ready.module.WasmCore(config.nativeJson, ready.policy, config.now());
     checkAbort(signal);
-    return { core: new CoreRuntime(native, config), native };
+    const core = new CoreRuntime(native, config);
+    if (config.scam && config.fetchScamBundle) {
+      try { await core.refreshScam({ signal }); }
+      catch (error) {
+        // Caller cancellation still cancels initialization. Advisory source and
+        // trust failures leave the authenticated policy Core usable and explicit.
+        checkAbort(signal);
+        config.hooks.diagnostic({ code: "scam_bundle_unavailable",
+          message: `Initial scam bundle was not installed (${error instanceof CoreError ? error.code : "ENGINE_ERROR"}).` });
+      }
+    }
+    checkAbort(signal);
+    return { core, native };
   } catch (error) {
     if (native) release(native);
     throw nativeError(error);

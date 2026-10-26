@@ -224,6 +224,18 @@ async function routeRequest(input: RouteInput): Promise<void> {
     proxyPath = `/policy-bundles/${profile}/${version}.json`;
   }
 
+  // Independent signed scam bundle namespace; never fall back to policy bundles.
+  // env is explicit, profile defaults to default, omitted sequence selects latest.
+  if (method === "GET" && url.pathname === "/v1/scam-bundle") {
+    const q = url.searchParams;
+    const allowed = new Set(["env", "profile", "sequence"]);
+    const validQuery = [...q.keys()].every((key) => allowed.has(key) && q.getAll(key).length === 1);
+    const sequence = q.get("sequence");
+    proxyPath = validQuery && (sequence === null || /^(?:0|[1-9][0-9]{0,77})(?![\s\S])/.test(sequence))
+      ? `/scam-bundles/${q.get("env") ?? ""}/${q.get("profile") ?? "default"}/${sequence ?? "latest"}.json`
+      : "/scam-bundles/invalid";
+  }
+
   if (
     method === "GET" &&
     (proxyPath.startsWith("/index/by-callkey/") ||
@@ -233,7 +245,8 @@ async function routeRequest(input: RouteInput): Promise<void> {
       proxyPath.startsWith("/bundles/") ||
       proxyPath.startsWith("/signatures/") ||
       proxyPath.startsWith("/contexts/") ||
-      proxyPath.startsWith("/policy-bundles/"))
+      proxyPath.startsWith("/policy-bundles/") ||
+      proxyPath.startsWith("/scam-bundles/"))
   ) {
     await handleProxy(input, proxyPath);
     return;
@@ -715,6 +728,7 @@ function sendCacheValue(
 }
 
 const POLICY_BUNDLE_SEQUENCE_RE = /^\/policy-bundles\/[a-z0-9-]+\/[1-9][0-9]*\.json$/;
+const SCAM_BUNDLE_SEQUENCE_RE = /^\/scam-bundles\/(staging|production)\/[a-z0-9-]{1,128}\/(?:0|[1-9][0-9]{0,77})\.json(?![\s\S])/;
 
 /** Content-addressed leaves — the sha IS the version, so safe to cache forever.
  *  policy-bundles/<profile>/<sequence>.json counts too: a sequence is never
@@ -723,7 +737,8 @@ function isContentAddressed(proxyPath: string): boolean {
   return (
     proxyPath.startsWith("/bundles/") ||
     proxyPath.startsWith("/signatures/") ||
-    POLICY_BUNDLE_SEQUENCE_RE.test(proxyPath)
+    POLICY_BUNDLE_SEQUENCE_RE.test(proxyPath) ||
+    SCAM_BUNDLE_SEQUENCE_RE.test(proxyPath)
   );
 }
 

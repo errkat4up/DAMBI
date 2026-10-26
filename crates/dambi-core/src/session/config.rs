@@ -79,6 +79,7 @@ impl Config {
         config.limits.validate()?;
         if let Some(scam) = &config.scam {
             scam.validate()?;
+            scam.validate_separate_keys(&config.store_config()?.keys)?;
         }
         Ok(config)
     }

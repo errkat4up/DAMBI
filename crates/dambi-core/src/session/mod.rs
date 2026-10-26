@@ -72,6 +72,7 @@ pub struct CoreSession {
     owner: usize,
     next_plan: u64,
     refresh: Option<(u64, RefreshTicket)>,
+    scam_refresh: Option<u64>,
     plans: BTreeMap<String, PendingPlan>,
     // Bounded tombstones retain useful immediate reuse/expiry errors without
     // retaining request/snapshot data or accumulating an unbounded history.
@@ -132,9 +133,10 @@ impl CoreSession {
             owner,
             next_plan: 0,
             refresh: None,
+            scam_refresh: None,
             plans: BTreeMap::new(),
             retired: VecDeque::new(),
-            scam: config.scam.map(scam::State::new),
+            scam: config.scam.map(scam::State::new).transpose()?,
         })
     }
 
@@ -455,6 +457,38 @@ impl CoreSession {
         Ok(id as u64)
     }
 
+    pub fn begin_scam_refresh(&mut self) -> Result<u64, SessionError> {
+        self.live()?;
+        if self.scam.is_none() {
+            return Err(SessionError::new("INVALID_CONFIG", "scam is not configured"));
+        }
+        let id = NEXT_REFRESH.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| {
+            id.checked_add(1).filter(|next| (*next as u64) <= MAX_SAFE_INTEGER)
+        }).map_err(|_| SessionError::new("LIMIT_EXCEEDED", "refresh identifier space exhausted"))? as u64;
+        self.scam_refresh = Some(id);
+        Ok(id)
+    }
+
+    pub fn commit_scam_refresh(&mut self, ticket: u64, envelope_json: &str, now_ms: u64) -> Result<(), SessionError> {
+        self.live()?;
+        clock(now_ms)?;
+        if self.scam_refresh != Some(ticket) {
+            return Err(SessionError::new("ABORTED", "scam refresh ticket is stale or foreign"));
+        }
+        self.scam_refresh = None;
+        self.scam.as_mut().ok_or_else(|| SessionError::new("INVALID_CONFIG", "scam is not configured"))?
+            .install_signed(envelope_json, now_ms)
+    }
+
+    pub fn cancel_scam_refresh(&mut self, ticket: u64) -> Result<(), SessionError> {
+        self.live()?;
+        if self.scam_refresh != Some(ticket) {
+            return Err(SessionError::new("ABORTED", "scam refresh ticket is stale or foreign"));
+        }
+        self.scam_refresh = None;
+        Ok(())
+    }
+
     pub fn commit_refresh(
         &mut self,
         ticket: u64,
@@ -508,6 +542,7 @@ impl CoreSession {
         self.plans.clear();
         self.retired.clear();
         self.refresh = None;
+        self.scam_refresh = None;
         self.scam = None;
     }
 

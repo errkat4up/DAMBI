@@ -82,6 +82,51 @@ describe("registry-api HTTP server", () => {
     expect((await fetch(`${url}/health`)).status).toBe(200);
   });
 
+  it("serves independent scam scopes verbatim with immutable versions, mutable latest and ETag 304", async () => {
+    const staging = JSON.stringify({ payload: '{ "kind": "scam_bundle" }', signature: "staging-signature", key_id: "scam-staging" });
+    const production = '{"payload":"production signed bytes","signature":"production-signature","key_id":"scam-production"}';
+    const policy = '{"payload":"policy signed bytes","signature":"policy-signature","key_id":"policy"}';
+    const reader = fakeReader({
+      "scam-bundles/staging/default/0.json": staging,
+      "scam-bundles/staging/default/latest.json": staging,
+      "scam-bundles/production/team-2/latest.json": production,
+      "policy-bundles/default/latest.json": policy,
+    });
+    const url = await start(reader);
+    const immutable = await fetch(`${url}/v1/scam-bundle?env=staging&sequence=0`);
+    expect(immutable.status).toBe(200);
+    expect(await immutable.text()).toBe(staging);
+    expect(immutable.headers.get("cache-control")).toBe(baseConfig.immutableCacheControlValue);
+    const notModified = await fetch(`${url}/v1/scam-bundle?env=staging&sequence=0`, {
+      headers: { "if-none-match": immutable.headers.get("etag")! },
+    });
+    expect(notModified.status).toBe(304);
+    expect(await notModified.text()).toBe("");
+    const latest = await fetch(`${url}/v1/scam-bundle?env=staging`);
+    expect(await latest.text()).toBe(staging);
+    expect(latest.headers.get("cache-control")).toBe(baseConfig.cacheControlValue);
+    expect(await (await fetch(`${url}/v1/scam-bundle?env=production&profile=team-2`)).text()).toBe(production);
+    expect(await (await fetch(`${url}/v1/bundle`)).text()).toBe(policy);
+    expect(reader.reads).toEqual(["scam-bundles/staging/default/0.json", "scam-bundles/staging/default/latest.json",
+      "scam-bundles/production/team-2/latest.json", "policy-bundles/default/latest.json"]);
+  });
+
+  it("rejects ambiguous scam query scopes before bucket reads and preserves missing-object 404", async () => {
+    const reader = fakeReader({});
+    const url = await start(reader);
+    for (const query of ["", "env=other", "env=staging&profile=UPPER", "env=staging&sequence=01",
+      "env=staging&sequence=latest", "env=staging&env=production", "env=staging&profile=default&profile=other",
+      "env=staging&sequence=0&sequence=1", "env=staging&version=1", "env=staging&profile=%2e%2e%2fother"]) {
+      expect((await fetch(`${url}/v1/scam-bundle?${query}`)).status).toBe(404);
+    }
+    expect(reader.reads).toEqual([]);
+    const missing = await fetch(`${url}/v1/scam-bundle?env=staging&sequence=1`);
+    expect(missing.status).toBe(404);
+    // An immutable sequence may be published next; do not cache its absence.
+    expect(missing.headers.get("cache-control")).toBe("no-store");
+    expect(reader.reads).toEqual(["scam-bundles/staging/default/1.json"]);
+  });
+
   it("proxies a callkey object (200 + headers)", async () => {
     const url = await start(
       fakeReader({

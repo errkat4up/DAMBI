@@ -12,6 +12,7 @@ use super::ParsedPolicyBundle;
 pub enum KeyRole {
     Policy,
     Decoder,
+    Scam,
 }
 
 /// Local configuration only. A response cannot add a key or assign its role.
@@ -80,6 +81,12 @@ impl TrustedKeys {
     /// Parse Base64 DER SubjectPublicKeyInfo and validate the P-256 curve/point.
     /// Invalid keys fail the whole configuration instead of being silently skipped.
     pub fn new(config: &[VerificationKey]) -> Result<Self, SignatureError> {
+        Self::for_role(config, KeyRole::Policy)
+    }
+
+    /// Independent bundle channels may require their own role without adding
+    /// a policy key to that channel's local trust configuration.
+    pub(crate) fn for_role(config: &[VerificationKey], required: KeyRole) -> Result<Self, SignatureError> {
         let invalid = |message| SignatureError::new(SignatureErrorKind::InvalidConfig, message);
         let mut keys: Vec<TrustedKey> = Vec::with_capacity(config.len());
         for entry in config {
@@ -96,7 +103,7 @@ impl TrustedKeys {
                 .any(|key| key.role != entry.role && key.public_key == public_key)
             {
                 return Err(invalid(
-                    "policy and Decoder roles must use distinct public keys",
+                    "different verification roles must use distinct public keys",
                 ));
             }
             keys.push(TrustedKey {
@@ -105,9 +112,9 @@ impl TrustedKeys {
                 public_key,
             });
         }
-        if !keys.iter().any(|key| key.role == KeyRole::Policy) {
+        if !keys.iter().any(|key| key.role == required) {
             return Err(invalid(
-                "at least one locally trusted policy key is required",
+                "at least one locally trusted key of the required role is required",
             ));
         }
         Ok(Self { keys })
@@ -128,7 +135,7 @@ impl TrustedKeys {
         })
     }
 
-    pub(super) fn verify_bytes(
+    pub(crate) fn verify_bytes(
         &self,
         role: KeyRole,
         message: &[u8],
@@ -145,6 +152,10 @@ impl TrustedKeys {
             }
         }
         Err(invalid_signature())
+    }
+
+    pub(crate) fn shares_key_with(&self, other: &Self) -> bool {
+        self.keys.iter().any(|left| other.keys.iter().any(|right| left.public_key == right.public_key))
     }
 }
 
