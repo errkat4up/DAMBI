@@ -204,6 +204,12 @@ node --test \
 
 GIWA Sepolia 풀 1개, 24시간+warm-up 1시간, `rpc_anchor + number_recheck`, 준비 4,187.60ms 후 연속 조회는 **2,363.36 / 2,332.80 / 2,030.90ms**, 모두 2,500ms 안에 partial로 반환했다. 요청은 23/23/20회, 로그 청크는 1/1/0개, 재시도·실패·timeout은 0이다. 기준 블록 39,650,519→39,650,521→39,650,521에서 `unknown→advanced→same`과 세 번의 history `interval_cache` 재사용을 확인했다. history 결측/미지원은 0, profile은 capability 미설정으로 나이 unknown·관리자 구간 결측 1·미지원 필드 1이다. 따라서 완전 성공 0·부분 완료 3이며 `allAttemptsCompleteWithinBudget=false`는 시간 초과가 아닌 지원 범위 부족을 반영한다. 최소 여유는 약 137ms이고, 3회 결과를 운영 p95로 확정하지 않는다. 기존 cold·단발 측정과 AH5-1 검증은 재사용한다. 실제 확장 Service Worker의 메모리 재사용·재시작과 실제 알고리즘을 포함한 전체 2.5초 달성은 미확인이다.
 
+`47ffe5b` 이후: 기존 probe를 브라우저 공통 세션으로 추출하고 개발용 SW 콘솔 진입점을 추가했다. 동일 provider의 별도 준비·조회, 중복 설치/동시 실행 차단, 반환 기록 격리와 새 세션을 확인하는 시험을 추가했다. **사용자 실행 확인: probe 시험 13개 통과·실패/취소/건너뜀 0개, 진단 번들 생성 성공.**
+
+실제 Dambi 0.2.3 Service Worker(`e0e273a8-b0fe-4a8e-870a-b876b094a8fd`)에서 준비는 4,401.30ms·29요청·재시도 0·partial, 후속 조회는 **2,308.90 / 2,064.40 / 2,329.40ms**로 모두 2,500ms 안에 partial로 반환했다. 요청 23/20/23회·실패/timeout/재시도 0이다. 기준 블록 39,652,529→39,652,529→39,652,533에서 `unknown→same→advanced`, history는 세 번 모두 `interval_cache`·결측/미지원 0이다. profile은 `reuse=none`·관리자 구간 결측 1·미지원 필드 1이며 미설정 capability에 따른 partial은 유지한다. 최소 여유 약 171ms는 데이터 조회만의 관측값이고 운영 p95나 전체 분석 2.5초 달성을 증명하지 않는다.
+
+확장 재시작 절차 후 새 SW 세션 `4aad31a3-2434-4944-9bb6-093ed3faed68`에서 `prepared=false`, **4,311.30ms·29요청·partial**을 확인했다. 기준 블록 39,653,927의 history는 `reuse=none`, 결측/미지원 0, snapshot 9,000/1,500개다. 사전 준비 없는 조회는 명시한 60초 진단 한도이며 준비 후 2.5초 성능에 합산하지 않는다. **AH5-2의 Node/SW 데이터 경로·재사용·재시작 확인 완료.** 자연 idle 종료나 production 거래 연결·완전 지원·실제 알고리즘 포함 전체 2.5초는 검증하지 않았다. SF5 연결 시 worker 재시작 후 사전 준비를 다시 해야 한다는 메모리 수명 조건을 인계한다. 실제 절차는 [Core README](../../packages/core/README.md)에 둔다.
+
 ## 번들 B1-1 — Universal Router
 
 2026-10-12, `main 7387536` 이후 B1-1 변경 검증: **Native 원문 2개 시험과 패키지 WASM 3개 시험 통과, 최종 WASM 로그 3 통과·0 실패.** 저장된 snapshot은 801개이며 기존 799개 내용 보존·UR 2개 추가·digest/bytes 일치를 확인했다. source-context 제외 30,484개와 Aave 거절 3개는 유지한다. 별도 `decoder_snapshot` target의 전체 결과는 공유되지 않았다. 대표 UR 경로의 편입·검증을 마쳤으며 다음은 B1-2 Aave다.

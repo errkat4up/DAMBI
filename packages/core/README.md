@@ -416,6 +416,65 @@ reorg. Check `verification.reuse` separately: reference advancement alone does n
 prove reuse or ancestry. Exact reused/downloaded block ranges and cumulative
 timestamp-fallback request counts are not reported.
 
+For the **AH5-2 extension Service Worker diagnostic**, build the manual console
+bundle from the repository root after the two probe test files pass:
+
+```sh
+node --test packages/core/tests/adapters/scam-data-probe.test.mjs \
+  packages/core/tests/adapters/scam-sw-diagnostic.test.mjs &&
+node browser-extension/scripts/build-scam-sw-probe.cjs &&
+pbcopy < browser-extension/dist/diagnostics/scam-sw-probe.js
+```
+
+This uses the existing Core adapter build; it does not rebuild WASM or the full
+extension. Open Dambi's **Service Worker → Inspect** from `chrome://extensions`,
+paste the copied bundle into that worker's console, then run:
+
+```js
+dambiScamProbe.start();
+await dambiScamProbe.prepare();
+await dambiScamProbe.fetch();
+await dambiScamProbe.fetch();
+await dambiScamProbe.fetch();
+console.log(JSON.stringify(dambiScamProbe.report(), null, 2));
+```
+
+Copy and save the printed JSON report. Use `console.log` rather than the
+DevTools-only `copy()` helper, which may be unavailable in this execution context.
+If only the output command fails, run the `console.log` line separately; do not
+restart preparation or repeat the fetches. The same provider serves each call, with a separate
+60-second preparation budget and 2,500ms fetch budget. Installation and `start()`
+make no RPC calls. A failed preparation prevents fetches; failed fetches remain
+in the report. Re-pasting or calling `start()` again cannot reset the session.
+The cache TTL is 120 seconds, so run the prepared fetches promptly; a miss after
+TTL expiry is not a worker-restart failure. Inspect actual history `reuse`,
+reference identity, coverage, latency and failures independently.
+
+To check worker recreation, wait for calls to finish, close its DevTools, reload
+**Dambi** on `chrome://extensions`, and open its new Service Worker console. Before
+pasting the bundle again, record the result of:
+
+```js
+typeof globalThis.dambiScamProbe // expected: "undefined"
+```
+
+Repeat the `pbcopy < ...` command above and paste the same bundle again, then
+measure one explicitly cold fetch:
+
+```js
+dambiScamProbe.start({ SCAM_TIMEOUT_MS: "60000", SCAM_REPEATS: "1" });
+await dambiScamProbe.fetch(); // intentionally do not call prepare()
+console.log(JSON.stringify(dambiScamProbe.report(), null, 2));
+```
+
+Compare `workerSessionId` between reports and require the returned cold history
+to say `reuse: "none"` before claiming a cold fetch was observed. If that fetch
+fails, retain the failure; a new worker ID alone does not prove data retrieval.
+The cold 60-second diagnostic is excluded from the prepared 2.5-second target.
+Reload verifies worker recreation, not natural idle suspension (DevTools may
+affect lifetime). This diagnostic is not installed in the production manifest or
+transaction path and does not establish full signing-check performance.
+
 The probe defaults to GIWA Sepolia, one known pool, a 24-hour window plus one-hour
 warm-up, a 2,500 ms budget and one uncached attempt. Defaults are diagnostic inputs,
 not calibrated risk policy. Probe request spacing is explicitly 100ms, with
