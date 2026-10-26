@@ -198,6 +198,12 @@ node --test \
 
 `7e341d7` 이후 변경: 실제 provider→Runtime→Rust/WASM 경로의 준비 후 새 plan/manual/check 근거, 재검증 reorg·Runtime timeout의 Cedar deny/warn 보존, 최종 recheck 중 abort/dispose를 확인하는 통합 시험 3개를 추가했다. 호스트 예제의 `checkWithTiming()`은 전체 check의 반환·거절 시간을 별도로 측정하며 기존 판정과 오류를 유지한다. **사용자 실행 확인: 측정·observer 격리 3개와 SDK 통합 3개, 합계 6개 통과·실패/취소/건너뜀 0개.** 합성 RPC·명시적 stub 경로의 `checkDurationMs`는 11.03ms였으며 SDK 측정 연결만 확인한다. 실제 알고리즘/확장/전체 2.5초 성능은 미확인이다. production Core/Rust·WASM 계약과 기존 deadline은 변경하지 않았다.
 
+### AH5-2 — 연속 실측·실제 호스트 확인
+
+`4831833` 이후 측정 스크립트 변경: 요청 대상과 일치하는 기준 블록의 번호·해시·시각을 남기고, 바로 이전에 완료된 조회와의 관계를 실제 캐시 재사용 여부와 구분한다. 첫 조회 및 실패·누락 뒤의 비교는 `unknown`이다. **사용자 실행 확인: probe 회귀 시험 10개 통과·실패/취소/건너뜀 0개.**
+
+GIWA Sepolia 풀 1개, 24시간+warm-up 1시간, `rpc_anchor + number_recheck`, 준비 4,187.60ms 후 연속 조회는 **2,363.36 / 2,332.80 / 2,030.90ms**, 모두 2,500ms 안에 partial로 반환했다. 요청은 23/23/20회, 로그 청크는 1/1/0개, 재시도·실패·timeout은 0이다. 기준 블록 39,650,519→39,650,521→39,650,521에서 `unknown→advanced→same`과 세 번의 history `interval_cache` 재사용을 확인했다. history 결측/미지원은 0, profile은 capability 미설정으로 나이 unknown·관리자 구간 결측 1·미지원 필드 1이다. 따라서 완전 성공 0·부분 완료 3이며 `allAttemptsCompleteWithinBudget=false`는 시간 초과가 아닌 지원 범위 부족을 반영한다. 최소 여유는 약 137ms이고, 3회 결과를 운영 p95로 확정하지 않는다. 기존 cold·단발 측정과 AH5-1 검증은 재사용한다. 실제 확장 Service Worker의 메모리 재사용·재시작과 실제 알고리즘을 포함한 전체 2.5초 달성은 미확인이다.
+
 ## 번들 B1-1 — Universal Router
 
 2026-10-12, `main 7387536` 이후 B1-1 변경 검증: **Native 원문 2개 시험과 패키지 WASM 3개 시험 통과, 최종 WASM 로그 3 통과·0 실패.** 저장된 snapshot은 801개이며 기존 799개 내용 보존·UR 2개 추가·digest/bytes 일치를 확인했다. source-context 제외 30,484개와 Aave 거절 3개는 유지한다. 별도 `decoder_snapshot` target의 전체 결과는 공유되지 않았다. 대표 UR 경로의 편입·검증을 마쳤으며 다음은 B1-2 Aave다.

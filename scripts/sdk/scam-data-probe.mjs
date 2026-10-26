@@ -133,12 +133,46 @@ function verificationSummary(value) {
   } catch { return undefined; }
 }
 
-function factSummary(batch) {
-  return Object.values(batch.results).flatMap((fact) => {
-    const value = fact.value;
+const blockNumber = (value) => typeof value === "string" && /^(?:0|[1-9][0-9]{0,77})(?![\s\S])/.test(value);
+function referenceSummary(value) {
+  if (!record(value) || !blockNumber(value.number)
+      || typeof value.hash !== "string" || !/^0x[0-9a-fA-F]{64}(?![\s\S])/.test(value.hash)
+      || !Number.isSafeInteger(value.timestampMs) || value.timestampMs < 0) return undefined;
+  return { number: value.number, hash: value.hash.toLowerCase(), timestampMs: value.timestampMs };
+}
+
+function sameSubject(actual, expected) {
+  return record(actual) && actual.chainId === expected.chainId && actual.venue === expected.venue
+    && Object.keys(DEFAULT).every((key) => address(actual[key]) && actual[key].toLowerCase() === expected[key]);
+}
+
+function referenceRelation(current, previous) {
+  if (!current || !previous) return "unknown";
+  if (current.number === previous.number) {
+    return current.hash === previous.hash && current.timestampMs === previous.timestampMs ? "same" : "changed";
+  }
+  return BigInt(current.number) > BigInt(previous.number) && current.timestampMs >= previous.timestampMs
+    && current.hash !== previous.hash ? "advanced" : "changed";
+}
+
+function factSummary(batch, request, previousFacts) {
+  if (!record(batch.results)) return [];
+  return Object.entries(batch.results).flatMap(([callId, fact]) => {
+    const value = fact?.value;
     if (!record(value) || !["scam.pool_history", "scam.token_profile"].includes(value.method)) return [];
+    const planned = request.calls.get(callId);
+    const targetIndex = batch.planId === request.planId && planned?.method === value.method
+      && planned.referenceGroupId === value.referenceGroupId && sameSubject(value.subject, planned.subject)
+      ? planned.targetIndex : undefined;
+    const reference = referenceSummary(value.reference?.block);
+    const previous = targetIndex === undefined ? undefined
+      : previousFacts?.find((item) => item.targetIndex === targetIndex && item.method === value.method);
     const verification = verificationSummary(value.verification);
-    return [{ method: value.method, referenceBlock: value.reference.block.number,
+    return [{ method: value.method,
+      ...(blockNumber(value.reference?.block?.number) ? { referenceBlock: value.reference.block.number } : {}),
+      ...(targetIndex === undefined ? {} : { targetIndex }),
+      ...(reference === undefined ? {} : { reference }),
+      referenceRelation: referenceRelation(reference, previous?.reference),
       ...(verification === undefined ? {} : { verification }),
       coverage: { missingIntervals: value.coverage.missing.length, unavailableFields: value.coverage.unavailable.length },
       ...(value.method === "scam.pool_history" ? { snapshots: value.histories.map(({ history }) => history.points.length) }
@@ -198,7 +232,7 @@ export async function runProbe(config, createProvider) {
       maxRequestBytes: 100_000, maxResultBytes: 16_000_000 },
     onMetrics(metrics) { observed = metrics; },
   });
-  async function measure(work, collectFacts) {
+  async function measure(work, request, previousTrial) {
     observed = undefined;
     let batch, threw = false;
     const started = performance.now();
@@ -209,7 +243,12 @@ export async function runProbe(config, createProvider) {
     const failure = metrics?.outcome === "failed" ? failureSummary(metrics.failure) : undefined;
     const preflight = preflightSummary(metrics?.preflight);
     const preflightGroup = metrics?.preflightGroup;
-    return { outcome: threw ? "failed" : metrics?.outcome ?? "failed",
+    const outcome = threw ? "failed" : metrics?.outcome ?? "failed";
+    // Only the immediately preceding completed fetch is a comparison baseline.
+    // Preparation returns no reference, and a failed/missing trial is not skipped.
+    const previousFacts = ["success", "partial"].includes(outcome)
+      && ["success", "partial"].includes(previousTrial?.outcome) ? previousTrial.facts : undefined;
+    return { outcome,
       ...(metrics?.reason === undefined ? {} : { reason: metrics.reason }),
       ...(failure === undefined ? {} : { failure }),
       ...(preflight === undefined ? {} : { preflight,
@@ -221,7 +260,7 @@ export async function runProbe(config, createProvider) {
       failedChunks: metrics?.failedChunks ?? null, resultBytes: metrics?.resultBytes ?? null,
       targets: config.subjects.length, calls: config.subjects.length * 2,
       ...(metrics ? {} : { diagnostic: "terminal_metrics_missing" }),
-      threw, ...(collectFacts ? { facts: batch ? factSummary(batch) : [] } : {}),
+      threw, ...(request ? { facts: batch ? factSummary(batch, request, previousFacts) : [] } : {}),
     };
   }
   let preparation;
@@ -237,9 +276,14 @@ export async function runProbe(config, createProvider) {
   // cold timeout as a failed warm path, or mix preparation into the fetch SLA.
   if (preparation?.outcome !== "failed") {
     for (let i = 0; i < config.repeats; i++) {
-      trials.push({ attempt: i + 1, ...await measure(() => provider.fetch(probeCalls(config, i), {
-        planId: `manual-probe:${i}`,
-      }), true) });
+      const calls = probeCalls(config, i), planId = `manual-probe:${i}`;
+      // Keep the requested identity before handing calls to the provider. The
+      // report uses ordinal targets rather than emitting subjects or call IDs.
+      const request = { planId, calls: new Map(calls.map((call, index) => [call.callId, {
+        method: call.method, referenceGroupId: call.params.referenceGroupId,
+        subject: { ...call.params.subject }, targetIndex: Math.floor(index / 2),
+      }])) };
+      trials.push({ attempt: i + 1, ...await measure(() => provider.fetch(calls, { planId }), request, trials.at(-1)) });
     }
   }
   return { scope: "Read-only Scam Filter provider data path; NOT algorithm or full analysis performance.",
@@ -267,6 +311,8 @@ export async function runProbe(config, createProvider) {
       "Both modes rely on the configured RPC. rpc_anchor does not cross-check every event block, and neither mode independently proves log completeness or chain consensus. number_recheck does not bind state reads by block hash.",
       "Pacing and cooldown are shared only within this provider, not globally or across processes; waiting can exhaust the unchanged timeout.",
       "Preparation has its own budget and is excluded from fetch latency and its 2,500 ms target. Failed preparation skips fetch trials; partial preparation may seed complete raw intervals but does not establish full coverage.",
+      "Reference relations compare adjacent completed fetches for the same requested chain, target and method within this run. The first fetch has no baseline, including after preparation. Failed or missing predecessors are not skipped. targetIndex is zero-based and requires a matching requested identity.",
+      "same requires equal block number, hash and timestamp; advanced requires a higher block number, a different hash and a nondecreasing timestamp. changed reports other reference differences, not a confirmed reorg. Reference relation and actual verification reuse are independent; neither reveals exact reused/new block ranges or source execution time.",
       "Cache-enabled does not imply a cache hit. Inspect returned verification reuse and original rawObservedAt; new references may need incremental RPC work. A partial result within 2,500 ms is not a complete risk analysis."],
     ...(preparation === undefined ? {} : { preparation,
       ...(preparation.outcome === "failed" ? { fetchSkipped: "preparation_failed" } : {}) }),

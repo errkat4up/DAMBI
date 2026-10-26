@@ -403,6 +403,19 @@ Read each returned method's `verification.reuse` to confirm an actual hit. A
 `partial` fetch within budget is still incomplete coverage. These measurements
 exclude the algorithm and Core evaluation and cannot establish the full signing SLA.
 
+For a short consecutive-fetch check, use the same command with `SCAM_REPEATS=3`.
+Each returned Fact keeps `referenceBlock` and adds a validated
+`reference: { number, hash, timestampMs }`. A zero-based `targetIndex` is included
+only when the result matches the requested identity. `referenceRelation` compares
+that method/target with the immediately preceding completed fetch: `same`,
+`advanced`, `changed` or `unknown`. The first fetch, including after preparation,
+has no reference baseline. A failed or missing predecessor is not skipped.
+`same` requires matching height, hash and timestamp; `advanced` requires a higher
+height, different hash and nondecreasing timestamp. `changed` is not a confirmed
+reorg. Check `verification.reuse` separately: reference advancement alone does not
+prove reuse or ancestry. Exact reused/downloaded block ranges and cumulative
+timestamp-fallback request counts are not reported.
+
 The probe defaults to GIWA Sepolia, one known pool, a 24-hour window plus one-hour
 warm-up, a 2,500 ms budget and one uncached attempt. Defaults are diagnostic inputs,
 not calibrated risk policy. Probe request spacing is explicitly 100ms, with

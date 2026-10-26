@@ -119,7 +119,9 @@ test("data probe prepares raw history once and measures independent fetch budget
         assert.doesNotMatch(calls[0].params.referenceGroupId, /prepare/);
         report(8, 1000);
         return { planId: context.planId, results: { [calls[0].callId]: { value: {
-          method: "scam.pool_history", reference: { block: { number: String(42 + fetches) } },
+          method: "scam.pool_history", subject: calls[0].params.subject,
+          referenceGroupId: calls[0].params.referenceGroupId,
+          reference: { block: { number: String(42 + fetches), hash: `0x${String(fetches).repeat(64)}`, timestampMs: 1000 + fetches } },
           coverage: { missing: [], unavailable: [] }, histories: [{ history: { points: [1] } }],
           verification: { history: "rpc_anchor", stateBinding: "number_recheck", reuse: "interval_cache",
             rawObservedAt: { fromMs: 1000, toMs: 2000, secret: "SECRET" }, verifiedAt: 3000 + fetches },
@@ -141,6 +143,8 @@ test("data probe prepares raw history once and measures independent fetch budget
   assert.ok(result.trials.every((trial) => trial.requests === 8 && trial.providerDurationMs === 1000));
   assert.deepEqual(result.trials[0].facts[0].verification, { history: "rpc_anchor", stateBinding: "number_recheck",
     reuse: "interval_cache", rawObservedAt: { fromMs: 1000, toMs: 2000 }, verifiedAt: 3001 });
+  assert.deepEqual(result.trials.map((trial) => trial.facts[0].referenceRelation), ["unknown", "advanced"]);
+  assert.ok(result.trials.every((trial) => trial.facts[0].targetIndex === 0));
   assert.match(result.cache, /enabled/);
   assert.doesNotMatch(JSON.stringify(result), /SECRET/);
   assert.equal(Object.hasOwn(result, "fetchSkipped"), false);
@@ -192,7 +196,9 @@ test("data probe reports provider terminal metrics without leaking endpoints or 
         receivedBytes: 1000, logChunks: 2, failedChunks: 0, resultBytes: failed ? 0 : 500, targets: 1, calls: 2 });
       if (failed) throw new Error("PRIVATE https://secret.invalid/");
       return { planId: context.planId, results: {
-        [calls[0].callId]: { value: { method: "scam.pool_history", reference: { block: { number: "42" } },
+        [calls[0].callId]: { value: { method: "scam.pool_history",
+          subject: { ...calls[0].params.subject, secret: "PRIVATE" }, referenceGroupId: calls[0].params.referenceGroupId,
+          reference: { block: { number: "42", hash: `0x${"ab".repeat(32)}`, timestampMs: 42000, secret: "PRIVATE" }, endpoint: "PRIVATE" },
           verification: { history: "rpc_anchor", stateBinding: "number_recheck", endpoint: "https://PRIVATE.invalid/", secret: "PRIVATE" },
           coverage: { missing: [], unavailable: [] }, histories: [{ history: { points: [1, 2] } }] } },
         [calls[1].callId]: { value: { method: "scam.token_profile", reference: { block: { number: "42" } },
@@ -227,16 +233,99 @@ test("data probe reports provider terminal metrics without leaking endpoints or 
   assert.equal(result.trials[1].retries, 1);
   assert.equal(result.trials[0].facts[1].age, "unknown");
   assert.deepEqual(result.trials[0].facts[0].snapshots, [2]);
+  assert.deepEqual(result.trials[0].facts[0].reference, { number: "42", hash: `0x${"ab".repeat(32)}`, timestampMs: 42000 });
+  assert.equal(result.trials[0].facts[0].referenceBlock, "42");
+  assert.equal(result.trials[0].facts[0].targetIndex, 0);
+  assert.equal(result.trials[0].facts[0].referenceRelation, "unknown");
   assert.deepEqual(result.trials[0].facts[0].verification, { history: "rpc_anchor", stateBinding: "number_recheck" });
   assert.equal(Object.hasOwn(result.trials[0].facts[1], "verification"), false,
     "Requested settings do not fabricate missing performed metadata");
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE|secret\.invalid|Bearer|authorization/);
+  for (const key of ["pool", "token", "quoteToken", "factory"]) {
+    assert.equal(JSON.stringify(result).includes(config.subjects[0][key]), false, "Target subjects stay out of the report");
+  }
   assert.match(result.scope, /NOT algorithm or full analysis/);
   assert.match(result.cache, /disabled/);
   assert.match(result.limitations.join(" "), /not globally or across processes/);
   assert.match(result.limitations.join(" "), /known-work lower bound.*not a completion forecast/);
   assert.match(result.limitations.join(" "), /pending work, not total timestamp fallback requests/);
   assert.match(result.limitations.join(" "), /neither mode independently proves log completeness or chain consensus/);
+});
+
+test("data probe compares returned reference identities separately from actual reuse", async () => {
+  const first = { number: "9007199254740993", hash: `0x${"ab".repeat(32)}`, timestampMs: 42000 };
+  const next = { number: "9007199254740994", hash: `0x${"cd".repeat(32)}`, timestampMs: 43000 };
+  for (const [current, expected] of [
+    [{ ...first, hash: first.hash.toUpperCase().replace("0X", "0x") }, "same"],
+    [next, "advanced"],
+    [{ ...next, timestampMs: first.timestampMs }, "advanced"],
+    [{ ...first, hash: next.hash }, "changed"],
+    [{ ...first, timestampMs: 42001 }, "changed"],
+    [{ ...next, timestampMs: 41000 }, "changed"],
+    [{ ...next, hash: first.hash }, "changed"],
+    [{ ...first, number: "9007199254740992" }, "changed"],
+    [{ ...next, hash: "SECRET" }, "unknown"],
+    [{ ...next, number: "42\n" }, "unknown"],
+    [{ ...next, timestampMs: -1 }, "unknown"],
+  ]) {
+    let attempt = 0;
+    const result = await runProbe(readProbeConfig({ SCAM_REPEATS: "2" }), (options) => ({
+      async fetch(calls, context) {
+        const block = attempt++ === 0 ? first : current;
+        options.onMetrics({ outcome: "partial", durationMs: 1 });
+        return { planId: context.planId, results: { [calls[0].callId]: { value: {
+          method: calls[0].method, subject: calls[0].params.subject, referenceGroupId: calls[0].params.referenceGroupId,
+          reference: { block }, coverage: { missing: [], unavailable: [] }, histories: [{ history: { points: [] } }],
+          verification: { history: "rpc_anchor", stateBinding: "number_recheck", reuse: "none" },
+        } } } };
+      },
+    }));
+    assert.equal(result.trials[0].facts[0].referenceRelation, "unknown", "Each run starts without a baseline");
+    assert.equal(result.trials[1].facts[0].referenceRelation, expected);
+    assert.equal(result.trials[1].facts[0].verification.reuse, "none", "Reference equality never fabricates reuse");
+    assert.doesNotMatch(JSON.stringify(result), /SECRET/);
+  }
+});
+
+test("data probe requires adjacent matching target and method evidence after gaps or failures", async () => {
+  const base = readProbeConfig({}).subjects[0];
+  const targets = [base, { ...base, pool: `0x${"11".repeat(20)}`, token: `0x${"22".repeat(20)}` }]
+    .map(({ pool, token, quoteToken, factory }) => ({ pool, token, quoteToken, factory }));
+  for (const gap of ["failed", "missing", "reference", "chain", "subject", "plan", "call", "group", "method"]) {
+    let attempt = 0;
+    const result = await runProbe(readProbeConfig({ SCAM_REPEATS: "3", SCAM_TARGETS_JSON: JSON.stringify(targets) }), (options) => ({
+      async fetch(calls, context) {
+        const middle = attempt++ === 1;
+        options.onMetrics({ outcome: middle && gap === "failed" ? "failed" : "partial", durationMs: 1 });
+        if (middle && gap === "failed") throw new Error("SECRET");
+        // Reverse result order to ensure targetIndex comes from requested identity.
+        const results = Object.fromEntries([calls[2], calls[0]].flatMap((call) => {
+          const affected = middle && call === calls[0];
+          if (affected && gap === "missing") return [];
+          const value = { method: call.method, subject: { ...call.params.subject },
+            referenceGroupId: call.params.referenceGroupId,
+            reference: { block: { number: "42", hash: `0x${"ab".repeat(32)}`, timestampMs: 42000 } },
+            coverage: { missing: [], unavailable: [] }, histories: [{ history: { points: [] } }],
+            age: { kind: "unknown" }, events: [] };
+          if (affected && gap === "reference") delete value.reference;
+          if (affected && gap === "chain") value.subject.chainId++;
+          if (affected && gap === "subject") value.subject = calls[2].params.subject;
+          if (affected && gap === "group") value.referenceGroupId = "SECRET";
+          if (affected && gap === "method") value.method = calls[1].method;
+          return [[affected && gap === "call" ? "SECRET" : call.callId, { value }]];
+        }));
+        return { planId: middle && gap === "plan" ? "SECRET" : context.planId, results };
+      },
+    }));
+    assert.deepEqual(result.trials[0].facts.map((fact) => fact.targetIndex), [1, 0]);
+    const last = result.trials[2].facts;
+    assert.equal(last.find((fact) => fact.targetIndex === 0).referenceRelation, "unknown", gap);
+    assert.equal(last.find((fact) => fact.targetIndex === 1).referenceRelation,
+      ["failed", "plan"].includes(gap) ? "unknown" : "same", "Other targets retain only their own adjacent baseline");
+    assert.ok(result.trials[1].facts.filter((fact) => fact.targetIndex !== 1)
+      .every((fact) => fact.referenceRelation === "unknown"));
+    assert.doesNotMatch(JSON.stringify(result), /SECRET/);
+  }
 });
 
 test("data probe allowlists failed-only diagnostics and never reuses them across attempts", async () => {
