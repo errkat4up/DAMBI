@@ -207,26 +207,31 @@ test("token profile requires explicit admin target, kind and block-range support
     ? new Response("missing archive", { status: 500 }) : undefined })
     .build({ eventLookbackSec: 10, eventKinds: ["paused"] }, { adminSupport: configured })).value;
   assert.deepEqual(failed.events, []);
-  assert.deepEqual(failed.coverage.missing, [{ fromMs: time(11) - 1, toMs: time(20), reason: "rpc_error" }]);
+  assert.deepEqual(failed.coverage.missing, [{ fromMs: time(11), toMs: time(20), reason: "rpc_error" }]);
 });
 
 test("token profile carries malformed, wrong-scope and missing admin data as gaps without inventing or joining events", async () => {
   const malformed = { ...adminEvent("paused", 18, 0), data: "0x" };
-  const { value } = await fixture({ logs: [adminEvent("paused", 15), malformed, adminEvent("paused", 18, 1), adminEvent("paused", 19)] })
+  const { value } = await fixture({ logs: [adminEvent("paused", 15), malformed, adminEvent("paused", 18, 1), adminEvent("paused", 20)] })
     .build({ eventLookbackSec: 10, eventKinds: ["paused"] }, { adminSupport: adminSupport() });
-  assert.deepEqual(value.coverage.missing, [{ fromMs: time(18) - 1, toMs: time(18), reason: "unavailable_history" }]);
-  assert.deepEqual(value.events, [{ tMs: time(15), kind: "paused" }, { tMs: time(19), kind: "paused" }]);
+  assert.deepEqual(value.coverage.missing, [{ fromMs: time(18), toMs: time(18) + 1, reason: "unavailable_history" }]);
+  assert.deepEqual(value.events, [{ tMs: time(15), kind: "paused" }, { tMs: time(20), kind: "paused" }]);
+  const final = (await fixture({ logs: [{ ...adminEvent("paused", 20), data: "0x" }, adminEvent("paused", 20, 1)] })
+    .build({ eventLookbackSec: 10, eventKinds: ["paused"] }, { adminSupport: adminSupport() })).value;
+  assert.deepEqual(final.events, [], "A malformed final block poisons its other events too");
+  assert.deepEqual(final.coverage.missing,
+    [{ fromMs: time(20) - 1, toMs: time(20), reason: "unavailable_history" }]);
   const wrongScope = (await fixture({ handle: (rpc) => rpc.method === "eth_getLogs"
     ? ok(rpc, [{ ...adminEvent("paused", 15), address: OTHER }]) : undefined })
     .build({ eventLookbackSec: 10, eventKinds: ["paused"] }, { adminSupport: adminSupport() })).value;
   assert.deepEqual(wrongScope.events, []);
-  assert.deepEqual(wrongScope.coverage.missing, [{ fromMs: time(11) - 1, toMs: time(20), reason: "unavailable_history" }]);
+  assert.deepEqual(wrongScope.coverage.missing, [{ fromMs: time(11), toMs: time(20), reason: "unavailable_history" }]);
   const partial = (await fixture({ maxBlocksPerQuery: 4, logs: [adminEvent("paused", 12), adminEvent("paused", 19)],
     handle: (rpc) => rpc.method === "eth_getLogs" && rpc.params[0].fromBlock === q(15)
       ? new Response("unavailable", { status: 500 }) : undefined })
     .build({ eventLookbackSec: 10, eventKinds: ["paused"] }, { adminSupport: adminSupport() })).value;
   assert.deepEqual(partial.events, [{ tMs: time(12), kind: "paused" }, { tMs: time(19), kind: "paused" }]);
-  assert.deepEqual(partial.coverage.missing, [{ fromMs: time(15) - 1, toMs: time(18), reason: "rpc_error" }]);
+  assert.deepEqual(partial.coverage.missing, [{ fromMs: time(15), toMs: time(18) + 1, reason: "rpc_error" }]);
 });
 
 test("token profile rejects incompatible requests and invalid support budgets before history work without truncating data", async () => {

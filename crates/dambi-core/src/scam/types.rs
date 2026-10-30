@@ -127,13 +127,13 @@ impl RuleSpec {
         }
     }
 
-    /// Threshold for the rule result: event count, or drop basis points.
+    /// Threshold for the result: event count (window_drop fires on one drop).
     pub fn threshold(&self) -> u64 {
         match self {
             Self::ChangeCount { count, .. }
             | Self::SwitchDensity { count, .. }
             | Self::EventCount { count, .. } => *count,
-            Self::WindowDrop { drop_bps, .. } => *drop_bps,
+            Self::WindowDrop { .. } => 1,
         }
     }
 }
@@ -227,7 +227,7 @@ pub struct AlgorithmIdentity {
     pub id: String,
     pub version: String,
     /// Numeric algorithm wire version, separate from the SDK's "0.1" schema.
-    /// Non-1 values can be retained for incompatible-module diagnostics.
+    /// Non-2 values can be retained for incompatible-module diagnostics.
     pub contract_version: u32,
 }
 
@@ -288,6 +288,7 @@ pub enum AnalysisMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AlgorithmRuleReason {
+    HistoryUnverified,
     PartialCoverage,
     WarmupIncomplete,
     NoUsableSegment,
@@ -535,6 +536,7 @@ pub enum FailureReason {
     DataMissing,
     FieldUnavailable,
     InitialStateUnknown,
+    HistoryUnverified,
     AgeUnknown,
     MarketTooYoung,
     StaleData,

@@ -1,10 +1,10 @@
 /**
  * Shared Scam Filter contracts. Only the subset exported by index.ts is public;
- * algorithm linking and future bundle transport remain separate integration work.
- * Algorithm specification revision 0.2 retains numeric wire contractVersion 1;
+ * the installed window-rule algorithm is selected by a verified bundle identity.
+ * Algorithm 0.2.0 uses numeric wire contractVersion 2;
  * the enclosing SDK contract/bundle schema is independently versioned "0.1".
  * Safe-integer/range/address/binding checks and all algorithm code remain runtime
- * work. No algorithm identity, default thresholds or warm-up size is invented.
+ * work. Research thresholds remain distinct from supported parameter ranges.
  */
 import type { FactResult } from "../ports/fact.js";
 import type { FactBatch, PlannedCall, CorePlan } from "./plan.js";
@@ -124,7 +124,7 @@ export type AnalysisVerification =
       readonly tokenProfile: MethodVerification;
     };
 export interface MissingInterval {
-  /** Proposed coverage convention: (fromMs, toMs], in actual Unix ms. */
+  /** Unobserved half-open range [fromMs, toMs), in actual Unix ms. */
   readonly fromMs: UnixMs;
   readonly toMs: UnixMs;
   readonly reason: "rpc_error" | "timeout" | "reorg" | "unavailable_history";
@@ -180,7 +180,7 @@ export interface CandidateSelection {
 export interface AlgorithmIdentity {
   readonly id: string;
   readonly version: string;
-  readonly contractVersion: 1; // Algorithm wire version, NOT SDK schema "0.1".
+  readonly contractVersion: 2; // Algorithm wire version, NOT SDK schema "0.1".
 }
 export type AlgorithmAvailability =
   | { readonly state: "connected"; readonly identity: AlgorithmIdentity }
@@ -248,12 +248,12 @@ interface MethodValueMeta {
 }
 export interface PoolHistoryValue<THistory = PoolHistory> extends MethodValueMeta {
   readonly method: "scam.pool_history";
-  /** One entry per distinct frozen candidate grid, built from the same raw
-   * query/reference. Select one only after age resolution; never resample it.
+  /** One entry per distinct frozen resolution declaration, preserving the same
+   * raw boundary/change points. Select one after age resolution; never resample.
    * The algorithm still receives a single selected PoolHistory. */
   readonly histories: readonly {
     readonly gridOriginMs: UnixMs;
-    readonly history: THistory; // history.bucketMs + gridOriginMs identifies the grid.
+    readonly history: THistory; // bucketMs + gridOriginMs identifies the candidate declaration.
   }[];
 }
 export interface TokenProfileValue<TEvents = readonly AdminEvent[]> extends MethodValueMeta {
@@ -280,9 +280,10 @@ export interface PoolHistory {
   readonly schema: "scam.pool_history/1";
   readonly builderVersion: string;
   readonly fromMs: UnixMs; // Includes required warm-up before the counting horizon.
-  readonly bucketMs: number; // Positive, fixed interval; no extra off-grid point at T.
+  readonly bucketMs: number; // Resolution metadata; points retain actual block-change times.
   readonly points: readonly PoolSnapshot[];
   readonly missing: readonly SnapshotInterval[];
+  /** complete asserts faithful block changes and explicit gaps, not full coverage or exact generator state. */
   readonly warmup: { readonly fromMs: UnixMs; readonly complete: boolean };
 }
 export interface AdminEvent {
@@ -312,14 +313,14 @@ export interface AnalysisRequest {
   readonly poolHistory: PoolHistory;
   readonly tokenProfile: TokenProfile;
 }
-export type AlgorithmRuleReason = "partial_coverage" | "warmup_incomplete"
+export type AlgorithmRuleReason = "partial_coverage" | "warmup_incomplete" | "history_unverified"
   | "no_usable_segment" | "resolution_too_coarse" | "metric_unavailable";
 export interface AlgorithmRuleResult {
   readonly ruleId: string;
   readonly outcome: RuleState;
   readonly reason?: AlgorithmRuleReason;
   readonly observed?: number;
-  readonly threshold: number;
+  readonly threshold: number; // Event count; window_drop uses 1, with its bps condition in RuleSpec.
   /** Counting/evidence window is (startMs, endMs]. For R2 choose maximum count,
    * then the greatest endMs on ties; this is not necessarily the first hit. */
   readonly window?: { readonly startMs: UnixMs; readonly endMs: UnixMs };
@@ -330,7 +331,7 @@ export interface AlgorithmRuleResult {
 export interface ScamAnalysis {
   readonly algorithmId: string;
   readonly algorithmVersion: string;
-  readonly contractVersion: 1;
+  readonly contractVersion: 2;
   readonly analysisMode: "real" | "stub";
   readonly binding: {
     readonly chainId: number;
@@ -390,7 +391,7 @@ export type ScamFailureReason = "algorithm_unavailable" | "algorithm_incompatibl
   | "invalid_algorithm_output" | "scam_results_missing" | "invalid_scam_input"
   | "subject_unresolved" | "subject_mismatch" | "reference_mismatch" | "reorg"
   | "bundle_unavailable" | "bundle_invalid" | "data_missing" | "field_unavailable"
-  | "initial_state_unknown" | "age_unknown" | "market_too_young" | "stale_data"
+  | "initial_state_unknown" | "history_unverified" | "age_unknown" | "market_too_young" | "stale_data"
   | "unsupported_resolution" | "resource_limit" | "no_time_budget" | "timeout";
 export type RuleState = "fired" | "clear" | "incomplete" | "not_evaluable";
 export interface RuleResult {
@@ -430,7 +431,7 @@ export interface AlgorithmCapabilities {
   readonly changeModes: readonly ("step" | "cumulative")[];
   readonly inputSchema: "scam.pool_history/1";
   readonly profileSchema: "scam.token_profile/1";
-  readonly outputContractVersion: 1;
+  readonly outputContractVersion: 2;
   readonly supportedLimits: AlgorithmLimits;
   readonly workUnit: string;
 }

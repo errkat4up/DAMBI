@@ -16,7 +16,7 @@ const subject = (actionPaths = ["actions[0]"]) => ({ chainId: CHAIN, venue: "uni
   pool: POOL, factory: FACTORY, token: TOKEN, quoteToken: QUOTE, actionPaths });
 
 function calls({ group = "opaque-group:a", prefix = "a", confirmDepth = 2, actionPaths, admin = false } = {}) {
-  const common = { subject: subject(actionPaths), referenceGroupId: group, confirmDepth, builderVersion: "dambi-v2/1" };
+  const common = { subject: subject(actionPaths), referenceGroupId: group, confirmDepth, builderVersion: "dambi-v2/2" };
   return [
     { callId: `${prefix}:history`, manifestId: "__scam::history", method: "scam.pool_history", optional: true, outputs: [],
       params: { ...structuredClone(common), dataSchema: "scam.pool_history/1", lookbackSec: 10, warmupSec: 1,

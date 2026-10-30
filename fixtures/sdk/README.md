@@ -220,6 +220,41 @@ SF5-1 로컬 커밋 `d192866` 후 SF5-2 변경 범위: 명시적인 로컬 시�
 
 CI 연결 보완 `5a3fc4e`의 사용자 회귀 시험은 **16개 통과·0개 실패**다. [PR #18 첫 CI](https://github.com/errkat4up/DAMBI/actions/runs/40298110918)는 의존성 workflow를 합쳐 **6개 성공·4개 실패·1개 건너뜀**이었다. 원인은 격리 Cargo workspace의 `js-sys` 누락과 공유 Rust 10개 파일의 포맷 차이이며, extension 실패·Core consumer 건너뜀은 Core 산출물 미생성에 따른 후속 중단이다. 해당 의존성·포맷을 보완하고 상속 의존성 회귀 시험 1개와 `io::Error::other` 정리를 추가했다. 후속 Clippy 지적도 조건식 조기 반환, 세션 내부 `Rc`, `Box<Subject>`, 명명된 타입·lexical scope·불필요한 복사 제거로 수정했으며 경고를 비활성화하지 않았다. **2026-10-26 사용자 재실행 보고에서 SDK 격리 검증 완료 메시지를 확인했다(Native·WASM·선택 Decoder 생성·raw pool parity·types/runtime/check/adapters).** 안내한 `Clippy && scam 경계 시험 && 격리 검증` 명령 기준 앞선 단계도 성공해야 마지막 메시지에 도달하며, 생략된 중간 시험 건수는 합산하지 않는다. **원격 CI 재검증은 아직 대기 중**이며 로컬 성공을 전체 GitHub Actions 성공으로 해석하지 않는다.
 
+## Scam Filter — 알고리즘 0.2.0 소스 인수
+
+2026-10-26, `56a3b5d`·`093e26d`의 알고리즘 변경을 `8d979b4`에서 로컬 SDK 작업과 병합했다. 룰별 사전 이력, `window_drop` 계산 수정, `history_unverified`, 알고리즘 버전 `0.2.0`과 경계 시험을 포함한다. 해당 병합 상태에서 `cargo test -p scam-filter --locked --offline` 실행 결과 **17 passed / 0 failed**(contract 15, reference 2). 실제 Core v2 조립·블록 단위 입력 전환·Native/WASM 소비 및 전체 경로 검증은 남아 있으며 SF6의 사용자 요청 대기를 유지한다. 이번 문서 갱신에서는 시험을 재실행하지 않았다.
+
+## SF6-1 — 실제 알고리즘 SDK 연결
+
+2026-10-30, `b3c8b2e` 이후 작업 트리 변경: `scam-filter@0.2.0`의 Native/WASM 어댑터, 서명 번들의 정확한 구현 선택, 숫자 계약 2·`history_unverified`, `dambi-v2/2` 블록 변경점·경계 값·half-open 누락 구간과 룰별 사전 이력을 연결했다. 실제 라이브러리의 사건 수·근거 형식과 자원 초과를 SDK 검증기에 맞추고, 대표 Native/production WASM 사례·기존 provider 회귀 및 격리 소스 의존성을 보완했다. **사용자 실행 로그 기준 SF6-1 연결·회귀 검증 통과: SDK/어댑터 36개, 기존 스캠 회귀 18개, 발행기 5개, 카드 9개로 확인한 합계 68개·실패 0개.** 격리 SDK 검증도 Native·WASM·선택 Decoder 생성·raw pool parity·types/runtime/check/adapters 및 tarball 생성까지 성공했다. 생략된 Native 개별 건수와 격리 경로에서 반복 실행한 시험은 합산하지 않는다. 안내한 `&&` 명령 순서대로 실행했다면 앞선 Clippy·빌드·계약 타입 검사도 통과한 결과다. 카드 시험의 `--localstorage-file` 경고는 비차단으로 남는다. 기록 반영을 위한 재빌드·재시험·커밋·푸시는 하지 않았다. 서비스/시연 설정은 별도 개발 중이며 SF5-2 실제 화면, SF6-2 실제 데이터·전체 지연시간, SF6-3 독립 소비자/CI 확인·최종 MVP 판정과 실제 LP 지원은 남아 있다. 격리 소스 검증·tarball 생성을 외부 소비자 설치·브라우저 검증 완료로 간주하지 않는다.
+
+아래는 통과한 변경 범위의 재현 명령이다. 관련 코드 변경·실패·새로운 우려가 없으면 반복하지 않는다. Rust/WASM·TS 계약이 함께 바뀌었으므로 재검증할 때는 동일 소스의 산출물을 사용한다.
+
+```sh
+cd /Users/spu/SDKdambi/DAMBI
+cargo test --locked -p dambi-core --lib --test session &&
+cargo clippy --locked -p dambi-core --all-targets --all-features -- -D warnings &&
+yarn core:build &&
+yarn workspace @dambi/core exec tsc -p ../../contracts/scam-filter-v0.1/tsconfig.json &&
+node --test packages/core/tests/scam-bundle.test.mjs packages/core/tests/adapters/scam-pool-history.test.mjs packages/core/tests/adapters/scam-token-profile.test.mjs packages/core/tests/adapters/scam-fact-provider.test.mjs
+```
+
+기존 stub 연결·발행 계약·카드의 영향 범위도 위 로그에서 통과했다. `yarn sdk:verify:isolated` 로컬 실행은 완료했으며, 원격 CI·독립 소비자 결과는 별도로 확인한다.
+
+```sh
+cd /Users/spu/SDKdambi/DAMBI
+wasm-pack build crates/dambi-core-wasm --target web --release --out-dir pkg-scam-test --out-name dambi_core --features scam-test-fixtures --locked &&
+node --test packages/core/tests/scam.test.mjs &&
+npm --prefix registryV2 run test:scam-publisher &&
+yarn --cwd browser-extension test frontend/confirm/scam-card.test.ts
+```
+
+## SF6-2 — 실제 환경·전체 검사 측정 준비
+
+2026-10-30, 검증된 SF6-1 변경을 로컬 `314c057`에 커밋한 뒤 진행했다(푸시 없음). 기존 RPC probe의 예산·계측·캐시를 재사용해 실제 `Core.check()`·production WASM·알고리즘을 측정하는 `scam-analysis-probe.mjs`와 회귀 시험을 작성했다. 로컬 테스트 서명 번들·저장된 요청을 사용하며, 실제 번들 HTTP/확장 화면과 초기화·사전 준비 시간은 검사 지연에서 구분한다. 불완전한 경고·나이 미상·stub을 성공으로 집계하지 않고 대상 불일치는 RPC 전에 거절한다. 공개 `AlgorithmCapabilities.outputContractVersion`에 남아 있던 타입 값 1도 2로 정정했다. **사용자 실행 로그 기준 측정기 회귀 시험 18개 통과·0개 실패.** 첫 무캐시 실측은 GIWA 풀 1개·rpc_anchor·관측 24시간+사전 이력 24시간·2,500ms 제한에서 3회 모두 pool_history 수집 중 timeout이었다(2,557.30 / 2,512.24 / 2,517.71ms). 요청 18/24/20회·재시도 0이며 반환 Fact와 실제 알고리즘 결과는 모두 0개다. SDK는 3회 모두 insufficient를 반환했으므로 report의 partial=3/failed=0은 검사 성공을 뜻하지 않는다. 이 무캐시 실행은 2.5초 목표에 미달했고 알고리즘 분석까지 도달하지 못했다. 다음 준비 후 측정의 설정 점검에서 기존 캐시 상한 100,000블록이 1초 간격 48시간 범위를 저장하지 못함을 확인해, 분석 probe의 기본값을 200,000블록으로 보완하고 명시적 상한 옵션·범위 저장 회귀 사례를 추가했다. 이번 실측은 cache=null이므로 이 상한이 관측된 timeout의 원인은 아니다. **사용자 재실행에서 보완한 대상 시험 1개 통과·0개 실패**를 확인했다(앞선 18개와 중복되는 사례로 추가 합산하지 않음). 기한·관측 범위·알고리즘 예산은 완화하지 않았다. SF6-2의 실제 화면·최종 지연시간·지원 범위 판정은 남는다. 실행 명령과 설정은 [Core README](../../packages/core/README.md#real-algorithm-sdk-measurement-sf6-2-development)에 둔다.
+
+준비 후 실제 분석: 동일 GIWA 풀 1개·48시간 입력·rpc_anchor에서 초기화 98.45ms, 사전 준비 **4,336.60ms·34요청·18로그 청크·partial**, 이어 SDK check **2,039.26 / 1,884.56 / 1,931.61ms**, 세 번 모두 2,500ms 안에 반환했다. 실제 모듈 `0.2.0`/계약 2가 세 번 모두 실행됐고 timeout·재시도·실패 청크는 0이다. history는 매번 `interval_cache`·1,066점·결측/미지원 0, 기준 블록은 40,003,972→40,003,974→40,003,976으로 전진했다. R1은 23/3으로 fired, R2는 1/3으로 clear이며 두 룰 모두 초기 상태·warm-up 충족/coverage 10000으로 반환됐다. 다만 factory capability 미설정으로 나이 unknown이라 **warn + age_unknown, partialWarnings=3, 완전 분석 성공=0**을 유지한다. 준비 시간은 검사 지연에 포함되지 않는다. 이는 단일 대상·준비된 캐시의 3회 SDK 관측이며 운영 p95, 다중 대상, 실제 서비스/확장 화면 성능이나 탐지 정확도 인증을 뜻하지 않는다. 다음은 검증된 나이 근거 연결과 남은 실제 호스트·지원 범위 확인이다. 이 기록 갱신으로 시험·RPC·빌드·커밋·푸시를 재실행하지 않았다.
+
 ## 번들 B1-1 — Universal Router
 
 2026-10-12, `main 7387536` 이후 B1-1 변경 검증: **Native 원문 2개 시험과 패키지 WASM 3개 시험 통과, 최종 WASM 로그 3 통과·0 실패.** 저장된 snapshot은 801개이며 기존 799개 내용 보존·UR 2개 추가·digest/bytes 일치를 확인했다. source-context 제외 30,484개와 Aave 거절 3개는 유지한다. 별도 `decoder_snapshot` target의 전체 결과는 공유되지 않았다. 대표 UR 경로의 편입·검증을 마쳤으며 다음은 B1-2 Aave다.

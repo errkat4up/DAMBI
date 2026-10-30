@@ -119,7 +119,6 @@ pub(super) fn validate_request(
             || point.t_ms > req.as_of.t_ms
             || p.pool_created_ms.is_some_and(|c| point.t_ms < c)
             || previous_time.is_some_and(|t| point.t_ms <= t)
-            || !on_grid(point.t_ms, binding.grid_origin_ms, h.bucket_ms)
             || !decimal_u256(&point.reserve_quote)
             || !decimal_u256(&point.reserve_token)
         {
@@ -129,7 +128,7 @@ pub(super) fn validate_request(
         if decimals.is_some_and(|d| d != current_decimals) {
             return Err(FailureReason::InvalidScamInput);
         }
-        while missing_index < h.missing.len() && h.missing[missing_index].to_ms < point.t_ms {
+        while missing_index < h.missing.len() && h.missing[missing_index].to_ms <= point.t_ms {
             missing_index += 1;
         }
         if h.missing
@@ -141,7 +140,6 @@ pub(super) fn validate_request(
         previous_time = Some(point.t_ms);
         decimals = Some(current_decimals);
     }
-    validate_grid_coverage(req, binding.grid_origin_ms)?;
 
     let mut previous_event = None;
     let mut missing_index = 0;
@@ -154,7 +152,7 @@ pub(super) fn validate_request(
         {
             return Err(FailureReason::InvalidScamInput);
         }
-        while missing_index < p.missing.len() && p.missing[missing_index].to_ms < event.t_ms {
+        while missing_index < p.missing.len() && p.missing[missing_index].to_ms <= event.t_ms {
             missing_index += 1;
         }
         if p.missing
@@ -180,7 +178,7 @@ pub(super) fn validate_output(
     let invalid = FailureReason::InvalidAlgorithmOutput;
     if out.algorithm_id != expected_identity.id
         || out.algorithm_version != expected_identity.version
-        || out.contract_version != 1
+        || out.contract_version != scam_filter::CONTRACT_VERSION
         || out.contract_version != expected_identity.contract_version
         || out.analysis_mode != expected_mode
         || out.binding.chain_id != req.subject.chain_id
@@ -233,15 +231,14 @@ pub(super) fn validate_output(
             _ => {}
         }
 
-        let is_count = !matches!(rule, RuleSpec::WindowDrop { .. });
-        if is_count {
+        {
             if result.observed.is_some_and(|n| n.fract() != 0.0)
                 || (matches!(result.outcome, RuleState::Clear | RuleState::Fired)
                     && result.observed.is_none())
             {
                 return Err(invalid);
             }
-            // This is only a physical upper bound (one confirmation per grid
+            // This is only a physical upper bound (one confirmation per input
             // point), not an attempt to reproduce the detector's event count.
             let start = horizon_start(req, rule);
             let maximum = if matches!(rule, RuleSpec::EventCount { .. }) {
@@ -264,8 +261,6 @@ pub(super) fn validate_output(
             if result.observed.is_some_and(|n| n > maximum as f64) {
                 return Err(invalid);
             }
-        } else if result.observed.is_some_and(|n| n > 10_000.0) {
-            return Err(invalid);
         }
         if let Some(observed) = result.observed {
             if (result.outcome == RuleState::Fired && observed < result.threshold)
@@ -375,43 +370,6 @@ fn validate_intervals(
     Ok(())
 }
 
-/// Linear in points + missing intervals, never in the number of empty buckets.
-/// Coverage is (fromMs, T]; a point at fromMs is an optional boundary seed.
-fn validate_grid_coverage(req: &AnalysisRequest, origin: u64) -> Result<(), FailureReason> {
-    let h = &req.pool_history;
-    let start = h
-        .from_ms
-        .saturating_add(1)
-        .max(req.token_profile.pool_created_ms.unwrap_or(0));
-    let mut cursor = grid_at_or_after(start, origin, h.bucket_ms);
-    let mut point_index = 0;
-    let mut missing_index = 0;
-    while let Some(t) = cursor.filter(|t| *t <= req.as_of.t_ms) {
-        while point_index < h.points.len() && h.points[point_index].t_ms < t {
-            point_index += 1;
-        }
-        while missing_index < h.missing.len() && h.missing[missing_index].to_ms < t {
-            missing_index += 1;
-        }
-        if h.points
-            .get(point_index)
-            .is_some_and(|point| point.t_ms == t)
-        {
-            point_index += 1;
-            cursor = t.checked_add(h.bucket_ms);
-        } else if let Some(gap) = h.missing.get(missing_index).filter(|gap| contains(gap, t)) {
-            cursor = gap
-                .to_ms
-                .checked_add(1)
-                .and_then(|next| grid_at_or_after(next, origin, h.bucket_ms));
-            missing_index += 1;
-        } else {
-            return Err(FailureReason::InvalidScamInput);
-        }
-    }
-    Ok(())
-}
-
 pub(super) fn resolution_too_coarse(rule: &RuleSpec, bucket_ms: u64) -> bool {
     match rule {
         RuleSpec::ChangeCount {
@@ -452,13 +410,11 @@ fn clear_has_complete_data(
         return !overlaps(&req.token_profile.missing, start, end);
     }
     let h = &req.pool_history;
-    if overlaps(&h.missing, start, end)
+    if !h.warmup.complete
+        || !result.warmup_complete
+        || overlaps(&h.missing, start, end)
         || invalid_price_in_range(req, rule, start, end)
-        || !h.points.iter().any(|p| {
-            p.t_ms > start
-                && p.t_ms <= end
-                && (rule.metric() != Some(Metric::PriceQuotePerToken) || p.reserve_token != "0")
-        })
+        || !usable_seed(req, rule, start)
     {
         return false;
     }
@@ -485,6 +441,7 @@ pub(super) fn initial_state_satisfied(
         .saturating_sub(requirement.minimum_warmup_ms)
         .max(req.token_profile.pool_created_ms.unwrap_or(0));
     if warmup_start < h.from_ms
+        || !usable_seed(req, rule, warmup_start)
         || overlaps(&h.missing, warmup_start, start)
         || h.missing.iter().any(|gap| contains(gap, warmup_start))
     {
@@ -514,14 +471,30 @@ fn validate_evidence(
     if let Some(window) = &result.window {
         if !safe(window.start_ms)
             || !safe(window.end_ms)
-            || window.start_ms < start
+            || window.start_ms
+                < match rule {
+                    RuleSpec::WindowDrop { window_sec, .. } => {
+                        start.saturating_sub(window_sec * 1000)
+                    }
+                    _ => start,
+                }
             || window.end_ms > end
-            || window.start_ms >= window.end_ms
+            || window.start_ms > window.end_ms
+            || window.start_ms == window.end_ms && result.observed != Some(0.0)
         {
             return Err(invalid);
         }
         if let RuleSpec::SwitchDensity { window_sec, .. } = rule {
-            if window.start_ms != start.max(window.end_ms.saturating_sub(window_sec * 1000)) {
+            let expected_start = if result.observed == Some(0.0) {
+                // With no switches the library reports the observation window.
+                if window.end_ms != end {
+                    return Err(invalid);
+                }
+                start
+            } else {
+                start.max(window.end_ms.saturating_sub(window_sec * 1000))
+            };
+            if window.start_ms != expected_start {
                 return Err(invalid);
             }
         }
@@ -529,7 +502,6 @@ fn validate_evidence(
     if matches!(rule, RuleSpec::SwitchDensity { .. }) {
         match result.observed {
             Some(n) if n > 0.0 && result.window.is_none() => return Err(invalid),
-            Some(n) if n == 0.0 && result.window.is_some() => return Err(invalid),
             _ => {}
         }
     }
@@ -540,8 +512,7 @@ fn validate_evidence(
         return Err(FailureReason::ResourceLimit);
     }
     let is_admin = matches!(rule, RuleSpec::EventCount { .. });
-    let is_count = !matches!(rule, RuleSpec::WindowDrop { .. });
-    if is_count && result.observed.is_some_and(|n| events.len() as f64 > n) {
+    if result.observed.is_some_and(|n| events.len() as f64 > n) {
         return Err(invalid);
     }
     let gaps = if is_admin {
@@ -588,14 +559,26 @@ fn validate_evidence(
                 .token_profile
                 .admin_events
                 .iter()
-                .filter(|actual| actual.t_ms == event.t_ms && admin_name(actual.kind) == event.kind)
+                .filter(|actual| {
+                    actual.t_ms == event.t_ms
+                        && match rule {
+                            RuleSpec::EventCount { event_kinds, .. } => {
+                                event_kinds.contains(&actual.kind)
+                            }
+                            _ => false,
+                        }
+                })
                 .count();
             if provided > available {
                 return Err(invalid);
             }
         }
         if let Some(window) = &result.window {
-            if event.t_ms <= window.start_ms || event.t_ms > window.end_ms {
+            // Drop evidence lists all confirmed drops; its window describes
+            // the latest drop and may begin in the pre-window history.
+            if !matches!(rule, RuleSpec::WindowDrop { .. })
+                && (event.t_ms <= window.start_ms || event.t_ms > window.end_ms)
+            {
                 return Err(invalid);
             }
         }
@@ -616,26 +599,10 @@ fn validate_evidence(
 
 fn event_kind_valid(rule: &RuleSpec, kind: &str) -> bool {
     match rule {
-        RuleSpec::ChangeCount { direction, .. } => match direction {
-            Direction::Up => kind == "up",
-            Direction::Down => kind == "down",
-            Direction::Either => matches!(kind, "up" | "down"),
-        },
-        RuleSpec::SwitchDensity { .. } => matches!(kind, "peak" | "trough"),
+        RuleSpec::ChangeCount { .. } => kind == "change",
+        RuleSpec::SwitchDensity { .. } => kind == "switch",
         RuleSpec::WindowDrop { .. } => kind == "drop",
-        RuleSpec::EventCount { event_kinds, .. } => {
-            event_kinds.iter().any(|k| admin_name(*k) == kind)
-        }
-    }
-}
-
-fn admin_name(kind: AdminEventKind) -> &'static str {
-    match kind {
-        AdminEventKind::OwnerChanged => "owner_changed",
-        AdminEventKind::ProxyUpgraded => "proxy_upgraded",
-        AdminEventKind::AdminChanged => "admin_changed",
-        AdminEventKind::Paused => "paused",
-        AdminEventKind::Unpaused => "unpaused",
+        RuleSpec::EventCount { .. } => kind == "admin_event",
     }
 }
 
@@ -662,22 +629,23 @@ fn overlaps(intervals: &[SnapshotInterval], from: u64, to: u64) -> bool {
 }
 
 fn contains(interval: &SnapshotInterval, time: u64) -> bool {
-    time > interval.from_ms && time <= interval.to_ms
+    time >= interval.from_ms && time < interval.to_ms
 }
 
-fn on_grid(time: u64, origin: u64, bucket: u64) -> bool {
-    time % bucket == origin % bucket
-}
-
-fn grid_at_or_after(time: u64, origin: u64, bucket: u64) -> Option<u64> {
-    let remainder = time % bucket;
-    let target = origin % bucket;
-    let offset = if remainder <= target {
-        target - remainder
-    } else {
-        bucket - (remainder - target)
-    };
-    time.checked_add(offset)
+fn usable_seed(req: &AnalysisRequest, rule: &RuleSpec, at: u64) -> bool {
+    req.pool_history
+        .points
+        .iter()
+        .rev()
+        .find(|p| p.t_ms <= at)
+        .is_some_and(|point| {
+            (rule.metric() != Some(Metric::PriceQuotePerToken) || point.reserve_token != "0")
+                && !req
+                    .pool_history
+                    .missing
+                    .iter()
+                    .any(|gap| contains(gap, at) || gap.from_ms >= point.t_ms && gap.from_ms < at)
+        })
 }
 
 fn safe(value: u64) -> bool {
