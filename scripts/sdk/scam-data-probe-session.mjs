@@ -74,7 +74,7 @@ export function readProbeConfig(env = {}) {
 export function probeCalls(config, iteration) {
   return config.subjects.flatMap((subject, index) => {
     const shared = { subject, referenceGroupId: `probe:${iteration}:target:${index}`,
-      confirmDepth: config.confirmDepth, builderVersion: "dambi-v2/1" };
+      confirmDepth: config.confirmDepth, builderVersion: "dambi-v2/2" };
     const call = (method, params) => ({ manifestId: "manual-scam-data-probe", callId: `${shared.referenceGroupId}:${method}`,
       method, params: { ...shared, ...params }, outputs: [], optional: true });
     return [

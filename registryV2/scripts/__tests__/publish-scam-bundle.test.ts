@@ -53,6 +53,15 @@ test("scam publisher preserves signed JCS bytes and writes only its environment 
   assert.equal(existsSync(join(opts.outRoot, "scam-bundles", "production")), false);
 });
 
+test("scam publisher uses numeric algorithm contract 2 independently of SDK schema 0.1", () => {
+  const input = draft();
+  const withAlgorithm = { ...input, compatibility: { ...input.compatibility,
+    algorithm: { id: "dambi.scam.window-rules", version: "0.2.0", contractVersion: 2 } } };
+  assert.doesNotThrow(() => validateScamBundleDraft(withAlgorithm, "staging", "default", NOW));
+  withAlgorithm.compatibility.algorithm.contractVersion = 1;
+  assert.throws(() => validateScamBundleDraft(withAlgorithm, "staging", "default", NOW));
+});
+
 test("scam publisher rejects scope, decimal sequence, expiry and model mismatches before output", () => {
   const invalid = [
     { kind: "policy_bundle" }, { schema: "0.2" }, { env: "production" }, { profile: "other" },

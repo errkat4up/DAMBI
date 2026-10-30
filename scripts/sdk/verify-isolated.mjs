@@ -14,6 +14,10 @@ const generated = new Set([".git", "target", "node_modules", "dist", "pkg", ".ca
 const runtimeTests = [
   "packages/core/tests/runtime.test.mjs",
   "packages/core/tests/check.test.mjs",
+  "packages/core/tests/scam-bundle.test.mjs",
+  "packages/core/tests/adapters/scam-pool-history.test.mjs",
+  "packages/core/tests/adapters/scam-token-profile.test.mjs",
+  "packages/core/tests/adapters/scam-fact-provider.test.mjs",
   "packages/core/tests/adapters/policy-api.test.mjs",
   "packages/core/tests/adapters/policy-api-core.test.mjs",
   "packages/core/tests/adapters/evm-rpc.test.mjs",
@@ -168,7 +172,7 @@ async function verify() {
   const wasmPack = await run("wasm-pack", ["--version"], { capture: true });
   if (!/^wasm-pack 0\.14\.0\s*$/.test(wasmPack.trim())) throw new Error("wasm-pack 0.14.0 is required");
   await run(process.execPath, [...yarn, "install", "--immutable"]);
-  const native = await run("cargo", ["test", "--locked", "-p", "dambi-core", "--test", "session"]);
+  const native = await run("cargo", ["test", "--locked", "-p", "dambi-core", "--lib", "--test", "session"]);
   if (!/test result: ok\. [1-9]\d* passed; 0 failed; 0 ignored; 0 measured; 0 filtered out/.test(native)) {
     throw new Error("Native session must run nonempty tests with no ignored/filtered cases");
   }

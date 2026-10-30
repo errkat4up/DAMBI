@@ -111,7 +111,7 @@ const algorithmRule: AlgorithmRuleResult = {
   coverageBps: 10000, warmupComplete: true,
 };
 const analysis: ScamAnalysis = {
-  algorithmId: "type-example-not-installed", algorithmVersion: "unreleased-example", contractVersion: 1, analysisMode: "real",
+  algorithmId: "type-example-not-installed", algorithmVersion: "unreleased-example", contractVersion: 2, analysisMode: "real",
   binding: { chainId: subject.chainId, pool: subject.pool, asOfBlock: reference.block.number, asOfBlockHash: reference.block.hash, rulesHash: reference.block.hash },
   rules: [algorithmRule],
 };

@@ -33,7 +33,7 @@ const WETH = "0x4200000000000000000000000000000000000006";
 const OTHER = "0x0000000000000000000000000000000000000001";
 const HASH = `0x${"11".repeat(32)}`;
 const BUILDER = "sf3-fixture/1";
-const IDENTITY = { id: "sf3-fixed-results", version: "1", contractVersion: 1 };
+const IDENTITY = { id: "sf3-fixed-results", version: "1", contractVersion: 2 };
 const initialPolicy = { payload: envelope.payload, signature: envelope.signature, keyId: envelope.key_id };
 const transaction = evidence.queries.find(({ request }) => request.method === "eth_getTransactionByHash" &&
   request.params[0] === "0x212c9856eee05e3dc92710267106842dcd44eb624668998b9079272136185cb9").response.result;
@@ -87,8 +87,8 @@ function fixedResults(outcome = "fired") {
     ruleId: rule.id, outcome, observed: outcome === "fired" ? 2 : 0, threshold: 2,
     coverageBps: 10_000, warmupComplete: true,
     ...(outcome === "fired" ? {
-      events: [{ tMs: T - 4_000, kind: rule.id === "r1" ? "up" : "peak" },
-        { tMs: T - 2_000, kind: rule.id === "r1" ? "down" : "trough" }],
+      events: [{ tMs: T - 4_000, kind: rule.id === "r1" ? "change" : "switch" },
+        { tMs: T - 2_000, kind: rule.id === "r1" ? "change" : "switch" }],
       ...(rule.id === "r2" ? { window: { startMs: T - 8_000, endMs: T - 2_000 } } : {}),
     } : {}),
   }));
@@ -249,7 +249,7 @@ const options = { timeout: 10_000 };
 
 function sf45Fixture(outcome = "fired", withAdminRule = false) {
   const selected = fixture(outcome);
-  selected.builderVersion = "dambi-v2/1";
+  selected.builderVersion = "dambi-v2/2";
   if (withAdminRule) {
     const rule = { id: "admin", enabled: true, kind: "event_count", lookbackSec: 10,
       eventKinds: ["paused"], count: 1 };
@@ -697,7 +697,7 @@ test("SF4-5 raw RPC provider reaches manual evaluate and check with identical pi
   const byMethod = Object.fromEntries(plan.scamCalls.map((call) => [call.method, scamFacts.results[call.callId].value]));
   const history = byMethod["scam.pool_history"];
   const profile = byMethod["scam.token_profile"];
-  assert.equal(history.builderVersion, "dambi-v2/1");
+  assert.equal(history.builderVersion, "dambi-v2/2");
   assert.deepEqual(history.reference, profile.reference);
   assert.equal(history.reference.block.number, "1000");
   assert.equal(history.reference.block.timestampMs, T);
@@ -713,7 +713,7 @@ test("SF4-5 raw RPC provider reaches manual evaluate and check with identical pi
   assert.equal(manual.source, "evaluated");
   assert.equal(manual.scam.status, "warn");
   assert.equal(manual.scam.targets[0].analysisMode, "stub", "The actual algorithm is still an explicit test fixture");
-  assert.equal(manual.scam.targets[0].binding.builderVersion, "dambi-v2/1");
+  assert.equal(manual.scam.targets[0].binding.builderVersion, "dambi-v2/2");
   assert.equal(manual.scam.targets[0].binding.selectionReason, "lower_bound_mature");
   assert.deepEqual(manual.scam.targets[0].binding.verification, {
     status: "declared", poolHistory: history.verification, tokenProfile: profile.verification,

@@ -69,7 +69,7 @@ export function validateScamBundleDraft(input: unknown, env: Env, profile: strin
       || compatibility.contractVersion !== "0.1") throw new Error("invalid compatibility");
   if (compatibility.algorithm !== null) {
     const algorithm = object(compatibility.algorithm, "algorithm identity");
-    if (!text(algorithm.id) || !text(algorithm.version) || algorithm.contractVersion !== 1) {
+    if (!text(algorithm.id) || !text(algorithm.version) || algorithm.contractVersion !== 2) {
       throw new Error("invalid algorithm identity");
     }
   }

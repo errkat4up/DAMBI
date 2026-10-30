@@ -648,7 +648,7 @@ fn scam_bundle(sequence: &str) -> Value {
     json!({
         "kind":"scam_bundle","schema":"0.1","sequence":sequence,
         "issuedAtMs":NOW-1000,"expiresAtMs":NOW+60000,"env":"staging","profile":"default",
-        "compatibility":{"engineRange":"*","builderRange":"dambi-v2/1","contractVersion":"0.1","algorithm":null},
+        "compatibility":{"engineRange":"*","builderRange":"dambi-v2/2","contractVersion":"0.1","algorithm":null},
         "support":[{"chainId":1,"venue":"uniswap_v2","factories":[CONTRACT],
             "quoteTokens":[SECOND_CONTRACT],"exemptTokens":[],"allowedBucketMs":[1000],"confirmDepth":2}],
         "presets":[{"id":"default","purpose":"default",

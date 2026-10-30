@@ -1,5 +1,5 @@
-//! Boundary tests only: the explicit test module returns fixed answers and never
-//! implements event generation, percentage arithmetic, or window detection.
+//! SDK boundary regressions and representative supplied-detector integration.
+//! FixedModule provides malformed-output cases without duplicating detection.
 
 use super::*;
 use serde_json::{json, Value};
@@ -23,6 +23,219 @@ fn limits() -> AlgorithmLimits {
         max_evidence_events_per_rule: 64,
         max_work_units: 10_000,
     }
+}
+
+fn real_evaluate(request: &AnalysisRequest) -> Result<ValidatedAnalysis, FailureReason> {
+    let module = window_rules::WindowRulesModule;
+    let mut context = pinned(request);
+    context.binding.algorithm = module.identity();
+    context.history_coverage.missing = request
+        .pool_history
+        .missing
+        .iter()
+        .map(|gap| MissingInterval {
+            from_ms: gap.from_ms,
+            to_ms: gap.to_ms,
+            reason: "rpc_error".into(),
+        })
+        .collect();
+    AlgorithmAdapter::new(Some(&module)).evaluate(
+        &context,
+        Some(&serde_json::to_string(request).unwrap()),
+        &limits(),
+        2000,
+        || 1000,
+    )
+}
+
+#[test]
+fn real_window_rules_preserve_sparse_changes_fidelity_and_partial_warnings() {
+    let mut req = request();
+    let point = req.pool_history.points[0].clone();
+    req.pool_history.points = [(1000, "100"), (5500, "130"), (9100, "180")]
+        .into_iter()
+        .map(|(t_ms, value)| PoolSnapshot {
+            t_ms,
+            reserve_quote: value.into(),
+            ..point.clone()
+        })
+        .collect();
+    let result = real_evaluate(&req).unwrap();
+    assert_eq!(result.analysis.analysis_mode, AnalysisMode::Real);
+    assert_eq!(result.analysis.algorithm_version, "0.2.0");
+    assert_eq!(result.rules[0].state, RuleState::Fired);
+    assert_eq!(result.analysis.rules[0].observed, Some(2.0));
+
+    req.pool_history.points.truncate(1);
+    assert_eq!(
+        real_evaluate(&req).unwrap().rules[0].state,
+        RuleState::Clear,
+        "A fully observed unchanged interval needs only its boundary state"
+    );
+    req.pool_history.warmup.complete = false;
+    let result = real_evaluate(&req).unwrap();
+    assert_eq!(result.rules[0].state, RuleState::Incomplete);
+    assert_eq!(
+        result.rules[0].reasons,
+        vec![FailureReason::HistoryUnverified]
+    );
+
+    req.pool_history.points.push(PoolSnapshot {
+        t_ms: 5500,
+        reserve_quote: "130".into(),
+        ..point.clone()
+    });
+    req.pool_history.points.push(PoolSnapshot {
+        t_ms: 9100,
+        reserve_quote: "180".into(),
+        ..point
+    });
+    req.pool_history.missing = vec![SnapshotInterval {
+        from_ms: 9500,
+        to_ms: 12000,
+    }];
+    let result = real_evaluate(&req).unwrap();
+    assert_eq!(result.rules[0].state, RuleState::Fired);
+    assert!(!result.analysis.rules[0].warmup_complete);
+    assert!(result.analysis.rules[0].coverage_bps < 10000);
+}
+
+#[test]
+fn real_window_rules_map_drop_counts_admin_evidence_and_work_limits() {
+    let mut req = request();
+    let point = req.pool_history.points[0].clone();
+    req.rules = vec![RuleSpec::WindowDrop {
+        id: "drop".into(),
+        enabled: true,
+        lookback_sec: 10,
+        metric: Metric::QuoteReserve,
+        window_sec: 5,
+        drop_bps: 500,
+    }];
+    req.pool_history.points = [(1000, "100"), (4000, "90"), (5000, "120"), (9000, "80")]
+        .into_iter()
+        .map(|(t_ms, value)| PoolSnapshot {
+            t_ms,
+            reserve_quote: value.into(),
+            ..point.clone()
+        })
+        .collect();
+    let result = real_evaluate(&req).unwrap();
+    assert_eq!(result.rules[0].state, RuleState::Fired);
+    assert_eq!(result.analysis.rules[0].threshold, 1.0);
+    assert_eq!(result.analysis.rules[0].observed, Some(2.0));
+
+    req.rules = vec![RuleSpec::EventCount {
+        id: "admin".into(),
+        enabled: true,
+        lookback_sec: 10,
+        event_kinds: vec![AdminEventKind::Paused],
+        count: 1,
+    }];
+    req.token_profile.admin_events = vec![AdminEvent {
+        t_ms: 7000,
+        kind: AdminEventKind::Paused,
+    }];
+    req.pool_history.warmup.complete = false;
+    let result = real_evaluate(&req).unwrap();
+    assert_eq!(result.rules[0].state, RuleState::Fired);
+    assert_eq!(result.rules[0].initial_state, "not_required");
+    let module = window_rules::WindowRulesModule;
+    let mut budget = limits();
+    budget.max_work_units = 1;
+    assert_eq!(
+        module.analyze(&req, &budget),
+        Err(AlgorithmError::ResourceLimit)
+    );
+    req.token_profile.admin_events = vec![
+        AdminEvent {
+            t_ms: 7000,
+            kind: AdminEventKind::Paused
+        };
+        1001
+    ];
+    assert_eq!(
+        module.analyze(&req, &limits()),
+        Err(AlgorithmError::ResourceLimit)
+    );
+}
+
+#[test]
+fn real_cumulative_requires_its_own_prefix_and_evidence_caps_keep_counts() {
+    let mut req = request();
+    if let RuleSpec::ChangeCount { change_mode, .. } = &mut req.rules[0] {
+        *change_mode = ChangeMode::Cumulative;
+    }
+    let result = real_evaluate(&req).unwrap();
+    assert_eq!(result.rules[0].state, RuleState::Incomplete);
+    assert_eq!(
+        result.rules[0].reasons,
+        vec![FailureReason::InitialStateUnknown]
+    );
+    let module = window_rules::WindowRulesModule;
+    assert!(
+        matches!(module.supports(&req.rules[0]), AlgorithmSupport::Supported { requirements }
+        if requirements.minimum_warmup_ms == 86_400_000)
+    );
+
+    req.rules = vec![RuleSpec::SwitchDensity {
+        id: "r2".into(),
+        enabled: true,
+        lookback_sec: 10,
+        metric: Metric::QuoteReserve,
+        window_sec: 5,
+        reversal_bps: 500,
+        switch_kind: SwitchKind::DirectionReversal,
+        count: 2,
+    }];
+    assert_eq!(
+        real_evaluate(&req).unwrap().rules[0].state,
+        RuleState::Incomplete,
+        "R2 with zero switches returns its observation window, not malformed output"
+    );
+    let point = req.pool_history.points[0].clone();
+    req.pool_history.points = [(1000, "100"), (4000, "130"), (7000, "90"), (9000, "140")]
+        .into_iter()
+        .map(|(t_ms, value)| PoolSnapshot {
+            t_ms,
+            reserve_quote: value.into(),
+            ..point.clone()
+        })
+        .collect();
+    let reversal = real_evaluate(&req).unwrap();
+    assert_eq!(reversal.rules[0].state, RuleState::Fired);
+    assert_eq!(reversal.analysis.rules[0].observed, Some(2.0));
+    assert_eq!(
+        reversal.analysis.rules[0]
+            .events
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|event| event.t_ms)
+            .collect::<Vec<_>>(),
+        vec![7000, 9000]
+    );
+
+    req.rules = vec![RuleSpec::EventCount {
+        id: "events".into(),
+        enabled: true,
+        lookback_sec: 10,
+        event_kinds: vec![AdminEventKind::Paused],
+        count: 2,
+    }];
+    req.token_profile.admin_events = vec![
+        AdminEvent {
+            t_ms: 7000,
+            kind: AdminEventKind::Paused
+        };
+        3
+    ];
+    let mut budget = limits();
+    budget.max_evidence_events_per_rule = 1;
+    let result = module.analyze(&req, &budget).unwrap();
+    assert_eq!(result.rules[0].outcome, RuleState::Fired);
+    assert_eq!(result.rules[0].observed, Some(3.0));
+    assert_eq!(result.rules[0].events.as_ref().unwrap().len(), 1);
 }
 
 fn request() -> AnalysisRequest {
@@ -71,7 +284,7 @@ fn pinned(request: &AnalysisRequest) -> PinnedInvocation {
         "settingsHash": OTHER_HASH, "settingsHashScheme": "sha256-jcs-scam-v1",
         "bundleSequence": "7", "selectedPreset": "established",
         "selectionReason": "exact_mature", "effectiveSettingsHash": OTHER_HASH,
-        "algorithm": {"id": "test-fixed", "version": "1.0.0", "contractVersion": 1},
+        "algorithm": {"id": "test-fixed", "version": "1.0.0", "contractVersion": 2},
         "builderVersion": "fixture/1", "fromMs": 1000, "toMs": 12000,
         "bucketMs": 1000, "gridOriginMs": 0, "warmupSec": 1
     }))
@@ -95,7 +308,7 @@ fn answer(request: &AnalysisRequest, state: RuleState) -> ScamAnalysis {
     ScamAnalysis {
         algorithm_id: "test-fixed".into(),
         algorithm_version: "1.0.0".into(),
-        contract_version: 1,
+        contract_version: 2,
         analysis_mode: AnalysisMode::Stub,
         binding: AlgorithmBinding {
             chain_id: request.subject.chain_id,
@@ -121,11 +334,11 @@ fn answer(request: &AnalysisRequest, state: RuleState) -> ScamAnalysis {
             events: (state == RuleState::Fired).then_some(vec![
                 EvidenceEvent {
                     t_ms: 5000,
-                    kind: "up".into(),
+                    kind: "change".into(),
                 },
                 EvidenceEvent {
                     t_ms: 6000,
-                    kind: "down".into(),
+                    kind: "change".into(),
                 },
             ]),
             coverage_bps: if state == RuleState::Incomplete {
@@ -159,7 +372,7 @@ impl FixedModule {
             identity: AlgorithmIdentity {
                 id: "test-fixed".into(),
                 version: "1.0.0".into(),
-                contract_version: 1,
+                contract_version: 2,
             },
             mode: AnalysisMode::Stub,
             supported: true,
@@ -273,7 +486,7 @@ fn module_compatibility_is_checked_before_invocation() {
     let request = request();
     let context = pinned(&request);
     let cases: [MutationCase<FixedModule>; 4] = [
-        ("wire version", |m| m.identity.contract_version = 2),
+        ("wire version", |m| m.identity.contract_version = 3),
         ("pinned implementation version", |m| {
             m.identity.version = "2.0.0".into()
         }),
@@ -311,8 +524,8 @@ fn malformed_or_unbound_input_is_rejected_before_invocation() {
         ("future point", |v| {
             v["poolHistory"]["points"][11]["tMs"] = json!(13000)
         }),
-        ("off-grid point", |v| {
-            v["poolHistory"]["points"][5]["tMs"] = json!(6500)
+        ("duplicate point", |v| {
+            v["poolHistory"]["points"][5]["tMs"] = json!(5000)
         }),
         ("extra policy payload", |v| {
             v["policyFacts"] = json!({"deny": false})
@@ -564,7 +777,7 @@ fn input_gap_or_unknown_initial_state_cannot_be_cleared_by_output_claims() {
     let clean = request();
     let mut request = clean.clone();
     let mut context = pinned(&request);
-    request.pool_history.points.retain(|p| p.t_ms != 10000);
+    request.pool_history.points.retain(|p| p.t_ms != 9000);
     request.pool_history.missing.push(SnapshotInterval {
         from_ms: 9000,
         to_ms: 10000,
@@ -714,15 +927,15 @@ fn resolution_contract_rejects_exact_count_span_without_detecting_events() {
     module.output.rules[0].events = Some(vec![
         EvidenceEvent {
             t_ms: 4000,
-            kind: "peak".into(),
+            kind: "switch".into(),
         },
         EvidenceEvent {
             t_ms: 5000,
-            kind: "trough".into(),
+            kind: "switch".into(),
         },
         EvidenceEvent {
             t_ms: 6000,
-            kind: "peak".into(),
+            kind: "switch".into(),
         },
     ]);
     assert!(evaluate(&module, &context, &request).is_ok());
