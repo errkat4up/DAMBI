@@ -431,7 +431,7 @@ export interface AlgorithmCapabilities {
   readonly changeModes: readonly ("step" | "cumulative")[];
   readonly inputSchema: "scam.pool_history/1";
   readonly profileSchema: "scam.token_profile/1";
-  readonly outputContractVersion: 1;
+  readonly outputContractVersion: 2;
   readonly supportedLimits: AlgorithmLimits;
   readonly workUnit: string;
 }

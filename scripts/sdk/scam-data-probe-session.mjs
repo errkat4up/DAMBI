@@ -30,6 +30,7 @@ export function readProbeConfig(env = {}) {
   const historyVerification = env.SCAM_HISTORY_VERIFICATION ?? "all_event_headers";
   requireConfig(HISTORY_VERIFICATIONS.includes(historyVerification));
   const cacheEnabled = integer(env, "SCAM_HISTORY_CACHE", 0, 0, 1) === 1;
+  const cacheMaxBlockSpan = integer(env, "SCAM_CACHE_MAX_BLOCK_SPAN", 100_000, 1, 1_000_000);
   const prepareTimeoutMs = integer(env, "SCAM_PREPARE_TIMEOUT_MS", undefined, 1, 60_000);
   requireConfig(prepareTimeoutMs === undefined || cacheEnabled);
   const targets = json(env, "SCAM_TARGETS_JSON", [{
@@ -59,13 +60,13 @@ export function readProbeConfig(env = {}) {
     repeats: integer(env, "SCAM_REPEATS", 1, 1, 20),
     timeoutMs: integer(env, "SCAM_TIMEOUT_MS", 2500, 1, 60_000),
     lookbackSec: integer(env, "SCAM_LOOKBACK_SEC", 86_400, 1, 86_400),
-    warmupSec: integer(env, "SCAM_WARMUP_SEC", 3600, 0, 3600),
+    warmupSec: integer(env, "SCAM_WARMUP_SEC", 3600, 0, 86_400),
     confirmDepth: integer(env, "SCAM_CONFIRM_DEPTH", 2, 0, 1000),
     ageThresholdSec: integer(env, "SCAM_AGE_THRESHOLD_SEC", 86_400, 1, 31_536_000),
     minRequestIntervalMs, retryDelayMs, maxRetryDelayMs,
     verification: Object.freeze({ history: historyVerification, stateBinding: "number_recheck" }),
     historyCache: cacheEnabled ? Object.freeze({ maxEntries: 8, maxBytes: 16_000_000,
-      ttlMs: 120_000, maxBlockSpan: 100_000 }) : undefined,
+      ttlMs: 120_000, maxBlockSpan: cacheMaxBlockSpan }) : undefined,
     prepareTimeoutMs,
     factorySupport, adminSupport,
   };
@@ -152,7 +153,7 @@ function referenceRelation(current, previous) {
     && current.hash !== previous.hash ? "advanced" : "changed";
 }
 
-function factSummary(batch, request, previousFacts) {
+export function factSummary(batch, request, previousFacts) {
   if (!record(batch.results)) return [];
   return Object.entries(batch.results).flatMap(([callId, fact]) => {
     const value = fact?.value;
@@ -177,7 +178,7 @@ function factSummary(batch, request, previousFacts) {
   });
 }
 
-function failureSummary(value) {
+export function failureSummary(value) {
   // Diagnostics are an allowlisted projection, never a remote error payload.
   try {
     if (!record(value)) return undefined;
@@ -194,7 +195,7 @@ function failureSummary(value) {
   } catch { return undefined; } // A malformed diagnostic cannot replace the outcome.
 }
 
-function preflightSummary(value) {
+export function preflightSummary(value) {
   try {
     if (!record(value)) return undefined;
     const counts = ["uniqueLogBlocks", "timestampedLogBlocks", "additionalHeaderRequests", "finalRecheckRequests",
@@ -208,6 +209,29 @@ function preflightSummary(value) {
 }
 
 const copy = (value) => JSON.parse(JSON.stringify(value));
+
+/** Shared manual-probe budgets and RPC telemetry; not product defaults. */
+export function probeProviderOptions(config, onMetrics) {
+  return {
+    policy: { async fetch(calls, options) {
+      if (calls.length) throw new Error("This probe does not fetch policy facts.");
+      return { planId: options.planId, results: {} };
+    } },
+    rpc: { chainId: config.chainId, endpoint: config.endpoint, verification: config.verification,
+      ...(config.historyCache === undefined ? {} : { historyCache: config.historyCache }),
+      factories: [...new Set(config.subjects.map((subject) => subject.factory))],
+      quoteTokens: [...new Set(config.subjects.map((subject) => subject.quoteToken))],
+      limits: { maxRequests: 512, maxResponseBytes: 8_000_000, maxTotalResponseBytes: 32_000_000,
+        maxLogs: 100_000, maxBlocksPerQuery: 10_000, concurrency: 2, maxRetries: 1,
+        minRequestIntervalMs: config.minRequestIntervalMs, retryDelayMs: config.retryDelayMs, maxRetryDelayMs: config.maxRetryDelayMs } },
+    history: { maxPoints: 20_000, maxLogs: 100_000, maxBlockLookups: 512, blockTimeHintMs: 1000 },
+    profile: { maxEvents: 20_000, maxLogs: 100_000, maxBlockLookups: 512, blockTimeHintMs: 1000 },
+    factorySupport: config.factorySupport, adminSupport: config.adminSupport,
+    limits: { timeoutMs: config.timeoutMs, maxCalls: config.subjects.length * 2, maxTargets: config.subjects.length,
+      maxRequestBytes: 100_000, maxResultBytes: 16_000_000 },
+    onMetrics,
+  };
+}
 
 /** One explicitly owned provider for Node or an extension Service Worker.
  * Report values are copies, so console edits cannot alter later comparisons.
@@ -226,25 +250,7 @@ export function createProbeSession(input, createProvider) {
     finally { busy = false; }
   }
   let observed;
-  const provider = createProvider({
-    policy: { async fetch(calls, options) {
-      if (calls.length) throw new Error("This probe does not fetch policy facts.");
-      return { planId: options.planId, results: {} };
-    } },
-    rpc: { chainId: config.chainId, endpoint: config.endpoint, verification: config.verification,
-      ...(config.historyCache === undefined ? {} : { historyCache: config.historyCache }),
-      factories: [...new Set(config.subjects.map((subject) => subject.factory))],
-      quoteTokens: [...new Set(config.subjects.map((subject) => subject.quoteToken))],
-      limits: { maxRequests: 512, maxResponseBytes: 8_000_000, maxTotalResponseBytes: 32_000_000,
-        maxLogs: 100_000, maxBlocksPerQuery: 10_000, concurrency: 2, maxRetries: 1,
-        minRequestIntervalMs: config.minRequestIntervalMs, retryDelayMs: config.retryDelayMs, maxRetryDelayMs: config.maxRetryDelayMs } },
-    history: { maxPoints: 20_000, maxLogs: 100_000, maxBlockLookups: 512, blockTimeHintMs: 1000 },
-    profile: { maxEvents: 20_000, maxLogs: 100_000, maxBlockLookups: 512, blockTimeHintMs: 1000 },
-    factorySupport: config.factorySupport, adminSupport: config.adminSupport,
-    limits: { timeoutMs: config.timeoutMs, maxCalls: config.subjects.length * 2, maxTargets: config.subjects.length,
-      maxRequestBytes: 100_000, maxResultBytes: 16_000_000 },
-    onMetrics(metrics) { observed = metrics; },
-  });
+  const provider = createProvider(probeProviderOptions(config, (metrics) => { observed = metrics; }));
   async function measure(work, request, previousTrial) {
     observed = undefined;
     let batch, threw = false;

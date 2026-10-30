@@ -8,7 +8,7 @@ import type { CorePlan, FactBatch, PlannedCall } from "../../packages/core/src/t
 import type { FactProvider } from "../../packages/core/src/ports/fact.js";
 import type { Verdict } from "../../packages/core/src/types/verdict.js";
 import type {
-  AlgorithmIdentity, AlgorithmInput, AlgorithmLimits, AlgorithmModulePort,
+  AlgorithmCapabilities, AlgorithmIdentity, AlgorithmInput, AlgorithmLimits, AlgorithmModulePort,
   AlgorithmPort, AlgorithmRuleResult, AnalysisRequest, CoreConfigScamDraft, CorePlanScamDraft, DataCoverage,
   DambiCoreScamDraft, EvaluateScamDraft, FixedReference, LocalScamTrust,
   NativeScamInputDraft, PlannedScamCall, PoolAge, PoolHistory, PoolHistoryValue, PoolSnapshot, RuleResult,
@@ -20,6 +20,9 @@ const r1: RuleSpec = {
   id: "price-up", kind: "change_count", enabled: false, lookbackSec: 3600,
   metric: "price_quote_per_token", direction: "up", changeMode: "step", thresholdBps: 1000, count: 3,
 };
+const outputVersion: AlgorithmCapabilities["outputContractVersion"] = 2;
+// @ts-expect-error Algorithm capabilities must not advertise the previous contract.
+const previousOutputVersion: AlgorithmCapabilities["outputContractVersion"] = 1;
 const r2: RuleSpec = {
   id: "reversals", kind: "switch_density", enabled: false, lookbackSec: 3600,
   metric: "price_quote_per_token", windowSec: 5, reversalBps: 500, switchKind: "direction_reversal", count: 2,
@@ -212,7 +215,7 @@ function compatibility(
   const notYetEnabled: CoreConfig = { ...legacyConfig, scam: { enabled: true } };
   void [unchangedConfig, unchangedCore, unchangedPlan, oldVerdict, noScam, withScam, providerReuse, publicScamCalls, publicScamVerdict, notYetEnabled];
 }
-void [r1, r2, auxiliary, missingWindow, policyRule, textDuration, wrongThreshold, eventWindow, inventedEvent, wrongMethod, projected, requiredFact,
+void [r1, r2, outputVersion, previousOutputVersion, auxiliary, missingWindow, policyRule, textDuration, wrongThreshold, eventWindow, inventedEvent, wrongMethod, projected, requiredFact,
   numericReserve, removedSwapCounts, ambiguousGrid, missingWorkLimit, mixedVersion, rawSdkState, leakedSdkBinding,
   providerEnvelope, unknownAge, inventedAge, mintAsCreation, numericBlock, presence, ruleResults, missingAlgorithm,
   notConfigured, automaticDeny, invalidRuleState, unavailableInput, wrongFailureChannel, signedWithTelemetry,

@@ -498,6 +498,79 @@ endpoint credentials to tracked files. Reports omit endpoints and headers;
 failures remain in the denominator and small-sample percentiles are not production
 performance claims. Node reachability does not establish extension reachability.
 
+## Real-algorithm SDK measurement (SF6-2, development)
+
+`scripts/sdk/scam-analysis-probe.mjs` runs the production `createCore().check()`
+path with live RPC data and the built-in `dambi.scam.window-rules@0.2.0` detector.
+It reuses the data probe's RPC budgets, preparation/cache support and telemetry.
+The default request is the recorded GIWA ETH swap. Policy/scam bundles are freshly
+signed **in memory with repository test-only keys**, trusted only by this local
+probe. No transaction is signed or submitted, and no service is created or changed.
+This isolates SDK measurement while the actual bundle services are being developed;
+it excludes bundle HTTP retrieval, extension startup, confirmation UI and user action.
+
+After SF6-1's production WASM build, validate the changed TypeScript and measurement
+code. These tests use local RPC fixtures, not external endpoints:
+
+```sh
+yarn workspace @dambi/core exec tsc -p tsconfig.build.json &&
+yarn workspace @dambi/core exec tsc -p ../../contracts/scam-filter-v0.1/tsconfig.json &&
+node --test packages/core/tests/adapters/scam-analysis-probe.test.mjs \
+  packages/core/tests/adapters/scam-data-probe.test.mjs \
+  packages/core/tests/adapters/scam-sw-diagnostic.test.mjs
+```
+
+Then measure the unprepared SDK check with its 2,500ms budget:
+
+```sh
+SCAM_HISTORY_VERIFICATION=rpc_anchor SCAM_REPEATS=3 \
+  node scripts/sdk/scam-analysis-probe.mjs
+```
+
+The default demo enables cumulative R1 and R2 with a 24-hour observation window.
+Core raises their prefix to 24 hours, so this requests **up to 48 hours**. Thresholds
+(500 bps, count 3; R2 window up to one hour) are diagnostic, not calibrated defaults.
+`all_event_headers` remains the default unless the verification flag is provided.
+Requested settings and actual `plannedHistories`/analysis binding ranges are reported
+separately. No factory/admin capability is invented: unknown age can keep the result
+insufficient even if the algorithm runs. Supply only verified deployment declarations
+through the existing `SCAM_FACTORY_SUPPORT_JSON`/`SCAM_ADMIN_SUPPORT_JSON` options.
+
+For a separately budgeted preparation followed by 2,500ms checks:
+
+The analysis probe's cache retains scans up to 200,000 blocks (about 48 hours
+at a one-second cadence, with margin). The data-only probe keeps its original
+100,000-block default. `SCAM_CACHE_MAX_BLOCK_SPAN` can explicitly set either
+probe's cap from 1 to 1,000,000; this is a storage bound, not a time-to-block
+conversion or a wider query. Entry/byte/TTL caps remain unchanged. A scan wider
+than this cap is not cached, so preparation alone does not prove a warm check.
+Confirm returned `verification.reuse` and the request counts.
+
+```sh
+SCAM_HISTORY_VERIFICATION=rpc_anchor SCAM_HISTORY_CACHE=1 \
+SCAM_PREPARE_TIMEOUT_MS=60000 SCAM_REPEATS=3 \
+  node scripts/sdk/scam-analysis-probe.mjs
+```
+
+Initialization and preparation are separate report entries, not check-latency samples.
+For a cold diagnostic use `SCAM_TIMEOUT_MS=60000` with cache/preparation unset; this
+does not change the 2,500ms comparison target. `provider` timings exclude the algorithm,
+while trial `durationMs` covers the SDK check. `successOnlyLatencyMs` includes only
+complete real analyses; `completedLatencyMs` also includes partial/insufficient results.
+Failures stay in ratio denominators. `insufficientRatio`, `partialWarnings`, `timeouts`
+and `noTimeBudget` retain their separate meanings. Small-sample p50/p95 are descriptive.
+Partial or failed analysis exits with code 1; inspect the JSON instead of treating that
+as a script crash. A resource-limit result is not evidence of RPC latency or detection.
+
+Existing RPC/target/cache options also apply. `SCAM_RULES_JSON` accepts explicit active
+SDK rules, still validated by Core. `SCAM_WARMUP_SEC` accepts 0–86,400 and cannot lower
+the algorithm's minimum. For another request or multiple targets, `SCAM_CASE_FILE`
+is a local JSON file `{ "request": <CheckRequest>, "decoders": { "schema_version": 1,
+"bundles": [...] } }`; use corresponding verified `SCAM_TARGETS_JSON` entries. Core
+must extract exactly those targets, and mismatches are rejected before RPC. The probe
+does not synthesize multi-pool transactions or infer deployment capabilities. Real
+extension confirmation and complete SF6-2 performance acceptance remain separate.
+
 ## Signed Scam Filter bundles (SF5-1, development)
 
 The signed configuration channel is separate from policy snapshots and market

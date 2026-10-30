@@ -249,6 +249,12 @@ npm --prefix registryV2 run test:scam-publisher &&
 yarn --cwd browser-extension test frontend/confirm/scam-card.test.ts
 ```
 
+## SF6-2 — 실제 환경·전체 검사 측정 준비
+
+2026-10-30, 검증된 SF6-1 변경을 로컬 `314c057`에 커밋한 뒤 진행했다(푸시 없음). 기존 RPC probe의 예산·계측·캐시를 재사용해 실제 `Core.check()`·production WASM·알고리즘을 측정하는 `scam-analysis-probe.mjs`와 회귀 시험을 작성했다. 로컬 테스트 서명 번들·저장된 요청을 사용하며, 실제 번들 HTTP/확장 화면과 초기화·사전 준비 시간은 검사 지연에서 구분한다. 불완전한 경고·나이 미상·stub을 성공으로 집계하지 않고 대상 불일치는 RPC 전에 거절한다. 공개 `AlgorithmCapabilities.outputContractVersion`에 남아 있던 타입 값 1도 2로 정정했다. **사용자 실행 로그 기준 측정기 회귀 시험 18개 통과·0개 실패.** 첫 무캐시 실측은 GIWA 풀 1개·rpc_anchor·관측 24시간+사전 이력 24시간·2,500ms 제한에서 3회 모두 pool_history 수집 중 timeout이었다(2,557.30 / 2,512.24 / 2,517.71ms). 요청 18/24/20회·재시도 0이며 반환 Fact와 실제 알고리즘 결과는 모두 0개다. SDK는 3회 모두 insufficient를 반환했으므로 report의 partial=3/failed=0은 검사 성공을 뜻하지 않는다. 이 무캐시 실행은 2.5초 목표에 미달했고 알고리즘 분석까지 도달하지 못했다. 다음 준비 후 측정의 설정 점검에서 기존 캐시 상한 100,000블록이 1초 간격 48시간 범위를 저장하지 못함을 확인해, 분석 probe의 기본값을 200,000블록으로 보완하고 명시적 상한 옵션·범위 저장 회귀 사례를 추가했다. 이번 실측은 cache=null이므로 이 상한이 관측된 timeout의 원인은 아니다. **사용자 재실행에서 보완한 대상 시험 1개 통과·0개 실패**를 확인했다(앞선 18개와 중복되는 사례로 추가 합산하지 않음). 기한·관측 범위·알고리즘 예산은 완화하지 않았다. SF6-2의 실제 화면·최종 지연시간·지원 범위 판정은 남는다. 실행 명령과 설정은 [Core README](../../packages/core/README.md#real-algorithm-sdk-measurement-sf6-2-development)에 둔다.
+
+준비 후 실제 분석: 동일 GIWA 풀 1개·48시간 입력·rpc_anchor에서 초기화 98.45ms, 사전 준비 **4,336.60ms·34요청·18로그 청크·partial**, 이어 SDK check **2,039.26 / 1,884.56 / 1,931.61ms**, 세 번 모두 2,500ms 안에 반환했다. 실제 모듈 `0.2.0`/계약 2가 세 번 모두 실행됐고 timeout·재시도·실패 청크는 0이다. history는 매번 `interval_cache`·1,066점·결측/미지원 0, 기준 블록은 40,003,972→40,003,974→40,003,976으로 전진했다. R1은 23/3으로 fired, R2는 1/3으로 clear이며 두 룰 모두 초기 상태·warm-up 충족/coverage 10000으로 반환됐다. 다만 factory capability 미설정으로 나이 unknown이라 **warn + age_unknown, partialWarnings=3, 완전 분석 성공=0**을 유지한다. 준비 시간은 검사 지연에 포함되지 않는다. 이는 단일 대상·준비된 캐시의 3회 SDK 관측이며 운영 p95, 다중 대상, 실제 서비스/확장 화면 성능이나 탐지 정확도 인증을 뜻하지 않는다. 다음은 검증된 나이 근거 연결과 남은 실제 호스트·지원 범위 확인이다. 이 기록 갱신으로 시험·RPC·빌드·커밋·푸시를 재실행하지 않았다.
+
 ## 번들 B1-1 — Universal Router
 
 2026-10-12, `main 7387536` 이후 B1-1 변경 검증: **Native 원문 2개 시험과 패키지 WASM 3개 시험 통과, 최종 WASM 로그 3 통과·0 실패.** 저장된 snapshot은 801개이며 기존 799개 내용 보존·UR 2개 추가·digest/bytes 일치를 확인했다. source-context 제외 30,484개와 Aave 거절 3개는 유지한다. 별도 `decoder_snapshot` target의 전체 결과는 공유되지 않았다. 대표 UR 경로의 편입·검증을 마쳤으며 다음은 B1-2 Aave다.
