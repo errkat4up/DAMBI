@@ -1,0 +1,51 @@
+{
+  "id": "swap-buy-unsellable-token",
+  "schema_version": 2,
+  "trigger": {
+    "where": {
+      "action.tag": {
+        "eq": "swap"
+      }
+    }
+  },
+  "policy_rpc": [
+    {
+      "id": "out-token-sec",
+      "method": "token.security_flags",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "token": "$.action.tokenOut.key.address"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "tokenIsHoneypot",
+          "type": "Bool",
+          "from": "$.result.tokenIsHoneypot",
+          "required": false
+        },
+        {
+          "kind": "context",
+          "field": "tokenSellTaxBps",
+          "type": "Long",
+          "from": "$.result.tokenSellTaxBps",
+          "required": false
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": {
+    "fields": {
+      "tokenIsHoneypot": "Bool",
+      "tokenSellTaxBps": "Long"
+    }
+  },
+  "_template": {
+    "minSellTaxBps": {
+      "cedar_long": "10000",
+      "default": "10000 bps = 100% (honeypot / sell blocked only)",
+      "meaning": "Warn when the bought token's sell tax is at or above this (basis points), in addition to a reported honeypot. Measured on ETH Uniswap V2 WETH pools 2023-06..2026-08, normal = pools alive and trading at day 30 (research s15/s16): 100% → normal tokens 0.9%; 99% → 2.9%; 50% → 4.3%; 20% → 7.2%. Lower = also warn on heavily taxed (not just unsellable) tokens."
+    }
+  }
+}

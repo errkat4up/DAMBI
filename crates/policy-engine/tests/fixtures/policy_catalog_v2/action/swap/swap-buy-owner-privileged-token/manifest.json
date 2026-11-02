@@ -1,0 +1,43 @@
+{
+  "id": "swap-buy-owner-privileged-token",
+  "schema_version": 2,
+  "trigger": {
+    "where": {
+      "action.tag": {
+        "eq": "swap"
+      }
+    }
+  },
+  "policy_rpc": [
+    {
+      "id": "out-token-sec",
+      "method": "token.security_flags",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "token": "$.action.tokenOut.key.address"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "tokenOwnerPrivileges",
+          "type": "Set<String>",
+          "from": "$.result.tokenOwnerPrivileges",
+          "required": false
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": {
+    "fields": {
+      "tokenOwnerPrivileges": "Set<String>"
+    }
+  },
+  "_template": {
+    "ownerPrivileges": {
+      "cedar_set": "[\"balance_change\", \"take_back_ownership\"]",
+      "default": "balance_change, take_back_ownership",
+      "meaning": "Owner controls that trigger the warning. Choices: balance_change, take_back_ownership, mint, hidden_owner, transfer_pause. Measured on ETH Uniswap V2 WETH pools 2023-06..2026-08, normal = pools alive and trading at day 30 (research s15/s16): default → normal tokens 1.1%; + mint → 4.1%; + hidden_owner → 9.6%. Widely used, vetted major tokens (e.g. USDT, USDC) are excluded — the sentence's \"알려진 주요 토큰이 아니고\"."
+    }
+  }
+}

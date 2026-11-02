@@ -1,0 +1,43 @@
+{
+  "id": "swap-buy-high-buy-tax",
+  "schema_version": 2,
+  "trigger": {
+    "where": {
+      "action.tag": {
+        "eq": "swap"
+      }
+    }
+  },
+  "policy_rpc": [
+    {
+      "id": "out-token-sec",
+      "method": "token.security_flags",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "token": "$.action.tokenOut.key.address"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "tokenBuyTaxBps",
+          "type": "Long",
+          "from": "$.result.tokenBuyTaxBps",
+          "required": false
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": {
+    "fields": {
+      "tokenBuyTaxBps": "Long"
+    }
+  },
+  "_template": {
+    "minBuyTaxBps": {
+      "cedar_long": "1000",
+      "default": "1000 bps = 10%",
+      "meaning": "Warn when the bought token's buy tax is at or above this (basis points). Measured on ETH Uniswap V2 WETH pools 2023-06..2026-08, normal = pools alive and trading at day 30 (research s15/s16): 10% → normal tokens 0.5%; 5% → 12.9% (many normal tokens use a 5% tax)."
+    }
+  }
+}
