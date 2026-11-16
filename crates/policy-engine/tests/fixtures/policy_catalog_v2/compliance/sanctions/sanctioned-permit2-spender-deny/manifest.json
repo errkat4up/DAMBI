@@ -1,5 +1,5 @@
 {
-  "id": "sanctioned-permit2-recipient-deny",
+  "id": "sanctioned-permit2-spender-deny",
   "schema_version": 2,
   "trigger": { "where": { "action.tag": { "eq": "permit2_sign_transfer" } } },
   "policy_rpc": [{

@@ -2,8 +2,9 @@
 //
 // Off-chain `PermitTransferFrom` / `PermitWitnessTransferFrom` typed data.
 // The signed message grants a one-time spend cap for `token` owned by `owner`.
-// The final spender and recipient are not part of the signature; they appear
-// only when the signature is executed on chain.
+// The spender is part of the signature. The final recipient is not (unless a
+// protocol binds it in a `PermitWitnessTransferFrom` witness); it appears only
+// when the signature is executed on chain.
 
 namespace Token {
   type Permit2SignTransferNonce = {

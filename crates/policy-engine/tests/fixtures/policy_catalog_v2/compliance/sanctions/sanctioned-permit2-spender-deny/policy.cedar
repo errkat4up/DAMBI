@@ -8,7 +8,7 @@
 // `address.sanctions` screens the Permit2 authorized spender against OFAC/EU/UN
 // lists. Off-chain signature (`meta.nature.kind == "offchain_sig"`). ENRICHMENT —
 // dormant until the dispatcher serves the method.
-@id("sanctioned-permit2-recipient-deny")
+@id("sanctioned-permit2-spender-deny")
 @severity("deny")
 @reason("Permit2 transfer spender is on a sanctions list (OFAC/EU/UN) — signature blocked")
 forbid(principal, action == Token::Action::"Permit2SignTransfer", resource)
