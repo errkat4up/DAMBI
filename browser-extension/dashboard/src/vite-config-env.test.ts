@@ -55,7 +55,7 @@ describe("dashboard Vite server URL env", () => {
     );
   });
 
-  it("keeps development builds local even when the extension root .env is for production", () => {
+  it("ignores the extension root production .env during development", () => {
     const root = mkdtempSync(path.join(tmpdir(), "dambi-extension-env-"));
     const dashboardDir = path.join(root, "dashboard");
     mkdirSync(dashboardDir);

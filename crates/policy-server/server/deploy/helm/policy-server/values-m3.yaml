@@ -9,8 +9,8 @@ image:
 
 api:
   replicas: 2
-  publicApiUrl: https://errkat4up-dambi.duckdns.org
-  dashboardUrl: https://errkat4up-dambi.duckdns.org
+  publicApiUrl: https://dambi-sub.duckdns.org
+  dashboardUrl: https://dambi-sub.duckdns.org
   # CHANGE ME: browser extension(s) logging in through
   # chrome.identity.launchWebAuthFlow. Comma-separated; each MUST EQUAL
   # getRedirectURL() byte-for-byte (trailing slash included). Typically the
@@ -19,7 +19,7 @@ api:
   oauthAllowedRedirectUris: "https://<your-extension-id>.chromiumapp.org/"
   marketAdminEmails: ""
   corsAllowedOrigins:
-    - https://errkat4up-dambi.duckdns.org
+    - https://dambi-sub.duckdns.org
     - chrome-extension://<your-extension-id>
 
 # GCE Ingress backend → ClusterIP (no external LB on the Service itself).
@@ -31,7 +31,7 @@ ingress:
   # GCE controller is selected via the kubernetes.io/ingress.class annotation
   # (this cluster has no "gce" IngressClass, so ingressClassName would match nothing).
   className: ""
-  host: errkat4up-dambi.duckdns.org
+  host: dambi-sub.duckdns.org
   tls:
     enabled: false          # ManagedCertificate provides TLS via annotation, not a secret
   gce:

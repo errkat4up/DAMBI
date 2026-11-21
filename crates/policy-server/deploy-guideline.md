@@ -57,7 +57,7 @@
 | 리전(지역) | 같은 파일 | `asia-northeast3`(서울) → 원하면 변경 |
 | Terraform 상태 버킷 | `server/deploy/terraform/backend.tf` | `your-gcp-project-dambi-tfstate` → **`<당신프로젝트>-dambi-tfstate`** (전 세계에서 유일해야 함) |
 | 이미지 경로 | `server/deploy/helm/policy-server/values-gke.yaml`, `values-m3.yaml` | `asia-northeast3-docker.pkg.dev/your-gcp-project-id/...` → 당신 리전/프로젝트로 |
-| 도메인(HTTPS용) | `values-m3.yaml`의 `ingress.host` | `errkat4up-dambi.duckdns.org` → 당신 도메인 |
+| 도메인(HTTPS용) | `values-m3.yaml`의 `ingress.host`, `api.publicApiUrl`, `api.dashboardUrl`, `api.corsAllowedOrigins` | `dambi-sub.duckdns.org` → 당신 도메인 |
 | CI/CD 설정 | `.github/workflows/policy-server-deploy.yml`의 `env:` | 위와 동일하게 |
 
 > 💡 프로젝트 ID는 [console.cloud.google.com](https://console.cloud.google.com) 상단 프로젝트 선택기에서 확인.
@@ -260,11 +260,11 @@ curl http://$LB/health   # ok 나오면 성공
 ## 7. (선택) 고정 HTTPS 도메인 + 구글 로그인
 
 도메인이 필요합니다. 돈 안 쓰려면 **무료 DuckDNS**를 추천:
-1. [duckdns.org](https://duckdns.org) → 구글 로그인 → 서브도메인 1개 생성 (예: `myapp` → `myapp.duckdns.org`) → **token** 복사.
+1. [duckdns.org](https://duckdns.org)에서 로그인한 뒤 사용할 서브도메인을 확인하고 **token**을 복사합니다.
 
 ```bash
-export DOMAIN=myapp.duckdns.org
-export DUCKDNS_SUB=myapp
+export DUCKDNS_SUB=dambi-sub  # 다른 계정으로 배포할 때는 본인이 등록한 이름을 입력
+export DOMAIN="${DUCKDNS_SUB}.duckdns.org"
 export DUCKDNS_TOKEN=<복사한 토큰>
 
 # (1) 고정 IP는 Terraform이 이미 만듦(ingress_ip). DuckDNS를 그 IP로 가리키게:
@@ -272,7 +272,7 @@ INGRESS_IP=$(terraform -chdir=crates/policy-server/server/deploy/terraform outpu
 curl "https://www.duckdns.org/update?domains=${DUCKDNS_SUB}&token=${DUCKDNS_TOKEN}&ip=${INGRESS_IP}"   # OK
 dig +short $DOMAIN    # INGRESS_IP 가 나오면 OK
 
-# (2) values-m3.yaml 의 ingress.host 를 $DOMAIN 으로 수정 (1번 표)
+# (2) 다른 도메인을 쓴다면 values-m3.yaml의 호스트와 URL을 함께 수정 (1번 표)
 
 # (3) 구글 OAuth 설정 (콘솔에서 수동, 한 번만):
 #   APIs & Services → Credentials → OAuth 2.0 Client(웹) 편집
@@ -373,7 +373,7 @@ gcloud iam workload-identity-pools providers describe github-provider \
 
 **검증** (롤아웃 거는 동안 다른 터미널에서):
 ```bash
-while true; do curl -s -o /dev/null -w "%{http_code} " https://errkat4up-dambi.duckdns.org/readyz; sleep 1; done
+while true; do curl -s -o /dev/null -w "%{http_code} " https://dambi-sub.duckdns.org/readyz; sleep 1; done
 # 전부 200이면 무중단 OK. 새 pod에 preStop 박혔는지:
 kubectl -n dambi get pod -l app.kubernetes.io/component=api \
   -o jsonpath='{.items[0].spec.containers[0].lifecycle.preStop}'; echo

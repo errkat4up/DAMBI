@@ -11,10 +11,10 @@ image:
 
 api:
   replicas: 2
-  publicApiUrl: https://errkat4up-dambi.duckdns.org
-  dashboardUrl: https://errkat4up-dambi.duckdns.org
+  publicApiUrl: https://dambi-sub.duckdns.org
+  dashboardUrl: https://dambi-sub.duckdns.org
   corsAllowedOrigins:
-    - https://errkat4up-dambi.duckdns.org
+    - https://dambi-sub.duckdns.org
     - chrome-extension://<your-extension-id>
 
 # M2: expose the API via an external L4 LoadBalancer (temp HTTP). No ingress/TLS yet.

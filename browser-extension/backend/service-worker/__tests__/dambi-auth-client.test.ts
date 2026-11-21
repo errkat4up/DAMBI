@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const legacyPolicyBase = "https://dambi-policy.duckdns.org";
+const legacyPolicyBases = [
+  "https://errkat4up-dambi.duckdns.org",
+  "https://dambi-policy.duckdns.org",
+];
 
 const tokenStore = vi.hoisted(() => ({
   getAccessToken: vi.fn<() => Promise<string | null>>(),
@@ -32,19 +35,16 @@ describe("dambi-auth client", () => {
   });
 
   it("normalizes only trusted server base URL overrides", () => {
-    expect(normalizeServerBaseUrl("https://errkat4up-dambi.duckdns.org/")).toBe(
-      "https://errkat4up-dambi.duckdns.org",
-    );
-    expect(normalizeServerBaseUrl(`${legacyPolicyBase}/`)).toBe(
-      "https://errkat4up-dambi.duckdns.org",
+    expect(normalizeServerBaseUrl("https://dambi-sub.duckdns.org/")).toBe(
+      "https://dambi-sub.duckdns.org",
     );
     expect(normalizeServerBaseUrl("http://127.0.0.1:8788")).toBe(
       "http://127.0.0.1:8788",
     );
     expect(normalizeServerBaseUrl("https://evil.example")).toBeNull();
-    expect(normalizeServerBaseUrl("https://errkat4up-dambi.duckdns.org.evil.example")).toBeNull();
-    expect(normalizeServerBaseUrl("https://user@errkat4up-dambi.duckdns.org")).toBeNull();
-    expect(normalizeServerBaseUrl("https://errkat4up-dambi.duckdns.org/api")).toBeNull();
+    expect(normalizeServerBaseUrl("https://dambi-sub.duckdns.org.evil.example")).toBeNull();
+    expect(normalizeServerBaseUrl("https://user@dambi-sub.duckdns.org")).toBeNull();
+    expect(normalizeServerBaseUrl("https://dambi-sub.duckdns.org/api")).toBeNull();
   });
 
   it("normalizes wallet addresses before constructing authenticated wallet requests", async () => {
@@ -62,7 +62,7 @@ describe("dambi-auth client", () => {
       label: "cold",
     });
     expect(fetchMock.mock.calls[0][0]).toBe(
-      "https://errkat4up-dambi.duckdns.org/wallets",
+      "https://dambi-sub.duckdns.org/wallets",
     );
     expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body))).toEqual({
       address: "0xa100000000000000000000000000000000000001",
@@ -72,7 +72,7 @@ describe("dambi-auth client", () => {
 
     await updateWallet("0xA100000000000000000000000000000000000001", { label: "cold" });
     expect(fetchMock.mock.calls[1][0]).toBe(
-      "https://errkat4up-dambi.duckdns.org/wallets/0xa100000000000000000000000000000000000001",
+      "https://dambi-sub.duckdns.org/wallets/0xa100000000000000000000000000000000000001",
     );
     expect(JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body))).toEqual({
       label: "cold",
@@ -80,7 +80,7 @@ describe("dambi-auth client", () => {
 
     await deleteWallet("0xA100000000000000000000000000000000000001");
     expect(fetchMock.mock.calls[2][0]).toBe(
-      "https://errkat4up-dambi.duckdns.org/wallets/0xa100000000000000000000000000000000000001",
+      "https://dambi-sub.duckdns.org/wallets/0xa100000000000000000000000000000000000001",
     );
   });
 
@@ -119,8 +119,8 @@ describe("dambi-auth client", () => {
     const client = await import("../dambi-auth/client");
     await Promise.resolve();
 
-    expect(client.getServerBaseUrl()).toBe("https://errkat4up-dambi.duckdns.org");
-    expect(getServerBaseUrl()).toBe("https://errkat4up-dambi.duckdns.org");
+    expect(client.getServerBaseUrl()).toBe("https://dambi-sub.duckdns.org");
+    expect(getServerBaseUrl()).toBe("https://dambi-sub.duckdns.org");
     expect(listeners).toHaveLength(1);
     const onChanged = listeners[0]!;
 
@@ -138,7 +138,22 @@ describe("dambi-auth client", () => {
       },
       "local",
     );
-    expect(client.getServerBaseUrl()).toBe("https://errkat4up-dambi.duckdns.org");
+    expect(client.getServerBaseUrl()).toBe("https://dambi-sub.duckdns.org");
+  });
+
+  it.each(legacyPolicyBases)("sends authenticated requests for %s to the current origin", async (legacyBase) => {
+    expect(normalizeServerBaseUrl(`${legacyBase}/`)).toBe("https://dambi-sub.duckdns.org");
+    tokenStore.getAccessToken.mockResolvedValue("access-token");
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await request(`${legacyBase}/auth/me`);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dambi-sub.duckdns.org/auth/me",
+      expect.objectContaining({ headers: { Authorization: "Bearer access-token" } }),
+    );
   });
 
   it("refuses absolute requests to untrusted hosts before attaching auth", async () => {
@@ -192,7 +207,7 @@ describe("dambi-auth client", () => {
     expect(result).toEqual([{ address: "0x1", chains: [] }]);
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls[1][0]).toBe(
-      "https://errkat4up-dambi.duckdns.org/auth/refresh",
+      "https://dambi-sub.duckdns.org/auth/refresh",
     );
     expect(tokenStore.setTokens).toHaveBeenCalledWith("new-access", "new-refresh");
     expect(fetchMock.mock.calls[2][1]).toMatchObject({

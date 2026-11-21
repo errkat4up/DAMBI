@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const legacyPolicyBase = "https://dambi-policy.duckdns.org";
+const legacyPolicyBases = [
+  "https://errkat4up-dambi.duckdns.org",
+  "https://dambi-policy.duckdns.org",
+];
 
 describe("dashboard server-api client", () => {
   let storage: Map<string, string>;
@@ -22,29 +25,26 @@ describe("dashboard server-api client", () => {
   });
 
   it("uses the Vite server URL when it is defined", async () => {
-    vi.stubEnv("VITE_DAMBI_SERVER_URL", "https://errkat4up-dambi.duckdns.org");
+    vi.stubEnv("VITE_DAMBI_SERVER_URL", "https://dambi-sub.duckdns.org");
 
     const { SERVER_BASE_URL } = await import("./client");
 
-    expect(SERVER_BASE_URL).toBe("https://errkat4up-dambi.duckdns.org");
+    expect(SERVER_BASE_URL).toBe("https://dambi-sub.duckdns.org");
   });
 
   it("normalizes only trusted server base URL overrides", async () => {
     const { normalizeServerBaseUrl } = await import("./client");
 
-    expect(normalizeServerBaseUrl("https://errkat4up-dambi.duckdns.org/")).toBe(
-      "https://errkat4up-dambi.duckdns.org",
-    );
-    expect(normalizeServerBaseUrl(`${legacyPolicyBase}/`)).toBe(
-      "https://errkat4up-dambi.duckdns.org",
+    expect(normalizeServerBaseUrl("https://dambi-sub.duckdns.org/")).toBe(
+      "https://dambi-sub.duckdns.org",
     );
     expect(normalizeServerBaseUrl("http://127.0.0.1:8788")).toBe(
       "http://127.0.0.1:8788",
     );
     expect(normalizeServerBaseUrl("https://evil.example")).toBeNull();
-    expect(normalizeServerBaseUrl("https://errkat4up-dambi.duckdns.org.evil.example")).toBeNull();
-    expect(normalizeServerBaseUrl("https://user@errkat4up-dambi.duckdns.org")).toBeNull();
-    expect(normalizeServerBaseUrl("https://errkat4up-dambi.duckdns.org/api")).toBeNull();
+    expect(normalizeServerBaseUrl("https://dambi-sub.duckdns.org.evil.example")).toBeNull();
+    expect(normalizeServerBaseUrl("https://user@dambi-sub.duckdns.org")).toBeNull();
+    expect(normalizeServerBaseUrl("https://dambi-sub.duckdns.org/api")).toBeNull();
   });
 
   it("ignores an untrusted stored server URL instead of sending tokens to it", async () => {
@@ -56,13 +56,30 @@ describe("dashboard server-api client", () => {
 
     await expect(request("/auth/me")).resolves.toEqual({ ok: true });
 
-    expect(SERVER_BASE_URL).toBe("https://errkat4up-dambi.duckdns.org");
-    expect(fetchMock.mock.calls[0][0]).toBe("https://errkat4up-dambi.duckdns.org/auth/me");
+    expect(SERVER_BASE_URL).toBe("https://dambi-sub.duckdns.org");
+    expect(fetchMock.mock.calls[0][0]).toBe("https://dambi-sub.duckdns.org/auth/me");
     expect(fetchMock.mock.calls[0][1]).toMatchObject({
       headers: {
         Authorization: "Bearer access-token",
       },
     });
+  });
+
+  it.each(legacyPolicyBases)("sends authenticated requests for %s to the current origin", async (legacyBase) => {
+    window.localStorage.setItem("dambi_server_url", legacyBase);
+    window.localStorage.setItem("dambi_jwt", "access-token");
+    const { SERVER_BASE_URL, request } = await import("./client");
+    expect(SERVER_BASE_URL).toBe("https://dambi-sub.duckdns.org");
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await request(`${legacyBase}/auth/me`);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dambi-sub.duckdns.org/auth/me",
+      expect.objectContaining({ headers: { Authorization: "Bearer access-token" } }),
+    );
   });
 
   it("refuses absolute requests to untrusted hosts before attaching auth", async () => {
@@ -124,7 +141,7 @@ describe("dashboard server-api client", () => {
     expect(result).toEqual({ user_id: "u_1", email: "a@example.com" });
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls[1][0]).toBe(
-      "https://errkat4up-dambi.duckdns.org/auth/refresh",
+      "https://dambi-sub.duckdns.org/auth/refresh",
     );
     expect(window.localStorage.getItem("dambi_jwt")).toBe("new-access");
     expect(window.localStorage.getItem("dambi_jwt_refresh")).toBe("new-refresh");

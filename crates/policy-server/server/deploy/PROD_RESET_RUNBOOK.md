@@ -109,8 +109,8 @@ from an empty database.
    gcloud redis instances describe dambi-redis \
      --region asia-northeast3 \
      --format='value(tier,authEnabled)'
-   curl -sS -i https://errkat4up-dambi.duckdns.org/health
-   curl -sS -i https://errkat4up-dambi.duckdns.org/readyz
+   curl -sS -i https://dambi-sub.duckdns.org/health
+   curl -sS -i https://dambi-sub.duckdns.org/readyz
    ```
 
    The ingress annotation must print `false`; production HTTP is intentionally

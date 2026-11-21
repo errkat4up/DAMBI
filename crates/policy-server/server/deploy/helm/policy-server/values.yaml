@@ -14,8 +14,8 @@ api:
   # preStop sleep + grace period → zero-downtime rollouts on GKE L7 (NEG drain race)
   preStopSleepSeconds: 15
   terminationGracePeriodSeconds: 30
-  publicApiUrl: https://errkat4up-dambi.duckdns.org
-  dashboardUrl: https://errkat4up-dambi.duckdns.org
+  publicApiUrl: https://dambi-sub.duckdns.org
+  dashboardUrl: https://dambi-sub.duckdns.org
   # Exact-match allowlist (comma-separated) of non-default OAuth redirect
   # targets — e.g. a browser extension's https://<id>.chromiumapp.org/.
   # Empty = only the default DASHBOARD_URL flow is allowed (fail-closed).
@@ -25,7 +25,7 @@ api:
   marketAdminEmails: ""
   corsAllowPrivateNetwork: false
   corsAllowedOrigins:
-    - https://errkat4up-dambi.duckdns.org
+    - https://dambi-sub.duckdns.org
     - chrome-extension://<published-extension-id>
   resources:
     requests:
@@ -69,7 +69,7 @@ oracleRpc:
 ingress:
   enabled: true
   className: nginx
-  host: errkat4up-dambi.duckdns.org
+  host: dambi-sub.duckdns.org
   tls:
     enabled: true
     secretName: policy-server-tls
