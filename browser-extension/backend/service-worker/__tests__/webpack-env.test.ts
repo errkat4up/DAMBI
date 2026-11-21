@@ -21,7 +21,7 @@ describe("webpack env mode helpers", () => {
       resolveServerUrl(env: Record<string, string | undefined>): string;
     };
 
-    expect(resolveServerUrl({})).toBe("https://errkat4up-dambi.duckdns.org");
+    expect(resolveServerUrl({})).toBe("https://dambi-sub.duckdns.org");
     expect(
       resolveServerUrl({ DAMBI_SERVER_URL: "https://dambi-policy.example.test" }),
     ).toBe("https://dambi-policy.example.test");

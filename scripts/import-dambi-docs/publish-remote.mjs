@@ -4,7 +4,7 @@
 // the token's account (the API forces community; official needs DB-direct).
 //
 // Usage:
-//   DAMBI_TOKEN=<jwt> DAMBI_URL=https://errkat4up-dambi.duckdns.org \
+//   DAMBI_TOKEN=<jwt> DAMBI_URL=https://dambi-sub.duckdns.org \
 //     node publish-remote.mjs            # publish all
 //   ... node publish-remote.mjs --dry    # print what would be sent, no POST
 
@@ -15,7 +15,12 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(__dirname, "out");
 const TOKEN = process.env.DAMBI_TOKEN;
-const BASE = process.env.DAMBI_URL || "https://errkat4up-dambi.duckdns.org";
+const productionBase = "https://dambi-sub.duckdns.org";
+const baseUrl = new URL(process.env.DAMBI_URL || productionBase);
+if (["errkat4up-dambi.duckdns.org", "dambi-policy.duckdns.org"].includes(baseUrl.hostname)) {
+  throw new Error(`DAMBI_URL points to a retired server. Set DAMBI_URL to ${productionBase}.`);
+}
+const BASE = baseUrl.href.replace(/\/$/, "");
 const DRY = process.argv.includes("--dry");
 
 if (!TOKEN && !DRY) {
