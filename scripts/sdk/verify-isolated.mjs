@@ -16,6 +16,7 @@ const runtimeTests = [
   "packages/core/tests/check.test.mjs",
   "packages/core/tests/scam-bundle.test.mjs",
   "packages/core/tests/adapters/scam-pool-history.test.mjs",
+  "packages/core/tests/adapters/scam-pool-creation.test.mjs",
   "packages/core/tests/adapters/scam-token-profile.test.mjs",
   "packages/core/tests/adapters/scam-fact-provider.test.mjs",
   "packages/core/tests/adapters/scam-analysis-probe.test.mjs",

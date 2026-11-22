@@ -74,7 +74,7 @@ export function verifyPoolCreation(
   if (supplied.logs.length === 0) return unknown("creation_evidence_missing");
   // Even duplicate copies are ambiguous at this boundary; do not select a winner.
   if (supplied.logs.length !== 1) return unknown("creation_ambiguous");
-  const log = supplied.logs[0];
+  const log: PoolCreationEvidence["logs"][number] = supplied.logs[0];
   if (!record(log) || log.removed !== false || !address(log.address)
       || !height(log.blockNumber) || !hash(log.blockHash) || !hash(log.transactionHash)
       || !integer(log.transactionIndex) || !integer(log.logIndex)
