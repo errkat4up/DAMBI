@@ -1,5 +1,31 @@
 # SDK 정책 입력과 Native 회귀
 
+## F5 — 동일 인정 블록 온체인 어댑터 착수 차단 사항
+
+- 작업: `t_18cd83b0` / 담당 D / branch 정보 미제공 / 상태: 선행 인터페이스 확인 대기, 구현 미완료.
+- 제공 기준: `3e5804144fbb5f18bc62448e70c892c02c016645`. 실제 작업 트리·커밋 포함 여부는 확인하지 않았다. 이번 변경은 이 인계 기록뿐이다.
+- 검증: 빌드·시험·RPC·QA·독립 리뷰 미실행. 통과·실패 건수는 없으며 커밋·푸시·배포도 수행하지 않았다.
+
+### 제공 기준선과 승인 계획의 연결 문제
+
+제공된 `packages/core/src/adapters/policy-api.ts`는 기존 `PolicySource`로 서명 envelope를 반환한다. 제공된 Core README와 `packages/core/tests/adapters/policy-api-core.test.mjs`는 갱신 실패 시 기존 정책 유지 및 교체 후 기존 plan의 snapshot 고정을 명시한다. 반면 F5에는 조회 불가와 확인된 폐기의 구분, 인정 블록에 결속된 사용 가능 기한, 새 활성 버전 확인 시 구버전 plan 무효화가 필요하다. 이 차이는 HTTP 동작을 변경해 해결하면 안 된다.
+
+구체적으로 `v1 plan → v2 활성 확인 → v1 evaluate`는 현재 HTTP 회귀에서 v1 평가 성공을 요구한다. 온체인 경로에는 별도의 무효화 집행이 필요하다. 또한 폐기를 단순 fetch rejection으로 전달하면 기존 정책 보존 동작 때문에 폐기가 집행되지 않는다. 어댑터가 조회 시각만 갱신하거나 envelope에 임의 metadata를 붙여도 Core의 기한 집행을 대신할 수 없다.
+
+제공 자료에는 다음 구현 계약이 없다.
+
+1. **F1/F3 Core 연결:** 활성·폐기 상태와 인정 블록·최종 사용 기한을 받는 공개 port 타입, TS runtime→WASM→Rust 전달 및 plan 무효화 인터페이스. 관련 `ports/policy.ts`, `core-runtime.ts`, Rust session과 WASM bridge는 이번 수정 허용 경로에도 없다. 제공된 공개 export만으로 후속 구현의 존재나 형식을 가정하지 않는다.
+2. **F4 Registry 연결:** 고정 ABI, scope 인코딩, 활성 버전·폐기 상태·서명 envelope 조회 함수 및 반환 형식, 기대 runtime code 또는 검증 가능한 인터페이스 식별 계약. 이 자료 없이 selector나 ABI tuple을 임의로 정하지 않는다.
+3. **공동 wire 계약:** 서명 원문의 `registry_ref` 형식과 버전·scope 결속 방식. parser·schema·publisher의 합의된 변경이 필요하며 기존 HTTP의 `registry_ref: null`은 유지해야 한다.
+
+### 필요한 인계와 권장 처리
+
+**확인 요청:** F1/F3·F4의 위 인터페이스를 포함하는 후속 기준 커밋과 해당 소스를 제공해 이 카드에 연결할지, 아직 없다면 A/B가 공동 계약을 먼저 인계하도록 이 카드의 해당 부분을 대기시킬지 확인한다. 승인된 F0의 구버전 plan 무효화 방향 자체를 다시 결정해 달라는 요청은 아니다.
+
+권장안은 A/B의 실제 타입·ABI를 인계받아 D가 `onchain-policy.ts`와 공개 adapter export, fake RPC 및 소비자 회귀를 구현하는 것이다. 기존 HTTP 시험의 snapshot 고정 assertion은 그대로 보존한다. 미지원 hash 기반 조회는 명시적으로 거절하고 `latest`로 폴백하지 않는다. 확정성 tag·허용 블록 지연·갱신 주기는 명시적 주입 설정으로 받고 GIWA에서 검증된 수치라고 주장하지 않는다.
+
+이 인계 전에는 기존 Core에 연결 가능한 온체인 `PolicySource`를 제공했다고 표시하지 않는다. fake RPC 회귀 실행 로그와 독립 리뷰는 구현 후 대기 항목이며, 실제 로컬 체인에서 소비자 deny까지 전달하는 검증은 별도 통합 카드다. 문서 작성이나 fake RPC 성공만으로 F5 전체 수용을 선언하지 않는다.
+
 ## Scam Filter — SF0 연결 정보 확인
 
 2026-10-19, [계획서 SF0-1](../../docs/scam-filter/mvp-design-plan.md#sf0-1--연결-대상측정-근거-확인) 범위에서 전달받은 연결 정보와 대표 거래를 공개 RPC에 읽기 전용으로 대조했다. **수동 RPC 확인 6개 항목 일치·0개 불일치:** 체인 ID, pair의 factory, factory의 getPair, token0·token1 구성, 대표 거래의 블록·성공 상태, pair의 Sync→Swap 순서. 자동화 시험 통과 수나 전체 DEX 검증을 뜻하지 않는다.
