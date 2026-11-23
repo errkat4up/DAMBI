@@ -1,0 +1,22 @@
+{
+  "id": "sanctioned-token-deny",
+  "schema_version": 2,
+  "trigger": {
+    "where": {
+      "action.tag": {
+        "in": [
+          "erc20_transfer",
+          "erc20_approve",
+          "swap"
+        ]
+      }
+    }
+  },
+  "_template": {
+    "sanctionedTokens": {
+      "cedar_set": "[\"0x6fa0be17e4bea2fcfa22ef89bf8ac9aab0ab0fc9\", \"0xf442ff10b8def89514560a66c0ad28777094636a\"]",
+      "default": "A7A5, wA7A5 (Ethereum)",
+      "meaning": "Token contracts whose transactions are prohibited by sanctions (lowercase 0x). Default: A7A5 and its wrapped form, banned by the EU 19th Russia sanctions package."
+    }
+  }
+}
