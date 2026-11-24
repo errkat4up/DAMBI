@@ -1,6 +1,6 @@
 const path = require("path");
 
-const DEFAULT_SERVER_URL = "https://errkat4up-dambi.duckdns.org";
+const DEFAULT_SERVER_URL = "https://dambi-sub.duckdns.org";
 
 function buildMode(env = process.env) {
   return env.DAMBI_EXTENSION_BUILD_MODE || env.NODE_ENV || "development";

@@ -12,12 +12,11 @@
 
 import { normalizeAuthToken } from "./auth-token";
 
-const CURRENT_PRODUCTION_BASE = "https://errkat4up-dambi.duckdns.org";
-// Retired host kept trusted so a stored override from an older install is
-// migrated forward instead of silently rejected.
-const RETIRED_PRODUCTION_BASE = "https://dambi-policy.duckdns.org";
+const CURRENT_PRODUCTION_BASE = "https://dambi-sub.duckdns.org";
+// Rewrite retired origins before making requests with stored credentials.
 const LEGACY_PRODUCTION_BASES = new Map([
-  [RETIRED_PRODUCTION_BASE, CURRENT_PRODUCTION_BASE],
+  ["https://errkat4up-dambi.duckdns.org", CURRENT_PRODUCTION_BASE],
+  ["https://dambi-policy.duckdns.org", CURRENT_PRODUCTION_BASE],
 ]);
 const URL_SCHEME_RE = /^[a-z][a-z\d+.-]*:/i;
 

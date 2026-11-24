@@ -34,7 +34,7 @@ Passed on the command line, or via a mode-specific gitignored env file:
 
 | var                                  | what                                                                                                | default                  |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------- | ------------------------ |
-| `DAMBI_SERVER_URL`                    | policy-server the SW + dashboard call (eval / auth / wallets)                                        | `http://127.0.0.1:8788`  |
+| `DAMBI_SERVER_URL`                    | policy-server the SW + dashboard call (eval / auth / wallets)                                        | `https://dambi-sub.duckdns.org` |
 | `REGISTRY_BASE_URL`                  | policy / token / adapter registry. **Required (https) for a prod build** — the guard fails otherwise | `http://localhost:8000`  |
 | `DAMBI_ALLOW_INSECURE_REGISTRY=1`     | bypass the prod registry guard (local smoke test only)                                              | —                        |
 
@@ -44,13 +44,11 @@ The server URL can also be switched at **runtime** from the dashboard's
 Env-file convention:
 
 - production builds read `browser-extension/.env`
-- development builds read `browser-extension/.env.development`
+- development builds read `.env.development` in `browser-extension/` for webpack and in `browser-extension/dashboard/` for Vite
 - command-line env vars still win in both modes
 
-This keeps a local production `.env` from accidentally pointing `yarn
-dev:chrome` or `cd dashboard && yarn dev` at prod. If you want dev to target a
-non-local server, export `DAMBI_SERVER_URL=...` for that command or put it in
-`.env.development`.
+To use the same local server in both development builds, run
+`export DAMBI_SERVER_URL=http://127.0.0.1:8788` in the shell that starts them.
 
 ### Production build (full, loadable)
 
@@ -74,11 +72,6 @@ TARGET_BROWSER=chrome yarn webpack --config webpack/webpack.dev.js --no-watch
 yarn workspace dambi-dashboard exec vite build --mode development
 ```
 
-That dev build targets `http://127.0.0.1:8788` by default. To point it
-elsewhere for a specific run, prefix both build commands with
-`DAMBI_SERVER_URL=https://<your-server-host>`, or write that value to
-`.env.development`.
-
 Or, for live iteration, run the two halves separately: `yarn dev:chrome`
 (webpack watch) **and** `cd dashboard && yarn dev` (dashboard at `:5173`, reached
 via the `dashboard-bridge` content script).
@@ -86,9 +79,7 @@ via the `dashboard-bridge` content script).
 ### Develop against a local server
 
 When you're changing **server** code too, run the policy-server locally and
-point the extension at it. Both paths below expose it on
-`http://127.0.0.1:8788` — which is already the extension's default, so a plain
-dev build targets it with no `DAMBI_SERVER_URL` at all.
+point the extension at it. Both paths below expose it on `http://127.0.0.1:8788`.
 
 - **Quick — `cargo run`:** copy the server's `.env.local.example` → `.env.local`
   (set `DATABASE_URL`, `REDIS_URL`), then `scripts/start-policy-server.sh local`.
@@ -105,8 +96,7 @@ Sanity check: `curl http://127.0.0.1:8788/readyz` → `200`.
 
 Then connect the extension, either way:
 
-- **Build-time** — default already targets local, so `yarn dev:chrome` (no env)
-  hits `127.0.0.1:8788`. To be explicit: `DAMBI_SERVER_URL=http://127.0.0.1:8788`.
+- **Build-time** — export `DAMBI_SERVER_URL=http://127.0.0.1:8788` before starting webpack and Vite.
 - **Runtime (no rebuild)** — dashboard → **Settings** → **로컬 (테스트)** preset
   (`http://127.0.0.1:8788`) → Save. The SW applies it immediately; the dashboard
   on next reload. Handy for flipping a prod build to your local server.

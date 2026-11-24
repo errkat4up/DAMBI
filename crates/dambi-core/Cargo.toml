@@ -21,6 +21,7 @@ p256.workspace = true
 policy-engine.workspace = true
 policy-state.workspace = true
 policy-transition.workspace = true
+scam-filter.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 serde_json_canonicalizer.workspace = true

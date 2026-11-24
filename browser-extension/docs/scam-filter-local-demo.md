@@ -99,7 +99,7 @@ const scamHostConfig = {
 
 예시는 `rpc_anchor + number_recheck`를 **명시적으로 선택**한다. 로그만 있는 블록의 이력은 RPC 로그 응답을 신뢰하고, 실제로 읽은 헤더와 기준 블록의 해시를 재검증해 숫자 블록으로 조회한 상태를 결속한다. 기본 `all_event_headers`의 이벤트 블록 헤더 전수 검증과 같은 보장은 아니다. 로그에 시각이 없으면 여전히 헤더 조회가 필요하므로 요청 수가 일정하다는 뜻도 아니다.
 
-24시간 이력과 warm-up을 두 후보 격자로 만들면 기존 AH 대상은 총 10,500개 point이므로 예시는 builder·SDK의 `maxPoints`를 20,000으로 둔다. provider 결과와 SDK 입력 수용량도 이 로컬 데이터 예시에 맞춰 16,000,000바이트로 명시했다. 이는 설계의 초기 512KB 후보를 운영 기본값으로 변경한 것이 아니다. 원자료·JSON 한도는 실제 알고리즘의 선언 상한을 대신하지 않으며, 실제 모듈의 더 작은 상한이나 작업 예산을 넘으면 판정 불가가 된다. 지원 대상·관측 구간을 바꿀 때는 이 한도들을 함께 조정한다.
+`dambi-v2/2`는 경계 값과 블록별 reserve 변경점을 보존하므로 point 수를 기간/bucketMs로 계산하지 않는다. 예시의 `maxPoints=20,000`은 후보 history 전체에 실제 생성한 점 수를 제한한다. provider 결과·SDK 입력의 16,000,000바이트도 시연 설정이며 운영 권장값이 아니다. cumulative·R2는 추가 24시간 이력이 필요하고 R2 작업 예산에 따라 더 작은 입력도 `resource_limit`이 될 수 있다. 지원 대상·관측 구간을 바꿀 때 실제 입력량과 전체 시간을 확인해야 한다.
 
 `factorySupport`·`adminSupport`는 실제 배포의 지원 근거를 확보했을 때만 `facts.scam`에 추가한다. 미설정으로 나이·관리자 이력 조회가 부분 결과가 되면 원래 사유를 유지한다. 주소가 같다는 이유만으로 지원 정보를 꾸미지 않는다.
 
@@ -125,7 +125,7 @@ await chrome.storage.local.set({ "scam-filter:host-config": scamHostConfig });
 
 **상태 해석과 복구**
 
-- 표준 배포용 SDK WASM에 실제 알고리즘이 없으면 지원 대상의 결과도 `insufficient / algorithm_unavailable`이다. 번들이 유효하다는 사실만으로 탐지가 완료되지 않는다. SDK가 `analysisMode: "stub"`를 반환하는 시험 결과는 화면에서 테스트 결과로 구분한다.
+- SF6 소스로 다시 빌드한 SDK는 서명 번들이 `algorithm: { id: "dambi.scam.window-rules", version: "0.2.0", contractVersion: 2 }`를 선언할 때 내장 구현을 선택한다. builder 호환성은 `dambi-v2/2`다. algorithm이 null이면 `insufficient / algorithm_unavailable`이며, 다른 구현 선언은 거절한다. `analysisMode: "stub"`인 시험 결과는 화면에서 테스트 결과로 구분한다. 서비스·시연 설정은 개발 중이며 실제 화면 확인은 연결 후 진행한다.
 - `quiet`는 실제 완료된 활성 검사 항목에만 적용한다. 부분·실패·미지원·비활성 상태는 성공 분석으로 표시하지 않는다. 현재 호스트는 보유 여부를 조회하지 않아 `unknown`으로 표시한다.
 - 초기화 자체가 실패한 `initialization_failed`는 해당 요청에 표시하며 **다음 요청이 다시 초기화**한다. 같은 요청 안에서 무한 재시도하지 않는다.
 - SDK는 최초 `refreshScam()` 실패를 정책 초기화와 격리한다. 따라서 Core 초기화는 성공했지만 스캠 번들이 unavailable인 경우가 있다. 이 호스트에는 번들 자동 갱신 스케줄이 없으므로 최초 수신 실패나 이후 만료에서 복구하려면 서비스를 준비한 뒤 Service Worker를 재시작하거나 설정 변경 이벤트를 발생시킨다. 동일 JSON을 그대로 다시 `set()`하면 변경 이벤트가 없을 수 있다. 필요하면 아래처럼 기존 설정을 보관한 뒤 제거·재설정한다.

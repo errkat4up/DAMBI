@@ -1,8 +1,8 @@
 # Scam Filter SF1 — SDK·알고리즘 연결 계약
 
-**공개 SDK API가 아닌 SF1 연결 계약이다.** [타입](types.ts)과 [스키마](contract.schema.json)는 담비와 알고리즘의 연결 경계를 정의한다. 기준은 [팀원 명세 v0.2](https://claude.ai/artifact/9FT22CC41pww8s72pxuenn)와 사용자에게 전달된 수정 합의다. SF2의 Rust 연결부는 [dambi-core::scam](../../crates/dambi-core/src/scam/mod.rs)에 두며 기존 Core 실행 경로·정책 Fact·Cedar·제품 번들은 변경하지 않는다. 실제 알고리즘·provider·결과 합성은 후속 단계다.
+이 문서는 담비 SDK와 알고리즘의 연결 계약이다. [타입](types.ts)과 [스키마](contract.schema.json)는 SDK 경계 형식을 정의하고, 실제 호출은 [Rust 어댑터](../../crates/dambi-core/src/scam/window_rules.rs)가 [scam-filter 0.2.0](../../crates/scam-filter/src/types.rs)의 규칙 필드로 변환한다. 공개 사용법은 [Core README](../../packages/core/README.md)를 따른다. SF6 연결 구현의 빌드·시험 상태는 [SDK 검증 기록](../../fixtures/sdk/README.md#sf6-1--실제-알고리즘-sdk-연결)에 둔다.
 
-디렉터리·SDK envelope의 `0.1`, 명세 문서의 `v0.2`, 알고리즘 wire의 `contractVersion: 1`은 별도 버전이다. 기존 문서 v0.1의 해상도·0값·창 선택 의미는 채택하지 않는다. 최초 연결 시 구현 ID·버전과 v0.2 인수 사례를 대조하며, 이후 의미가 바뀌면 wire 호환성을 다시 정한다. 실제 패키지·알고리즘 버전은 인수 전까지 꾸며 넣지 않는다.
+디렉터리·SDK envelope의 `0.1`, 알고리즘 패키지의 `0.2.0`, 숫자 `contractVersion: 2`는 별도 버전이다. 내장 구현은 `dambi.scam.window-rules@0.2.0`, builder는 `dambi-v2/2`다. 이전 계약 1·격자 builder와 호환된다고 간주하지 않으며 Rust/WASM·TS와 서명 번들의 호환성 선언을 함께 갱신해야 한다.
 
 ## 경계와 단위
 
@@ -23,18 +23,18 @@
 2. provider가 동일 `planId + chainId + referenceGroupId`에 기준 블록을 먼저 확보하고 두 메서드에 공유한다. 응답의 subject·기준 블록·스키마·builder를 계획과 대조한다. 로그 상한·과거 증거 블록·조회 누락·canonical hash 검사는 SF4의 책임이다.
 3. 나이는 factory `PairCreated`의 정확한 생성 근거, 과거 코드 존재의 검증된 하한, 미상으로 구분한다. 첫 Mint를 생성 시점으로 쓰지 않는다. X와 X1이 다르면 나이 검색의 추가 범위·호출 수도 처음부터 예산에 포함한다.
 4. 정확한 A<X는 신규, A≥X 또는 하한≥X는 기본이다. 하한<X·나이 미상은 신규를 임시 선택하지만 미발동을 quiet로 올리지 않는다. 선택된 후보 범위만 분석하고 선택 사유·두 후보 해시·적용 설정 해시를 남긴다.
-5. provider는 `PoolHistoryValue.histories`에 요청한 각 고유 격자의 `{gridOriginMs, history: PoolHistory}`를 반환한다. SDK가 나이 선택 후 해당 격자 하나를 알고리즘에 넘긴다. `TokenProfileValue`의 검증된 `age/events/coverage`를 연결부가 `TokenProfile`로 축약한다. 정확한 생성 시각 또는 검증된 하한만 전달하고 미상은 필드를 생략한다. 기존 `PoolAge`의 출처·검색 범위는 SDK envelope에 남긴다.
+5. provider는 `PoolHistoryValue.histories`에 요청한 각 고유 해상도 선언의 `{gridOriginMs, history: PoolHistory}`를 반환한다. 모든 후보에 같은 블록 변경점을 보존하고 SDK가 나이 선택 후 해당 후보 하나를 알고리즘에 넘긴다. `TokenProfileValue`의 검증된 `age/events/coverage`를 연결부가 `TokenProfile`로 축약한다. 정확한 생성 시각 또는 검증된 하한만 전달하고 미상은 필드를 생략한다. 기존 `PoolAge`의 출처·검색 범위는 SDK envelope에 남긴다.
 
 `ScamFactBatch`와 `FactBatch`는 구조상 호환된다. 이것은 전송 포트 재사용이지 보안 분리의 증명이 아니다. 스캠 결과를 기존 `facts::validate`·projection·Cedar에 보내면 안 된다. `optional:true`는 형식 오류·만료·크기 오류를 격리하지 않는다. 특정 지표 조회 불가와 실제 빈 이벤트/0값은 `unavailable/missing`과 원자료로 구분한다.
 
 ## 스냅샷·초기 상태 계약
 
-- 원천 로그는 알고리즘 입력이 아니다. 담비 builder는 검증한 풀의 로그를 블록·transaction·log index 순으로 정리하고, 각 격자 시각 **이하**의 마지막 확인된 reserve 상태를 사용한다. 같은 시각이면 마지막 로그가 반영된 상태다. 상태를 확인하지 못한 구간은 `missing`이며 이전 값으로 덮지 않는다. 조회가 완전하고 변화가 없음을 확인한 구간만 값 이어 채우기(forward fill)를 허용한다.
-- `bucketMs`와 SDK에 고정한 `gridOriginMs`가 격자를 정한다. 점은 오름차순·중복 없이 격자에 맞고 T 이하이며, T를 맞추려고 비격자 점을 추가하지 않는다. 풀 생성 이전 값은 만들지 않는다. 원본 reserve는 10진 정수 문자열, decimals는 0~255 정수다. U256 범위와 시간·정렬·격자·구간 관계는 의미 검증 대상이다.
-- 공통 조회는 두 후보의 X1·W 요구를 모두 포함하고 분석 기준 T는 고정 블록 시각을 유지한다. 두 후보가 서로 다른 격자를 요구하면 같은 원천 조회에서 각 격자를 만들고, `(history.bucketMs, gridOriginMs)`로 구분해 한 응답에 반환한다. 요청 격자 중복은 하나로 합치고 응답의 누락·중복·추가 격자는 거절한다. 조회 누락은 각 history의 missing에 남긴다. 선택 후 알고리즘에는 해당 후보의 최대 X1+W 범위로 잘라낸 history 하나만 전달하며 `fromMs`와 warm-up/누락 범위도 함께 조정한다. 임의 다운샘플링이나 해상도 변경으로 조건을 맞추지 않는다.
-- `missing`은 `(fromMs, toMs]`이며, 격자 누락을 모두 표현한다. 가격의 `reserveToken=0`은 스냅샷 자체를 삭제하지 않고 알고리즘이 **가격 룰의 계산 불가 점**으로 처리한다. 유동성 룰까지 자동으로 누락시키지 않는다. 관리자 이벤트 조회 불가는 해당 범위를 missing/unavailable로 남기며, 성공한 빈 이벤트와 구분한다.
-- 모듈의 `supports(rule)`가 필요한 초기 상태와 최소 warm-up 요구를 제공한다. W는 그 요구 이상으로 계획하되, 입력의 `warmup.complete`는 필요한 자료 확보 여부이지 상승·하락 방향이 이미 확정됐다는 보장이 아니다. 초기 상태의 실제 완성은 알고리즘이 판단해 룰 결과에 남긴다. 생성부터 전 기록이 있는 경우 존재하지 않는 생성 이전 자료는 요구하지 않는다.
-- v0.2의 기본 `bucketMs=12000`은 초기 프리셋 후보이며 GIWA 블록 간격과 다르다. 사용자는 지원 범위 안에서 바꿀 수 있고, 바뀐 Δ에 맞는 룰과 기본값 검증이 필요하다. X는 계속 **풀 생성 나이** 기준이다. 실제 기본 X·임계치·W는 연구 결과 인수 시 확정한다.
+- builder는 시작 경계의 확인된 reserve 상태와 **reserve가 변경된 모든 블록의 마지막 Sync**를 보존한다. 블록 내부 로그는 순서대로 처리하며 어느 Sync라도 잘못됐으면 그 블록을 누락으로 처리한다. 변화 없는 구간에는 반복 점을 생성하지 않고, 누락 이후 첫 확인된 Sync에서 새 구간을 시작한다.
+- 점은 오름차순·중복 없이 T 이하이며 풀 생성 이전 값을 만들지 않는다. `bucketMs/gridOriginMs`는 호환성을 위한 후보 해상도 메타데이터로 유지하며 변경점을 격자에 맞춰 삭제·이동하지 않는다. 같은 시각의 서로 다른 블록 변화를 현재 입력 형식으로 표현할 수 없으면 거절한다. 원본 reserve는 U256 범위 10진 문자열, decimals는 0~255 정수다.
+- 공통 조회는 두 후보의 X1·W를 모두 포함한다. 선택 후 해당 후보의 X1+W로 자르되 경계에서 유효한 이전 상태를 시작 값으로 보존한다. 누락을 가로지르거나 미래 Sync를 이용해 경계 값을 만들지 않는다. `fromMs`와 warm-up/누락 범위도 함께 조정한다.
+- `missing`은 **`[fromMs, toMs)`**다. 가격의 `reserveToken=0`은 가격 룰의 계산 불가 점이며 유동성 룰까지 자동 누락시키지 않는다. 관리자 이벤트 조회 불가는 missing/unavailable로 남기고 성공한 빈 이벤트와 구분한다.
+- `warmup.complete`는 모든 블록 변경점과 조회 누락을 충실히 전달했다는 호스트 선언이다. coverage 100%나 초기 상태 복원을 뜻하지 않는다. `false`면 step을 포함한 pool 룰을 clear로 만들 수 없다. 누락이 있으면 `partial_coverage`가 `history_unverified`보다 우선하고, 이미 확인된 fired는 보존한다.
+- 최소 W는 step·관리자 이벤트 0, cumulative·R2 24시간, window_drop은 windowSec다. 후보별 활성 룰 요구와 명시 W 중 큰 값을 계획한다. cumulative·R2는 유한 사전 이력의 근사이며 생성 이후 전체 이력과 동일함을 보장하지 않는다. 확인된 생성 시각 이전 자료는 요구하지 않는다. 운영 임계치·성능 권장값은 별도 검증 대상이다.
 
 ## 룰 의미 — v0.2 합의
 
@@ -45,13 +45,14 @@
 | R1 최소 해상도 | `lookbackSec × 1000 > (count − 1) × bucketMs` |
 | R2 최소 해상도 | `windowSec × 1000 > (count − 1) × bucketMs`; 등호는 `not_evaluable/resolution_too_coarse` |
 | window_drop 최소 창 | `windowSec × 1000 ≥ bucketMs`를 **MVP 지원 정책**으로 사용. 모든 계산 방식에서 수학적으로 필요한 조건이라는 뜻은 아님 |
-| R2 근거 | B=`max(T−X1, 확인된 생성 시각)`; `(max(B,end−X2),end]`의 최대 횟수, 동률이면 가장 늦은 end. 사건 0개면 근거 창 없음 |
+| R2 근거 | B=`max(T−X1, 확인된 생성 시각)`; `(max(B,end−X2),end]`의 최대 횟수, 동률이면 가장 늦은 end. 사건 0개면 `(B,T]` 관측 창 반환 |
+| window_drop 결과 | `observed`는 조건을 만족한 하락 사건 수, 결과 `threshold`는 1. bps 조건은 입력 `dropBps`에 유지. window는 마지막 사건의 창이며 events는 전체 관측 기간의 사건 중 제한된 근거 |
 | 유효한 0 | quote reserve 양수→0, token reserve가 양수인 가격의 양수→0은 유효한 −100% 관측 |
 | 계산 불가 | 가격 분모(token reserve) 0이면 구간·상태를 끊고 앞뒤를 잇는 사건을 만들지 않음 |
 | 기준값 0 | 0→양수는 백분율 사건 없이 다음 양수에서 상태 재시작 |
 | 완전성 | 범위 안의 계산 불가·누락 또는 필요한 초기 상태 미확정이면 clear 금지. 유효한 사건만으로 충족한 fired는 유지 |
 
-R1/R2 해상도 식은 **고정 격자·점당 사건 최대 1개**에서 필요한 사건 수를 담을 최소 조건이지 실제 발동이나 데이터 충족의 보장이 아니다. 모든 기간은 같은 단위로 변환하고 overflow 없이 비교한다. 이 조건을 warm-up이나 비격자 관리자 이벤트에 적용하지 않는다. 잘린 창은 실제 범위와 사건 수로 판단하고 W의 사건은 집계하지 않는다. 정확히 X2 간격인 사건은 함께 세지 않는다.
+R1/R2 해상도 식은 실제 모듈의 지원 정책으로 유지하며 변경점을 샘플링하는 근거로 사용하지 않는다. 모든 기간은 같은 단위로 변환하고 overflow 없이 비교한다. 이 조건을 warm-up이나 관리자 이벤트에 적용하지 않는다. 잘린 창은 실제 범위와 사건 수로 판단하고 W의 사건은 집계하지 않는다. 정확히 X2 간격인 사건은 함께 세지 않는다.
 
 사건 생성·고저점·윈도우 탐색·정밀도 구현은 팀원 영역이다. [인수 벡터](acceptance-cases.json)는 명세의 고정 입력·기대값을 옮긴 자료이며 실행 결과가 아니다. 기존 SF0-4의 수작업 사건 사례는 그대로 재사용하고, 그 스냅샷에서 사건을 계산했다고 소급 주장하지 않는다.
 
@@ -76,15 +77,16 @@ R1/R2 해상도 식은 **고정 격자·점당 사건 최대 1개**에서 필요
 | --- | --- |
 | partial_coverage | data_missing |
 | warmup_incomplete | initial_state_unknown |
+| history_unverified | history_unverified |
 | no_usable_segment | data_missing |
 | resolution_too_coarse | unsupported_resolution |
 | metric_unavailable | field_unavailable |
 
 `outcome`은 SDK `state`로 1:1 대응한다. 근거의 observed/threshold/window/events/coverageBps와 원 reason은 evidence에 보존한다. SDK `AlgorithmInput.coverage`는 검증된 provider의 poolHistory/tokenProfile coverage를 보관하고, 필요한 초기 상태의 충족 여부는 모듈 결과와 해당 룰 요구사항에서 가져온다. 슬림 알고리즘 요청에 없는 `fromBlock`을 기준 블록으로 꾸며 넣지 않는다. 이 메타데이터는 알고리즘에 전달하지 않는다. 여러 결함이 있으면 원자료·나이·신선도 사유를 추가하되 알고리즘 결과를 조용히 clear로 고치지 않는다.
 
-SF2의 `AlgorithmModule`은 위 모듈 포트의 Rust 표현이고, `AlgorithmAdapter::evaluate`는 고정된 `PinnedInvocation`과 정규화 요청 JSON을 검증해 `Result<ValidatedAnalysis, FailureReason>`을 반환한다. 모듈의 등록 `analysisMode`와 출력 모드는 일치해야 하며 stub은 `cfg(test)`에서만 명시 주입한다. `PinnedInvocation`의 계획·coverage는 SF3가 소유·검증할 값이지 호스트가 제출한 판정을 신뢰하는 경로가 아니다. 원천 로그의 스냅샷 생성은 SF4, CoreSession/WASM export·최종 판정 합성은 SF3에서 연결한다. 실제 알고리즘 crate를 Core의 필수 의존성으로 추가하지 않으며, 인수 시 호출 측의 명시적 구현체 주입으로 조립한다.
+`AlgorithmModule`은 위 모듈 포트의 Rust 표현이고, `AlgorithmAdapter::evaluate`는 고정된 `PinnedInvocation`과 정규화 요청 JSON을 검증해 `Result<ValidatedAnalysis, FailureReason>`을 반환한다. 모듈의 등록 `analysisMode`와 출력 모드는 일치해야 한다. stub은 시험 빌드에서만 명시 주입한다. `PinnedInvocation`의 계획·coverage는 Native 계획이 소유·검증하며 호스트가 제출한 판정을 신뢰하지 않는다. SF6에서 실제 알고리즘 crate를 Core 의존성으로 연결했다. 검증된 번들의 algorithm이 내장 ID·버전·계약과 정확히 일치할 때만 사용하며 null은 `algorithm_unavailable`, 다른 구현 선언은 설치 오류다. 번들로 외부 코드를 내려받지 않는다.
 
-입력 바이트 상한을 파싱 전에, 배열 개수·격자·누락·룰/대상/기준 블록을 호출 전에 검사한다. 결과는 버전·결속·룰별 상태·근거·크기와 원자료 완전성을 검사하되 사건 생성이나 최대 창 탐색을 다시 계산하지 않는다. 벽시계 기한은 호출 전후에 확인하고 함수 내부 작업량은 모듈이 협력적으로 제한한다. 무한 실행·panic·WASM trap·OOM을 선점 차단한다는 보장은 아니다. SF2 실행 명령과 검증 상태는 [SDK 검증 기록](../../fixtures/sdk/README.md#sf2-알고리즘-연결부테스트-대체-모듈)에 둔다.
+입력 바이트 상한을 파싱 전에, 배열 개수·정렬·누락·룰/대상/기준 블록을 호출 전에 검사한다. 결과는 버전·결속·룰별 상태·근거·크기와 원자료 완전성을 검사하되 사건 생성이나 최대 창 탐색을 다시 계산하지 않는다. 벽시계 기한은 호출 전후에 확인한다. 내장 어댑터는 R2의 제곱 비용을 포함한 보수적 작업량을 호출 전에 제한한다. 무한 실행·panic·WASM trap·OOM을 선점 차단한다는 보장은 아니다.
 
 ## 오류·수명주기·기한
 
@@ -103,7 +105,7 @@ SF2의 `AlgorithmModule`은 위 모듈 포트의 Rust 표현이고, `AlgorithmAd
 
 `kind/schema`, env/profile, 발행/만료, engine/builder/알고리즘 호환성, 지원 체인·factory·quote, 프리셋을 별도 검증한다. sequence는 **수치 비교**하며 동일 scope의 역행·동일 sequence의 다른 내용을 거절한다. 갱신은 전부 검증한 후 교체하며 실패는 기존 정책 snapshot을 바꾸지 않는다. 이전 스캠 번들도 유효한 동안만 사용하고 만료가 sequence 기준을 지우지 않는다. 모델은 `null`; 레지스트리·노드·꼬리 발급은 추가하지 않는다.
 
-JSON Schema는 **룰·SDK 서명 envelope·정규화 데이터·알고리즘 요청/결과의 구조**를 정의한다. 전체 스캠 번들 payload·SDK report는 타입과 이 계약으로 정의하며 런타임 검증은 후속 단계다. 다음은 스키마만으로 완료되지 않는다.
+JSON Schema는 **룰·SDK 서명 envelope·정규화 데이터·SDK 경계 요청/결과의 구조**를 정의한다. 전체 스캠 번들 payload·SDK report는 타입과 이 계약을 따르며 Native에서 런타임 검증한다. 다음은 스키마만으로 완료되지 않는다.
 
 - X2≤X1, ID 유일성·override 대상과 종류 일치, 후보별 전체 설정 검증, 공통 입력 준비 가능 여부.
 - 알고리즘이 지원하는 metric/mode/스위칭/관리자 이벤트, 해상도·W·자원 상한, 양방향 임계치의 해석. 상승률에 하락률 상한을 공통 적용하지 않는다.
@@ -112,11 +114,11 @@ JSON Schema는 **룰·SDK 서명 envelope·정규화 데이터·알고리즘 요
 
 ## 자원 한도와 실제 모듈 인수
 
-초기 후보는 대상 8개·룰 16개·20,000점/대상·근거 64개/룰·결과 512KiB다. 제품 성능 보장값이 아니며 SDK 한도와 모듈 지원 한도 중 더 엄격한 값을 적용한다. 입력 크기·개수는 할당/호출 전에 확인하고, 알고리즘은 전달받은 작업량 상한을 협력적으로 지켜야 한다. 작업량 소진은 `timeout`, 입력·출력 크기 한도는 `resource_limit`로 구분한다. 논리 작업 단위와 지원 예산은 구현 버전에 결속하며 해당 제한을 지원하지 않는 모듈은 연결하지 않는다. 벽시계 deadline은 SDK 소유이고 순수 함수 내부에 시계 조회를 요구하지 않는다.
+초기 후보는 대상 8개·룰 16개·20,000점/대상·근거 64개/룰·결과 512KiB다. 제품 성능 보장값이 아니며 SDK 한도와 모듈 지원 한도 중 더 엄격한 값을 적용한다. 실제 라이브러리의 관리자 이벤트 상한은 1,000개다. 내장 어댑터는 `window-rules-bounded-visits/1` 작업 추정치와 크기·개수를 호출 전에 검사하고 초과를 `resource_limit`로 반환한다. 실제 deadline 초과는 `timeout`이며 입력 자르기나 정상 판정으로 바꾸지 않는다. 작업 추정치는 시간 보장이 아니므로 R2를 포함한 최종 성능은 실측해야 한다.
 
 모듈 로딩/등록은 Native 연결부의 명시적 구성으로 한다. 미등록은 unavailable, stub은 시험에서만 명시 주입하며 제품 기본값으로 연결하지 않는다. 기능을 구성한 뒤의 스캠 번들 조회/검증 실패는 스캠만 unavailable로 남기고 유효한 정책 초기화를 실패시키지 않는다. 잘못된 로컬 설정 자체는 설정 시 거절한다.
 
-실제 인수 시 팀원이 제공할 것은 Rust 패키지·ID/버전·지원 룰/초기 상태 요구/작업량 제한과 Python/Rust 공통 기대값이다. 정상 오류 격리와 trap/OOM 격리는 같은 보장이 아니다. SF1에서 안전성을 달성했다고 표시하지 않고 실제 Native/WASM 인수에서 확인한다. 공개 페이지의 `test_ref.py` 통과 표시는 **팀원 보고**이며 파일과 실행 결과를 직접 확인한 것이 아니다.
+알고리즘 소스·기대값은 인수했고 기존 독립 시험 결과는 SDK 검증 기록에 남겼다. 이번 Native/WASM 조립은 별도 검증해야 한다. 정상 오류 격리와 trap/OOM 격리는 같은 보장이 아니다.
 
 X1=24시간의 최초 조회만으로 예산을 소진할 수 있으므로 부분 입력과 평가 여유를 합의한다. 400개 표본 결과·온체인 레지스트리·실제 LP 거래 확보를 이 계약 초안의 선행 조건으로 추가하지 않는다. 실제 LP 지원은 여전히 미완이다.
 

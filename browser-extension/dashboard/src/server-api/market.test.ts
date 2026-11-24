@@ -41,25 +41,25 @@ describe("dashboard marketplace API client", () => {
     await watchListing("listing/id");
 
     expect(fetchMock.mock.calls[0][0]).toBe(
-      "https://errkat4up-dambi.duckdns.org/market/listings/safe%2Flisting",
+      "https://dambi-sub.duckdns.org/market/listings/safe%2Flisting",
     );
     expect(fetchMock.mock.calls[1][0]).toBe(
-      "https://errkat4up-dambi.duckdns.org/market/listings/id/listing%2Fid/versions/1.2.3%2Bbuild%2Fmeta",
+      "https://dambi-sub.duckdns.org/market/listings/id/listing%2Fid/versions/1.2.3%2Bbuild%2Fmeta",
     );
     expect(fetchMock.mock.calls[2][0]).toBe(
-      "https://errkat4up-dambi.duckdns.org/market/listings/id/listing%2Fid",
+      "https://dambi-sub.duckdns.org/market/listings/id/listing%2Fid",
     );
     expect(fetchMock.mock.calls[3][0]).toBe(
-      "https://errkat4up-dambi.duckdns.org/market/reviews/review%2Fid/report",
+      "https://dambi-sub.duckdns.org/market/reviews/review%2Fid/report",
     );
     expect(fetchMock.mock.calls[4][0]).toBe(
-      "https://errkat4up-dambi.duckdns.org/market/reports/report%2Fid",
+      "https://dambi-sub.duckdns.org/market/reports/report%2Fid",
     );
     expect(fetchMock.mock.calls[5][0]).toBe(
-      "https://errkat4up-dambi.duckdns.org/market/reviews/review%2Fid/helpful",
+      "https://dambi-sub.duckdns.org/market/reviews/review%2Fid/helpful",
     );
     expect(fetchMock.mock.calls[6][0]).toBe(
-      "https://errkat4up-dambi.duckdns.org/market/listings/id/listing%2Fid/watch",
+      "https://dambi-sub.duckdns.org/market/listings/id/listing%2Fid/watch",
     );
   });
 

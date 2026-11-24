@@ -45,23 +45,23 @@ describe("dashboard wallet API client", () => {
     await patchWallet("0xA100000000000000000000000000000000000001", { label: "Vault" });
     await deleteWallet("0xA100000000000000000000000000000000000001");
 
-    expect(fetchMock.mock.calls[0][0]).toBe("https://errkat4up-dambi.duckdns.org/wallets");
+    expect(fetchMock.mock.calls[0][0]).toBe("https://dambi-sub.duckdns.org/wallets");
     expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body))).toEqual({
       address: "0xa100000000000000000000000000000000000001",
       chains: ["eip155:1"],
       label: "Cold",
     });
     expect(fetchMock.mock.calls[1][0]).toBe(
-      "https://errkat4up-dambi.duckdns.org/wallets/0xa100000000000000000000000000000000000001/sync",
+      "https://dambi-sub.duckdns.org/wallets/0xa100000000000000000000000000000000000001/sync",
     );
     expect(fetchMock.mock.calls[2][0]).toBe(
-      "https://errkat4up-dambi.duckdns.org/wallets/0xa100000000000000000000000000000000000001/approvals?with_risk=true",
+      "https://dambi-sub.duckdns.org/wallets/0xa100000000000000000000000000000000000001/approvals?with_risk=true",
     );
     expect(fetchMock.mock.calls[3][0]).toBe(
-      "https://errkat4up-dambi.duckdns.org/wallets/0xa100000000000000000000000000000000000001",
+      "https://dambi-sub.duckdns.org/wallets/0xa100000000000000000000000000000000000001",
     );
     expect(fetchMock.mock.calls[4][0]).toBe(
-      "https://errkat4up-dambi.duckdns.org/wallets/0xa100000000000000000000000000000000000001",
+      "https://dambi-sub.duckdns.org/wallets/0xa100000000000000000000000000000000000001",
     );
   });
 
@@ -106,13 +106,13 @@ describe("dashboard wallet API client", () => {
     await getSpender("0xA100000000000000000000000000000000000001");
 
     expect(fetchMock.mock.calls[0][0]).toBe(
-      "https://errkat4up-dambi.duckdns.org/wallets/0xa100000000000000000000000000000000000001/positions",
+      "https://dambi-sub.duckdns.org/wallets/0xa100000000000000000000000000000000000001/positions",
     );
     expect(fetchMock.mock.calls[1][0]).toBe(
-      "https://errkat4up-dambi.duckdns.org/wallets/0xa100000000000000000000000000000000000001/pending",
+      "https://dambi-sub.duckdns.org/wallets/0xa100000000000000000000000000000000000001/pending",
     );
     expect(fetchMock.mock.calls[2][0]).toBe(
-      "https://errkat4up-dambi.duckdns.org/spenders/0xa100000000000000000000000000000000000001",
+      "https://dambi-sub.duckdns.org/spenders/0xa100000000000000000000000000000000000001",
     );
   });
 

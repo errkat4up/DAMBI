@@ -306,7 +306,7 @@ Successful built-in method values include version-1 `verification` metadata:
 the modes, raw timestamp source kinds (`header` / `rpc_log`), reuse status,
 original collection time range and final verification time. `timeSources`
 describes raw evidence supplied to each method, not the source of every output
-grid point; a final header check does not erase an original log timestamp source.
+boundary/change point; a final header check does not erase an original log timestamp source.
 Current fresh batches use `reuse: "none"` and their original `observedAt` for
 both collection-range endpoints. A method reusing logs declares
 `reuse: "interval_cache"`, preserving the original raw collection range while its
@@ -321,7 +321,14 @@ check; that check cannot predate `Fact.observedAt` or exceed allowed clock skew.
 Fresh (`reuse: "none"`) observations cannot predate that Fact's collection start.
 These are checked provider declarations, not cryptographic proof of source data.
 Rebuild the matching Rust/WASM with TypeScript: older Core artifacts reject the
-new wrapper fields. The pure algorithm's wire contract remains version 1.
+new wrapper fields. The built-in detector now uses numeric algorithm contract 2,
+distinct from the SDK bundle schema `"0.1"`. Builder `dambi-v2/2` retains the
+boundary state and every changed block's final reserves. `bucketMs` no longer
+samples away changes; missing intervals are `[fromMs, toMs)`. `warmup.complete`
+asserts faithful history including explicit gaps, not full coverage. Cumulative
+R1 and R2 request at least 24 hours of prefix; window-drop requests its window
+length, and step/event-count add no minimum prefix. This finite prefix does not
+guarantee equivalence to replaying all history since creation.
 
 `rpc.limits.minRequestIntervalMs` sets minimum request-start spacing (default 0
 for compatibility). Spacing and rate-limit cooldown are shared across batches
@@ -491,6 +498,79 @@ endpoint credentials to tracked files. Reports omit endpoints and headers;
 failures remain in the denominator and small-sample percentiles are not production
 performance claims. Node reachability does not establish extension reachability.
 
+## Real-algorithm SDK measurement (SF6-2, development)
+
+`scripts/sdk/scam-analysis-probe.mjs` runs the production `createCore().check()`
+path with live RPC data and the built-in `dambi.scam.window-rules@0.2.0` detector.
+It reuses the data probe's RPC budgets, preparation/cache support and telemetry.
+The default request is the recorded GIWA ETH swap. Policy/scam bundles are freshly
+signed **in memory with repository test-only keys**, trusted only by this local
+probe. No transaction is signed or submitted, and no service is created or changed.
+This isolates SDK measurement while the actual bundle services are being developed;
+it excludes bundle HTTP retrieval, extension startup, confirmation UI and user action.
+
+After SF6-1's production WASM build, validate the changed TypeScript and measurement
+code. These tests use local RPC fixtures, not external endpoints:
+
+```sh
+yarn workspace @dambi/core exec tsc -p tsconfig.build.json &&
+yarn workspace @dambi/core exec tsc -p ../../contracts/scam-filter-v0.1/tsconfig.json &&
+node --test packages/core/tests/adapters/scam-analysis-probe.test.mjs \
+  packages/core/tests/adapters/scam-data-probe.test.mjs \
+  packages/core/tests/adapters/scam-sw-diagnostic.test.mjs
+```
+
+Then measure the unprepared SDK check with its 2,500ms budget:
+
+```sh
+SCAM_HISTORY_VERIFICATION=rpc_anchor SCAM_REPEATS=3 \
+  node scripts/sdk/scam-analysis-probe.mjs
+```
+
+The default demo enables cumulative R1 and R2 with a 24-hour observation window.
+Core raises their prefix to 24 hours, so this requests **up to 48 hours**. Thresholds
+(500 bps, count 3; R2 window up to one hour) are diagnostic, not calibrated defaults.
+`all_event_headers` remains the default unless the verification flag is provided.
+Requested settings and actual `plannedHistories`/analysis binding ranges are reported
+separately. No factory/admin capability is invented: unknown age can keep the result
+insufficient even if the algorithm runs. Supply only verified deployment declarations
+through the existing `SCAM_FACTORY_SUPPORT_JSON`/`SCAM_ADMIN_SUPPORT_JSON` options.
+
+For a separately budgeted preparation followed by 2,500ms checks:
+
+The analysis probe's cache retains scans up to 200,000 blocks (about 48 hours
+at a one-second cadence, with margin). The data-only probe keeps its original
+100,000-block default. `SCAM_CACHE_MAX_BLOCK_SPAN` can explicitly set either
+probe's cap from 1 to 1,000,000; this is a storage bound, not a time-to-block
+conversion or a wider query. Entry/byte/TTL caps remain unchanged. A scan wider
+than this cap is not cached, so preparation alone does not prove a warm check.
+Confirm returned `verification.reuse` and the request counts.
+
+```sh
+SCAM_HISTORY_VERIFICATION=rpc_anchor SCAM_HISTORY_CACHE=1 \
+SCAM_PREPARE_TIMEOUT_MS=60000 SCAM_REPEATS=3 \
+  node scripts/sdk/scam-analysis-probe.mjs
+```
+
+Initialization and preparation are separate report entries, not check-latency samples.
+For a cold diagnostic use `SCAM_TIMEOUT_MS=60000` with cache/preparation unset; this
+does not change the 2,500ms comparison target. `provider` timings exclude the algorithm,
+while trial `durationMs` covers the SDK check. `successOnlyLatencyMs` includes only
+complete real analyses; `completedLatencyMs` also includes partial/insufficient results.
+Failures stay in ratio denominators. `insufficientRatio`, `partialWarnings`, `timeouts`
+and `noTimeBudget` retain their separate meanings. Small-sample p50/p95 are descriptive.
+Partial or failed analysis exits with code 1; inspect the JSON instead of treating that
+as a script crash. A resource-limit result is not evidence of RPC latency or detection.
+
+Existing RPC/target/cache options also apply. `SCAM_RULES_JSON` accepts explicit active
+SDK rules, still validated by Core. `SCAM_WARMUP_SEC` accepts 0–86,400 and cannot lower
+the algorithm's minimum. For another request or multiple targets, `SCAM_CASE_FILE`
+is a local JSON file `{ "request": <CheckRequest>, "decoders": { "schema_version": 1,
+"bundles": [...] } }`; use corresponding verified `SCAM_TARGETS_JSON` entries. Core
+must extract exactly those targets, and mismatches are rejected before RPC. The probe
+does not synthesize multi-pool transactions or infer deployment capabilities. Real
+extension confirmation and complete SF6-2 performance acceptance remain separate.
+
 ## Signed Scam Filter bundles (SF5-1, development)
 
 The signed configuration channel is separate from policy snapshots and market
@@ -521,7 +601,7 @@ Core verifies original UTF-8 bytes using P-256/SHA-256 and padded Base64 P1363
 signatures against locally configured `scam` role keys, distinct from policy and
 Decoder trust keys. It checks scope, validity, compatibility, rules, resource
 bounds and sequence before replacing the snapshot. Compatibility accepts `*` or
-the exact version; the current builder is `dambi-v2/1`. Lower sequences and changed
+the exact version; the current builder is `dambi-v2/2`. Lower sequences and changed
 payload bytes at the same sequence are rejected. Identical payload bytes at the
 same sequence are idempotent. New plans receive the replacement; existing plans
 retain their snapshot and still enforce its expiry. Sequence memory is scoped to
@@ -532,10 +612,20 @@ for market analysis. A failed refresh leaves policy and the previous scam
 snapshot unchanged; expiry still makes scam evaluation `insufficient`. Initial
 scam-source failures emit `scam_bundle_unavailable` and preserve policy service.
 Caller cancellation still rejects initialization. Missing scam configuration
-performs no scam fetch. Bundle installation does not supply an algorithm:
-active supported rules with no module report `algorithm_unavailable`, never
-`quiet`. Uncalibrated R1/R2 remain disabled in default-purpose presets; explicit
-demo-purpose presets may enable them.
+performs no scam fetch. A signed bundle selects the built-in detector with
+`algorithm: { id: "dambi.scam.window-rules", version: "0.2.0", contractVersion: 2 }`.
+An unknown identity/version is rejected; `algorithm: null` retains
+`algorithm_unavailable` for active supported rules. No executable code is fetched.
+Rebuild Rust/WASM and TypeScript together and issue matching bundle compatibility
+before using this path. Uncalibrated R1/R2 remain disabled in default-purpose
+presets; explicit demo-purpose presets may enable them.
+
+The adapter bounds input, evidence and conservative work estimates before the
+synchronous call, including R2's quadratic search cost. Exceeding these bounds
+returns `resource_limit`; wall-clock expiry returns `timeout`. These limits do
+not establish end-to-end latency. `window_drop.observed` is a count of qualifying
+drop events (result threshold 1); its bps condition stays in the requested rule.
+Unverified history keeps `history_unverified` instead of becoming `quiet`.
 
 Local issuance uses `registryV2/scripts/publish-scam-bundle.ts` with an explicit
 scam-only key path/ID and a complete payload draft:

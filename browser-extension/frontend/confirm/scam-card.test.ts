@@ -28,7 +28,7 @@ function target(): TargetReport {
       settingsHash: HASH, settingsHashScheme: "sha256-jcs-scam-v1",
       bundleSequence: "1", selectedPreset: "established", selectionReason: "exact_mature",
       effectiveSettingsHash: HASH,
-      algorithm: { id: "fixture", version: "1", contractVersion: 1 },
+      algorithm: { id: "fixture", version: "1", contractVersion: 2 },
       builderVersion: "1", fromMs: NOW - 60_000, toMs: NOW,
       bucketMs: 1_000, gridOriginMs: 0, warmupSec: 1,
     },

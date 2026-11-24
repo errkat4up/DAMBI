@@ -19,12 +19,11 @@ import { getAccessToken, getRefreshToken, setTokens } from "./tokenStore";
 
 declare const DAMBI_SERVER_URL: string | undefined;
 
-const CURRENT_PRODUCTION_BASE = "https://errkat4up-dambi.duckdns.org";
-// Retired hosts still trusted so an existing install's stored override (or a
-// carried redirect) is migrated forward instead of silently rejected.
-const RETIRED_PRODUCTION_BASE = "https://dambi-policy.duckdns.org";
+const CURRENT_PRODUCTION_BASE = "https://dambi-sub.duckdns.org";
+// Rewrite retired origins before making requests with stored credentials.
 const LEGACY_PRODUCTION_BASES = new Map([
-  [RETIRED_PRODUCTION_BASE, CURRENT_PRODUCTION_BASE],
+  ["https://errkat4up-dambi.duckdns.org", CURRENT_PRODUCTION_BASE],
+  ["https://dambi-policy.duckdns.org", CURRENT_PRODUCTION_BASE],
 ]);
 const URL_SCHEME_RE = /^[a-z][a-z\d+.-]*:/i;
 const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;

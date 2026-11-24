@@ -20,7 +20,7 @@ use crate::bundle::{KeyRole, TrustedKeys, VerificationKey};
 use crate::scam::*;
 
 const NOTICE: &str = "patterns_only_no_sellability_guarantee";
-const BUILDER_VERSION: &str = "dambi-v2/1";
+const BUILDER_VERSION: &str = "dambi-v2/2";
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -358,13 +358,25 @@ impl State {
                 return Ok(());
             }
         }
-        // Module linking is a separate integration step. Never copy a test
-        // fixture module into an authenticated production bundle installation.
+        // A signed declaration selects only the exact built-in implementation.
+        // It cannot download code, choose a stub or silently use another version.
+        let module = if let Some(identity) = &bundle.compatibility.algorithm {
+            let real = crate::scam::window_rules::WindowRulesModule;
+            if *identity != real.identity() {
+                return Err(SessionError::new(
+                    "INVALID_SCAM_BUNDLE",
+                    "scam algorithm identity is not installed",
+                ));
+            }
+            Some(Rc::new(real) as Rc<dyn AlgorithmModule>)
+        } else {
+            None
+        };
         self.installed = Some(Rc::new(Installed {
             bundle,
             digest,
             builder_version: BUILDER_VERSION.into(),
-            module: None,
+            module,
         }));
         Ok(())
     }
@@ -950,21 +962,31 @@ fn effective_pair(
         preset.rules.extend(settings.additional_rules.clone());
         validate_preset(preset, limits)?;
         preset.rules.retain(RuleSpec::enabled);
-    }
-    let span = pair
-        .new_market
-        .rules
-        .iter()
-        .chain(&pair.established.rules)
-        .map(RuleSpec::lookback_sec)
-        .max()
-        .unwrap_or(0)
-        .saturating_add(pair.new_market.warmup_sec.max(pair.established.warmup_sec))
-        .saturating_mul(1000);
-    for preset in [&pair.new_market, &pair.established] {
-        if span / preset.bucket_ms + 2 > limits.max_points {
-            return Err(config_error("candidate union exceeds maxPoints"));
+        if bundle.compatibility.algorithm.as_ref()
+            == Some(&crate::scam::window_rules::WindowRulesModule.identity())
+        {
+            let required = preset
+                .rules
+                .iter()
+                .map(crate::scam::window_rules::minimum_warmup_sec)
+                .max()
+                .unwrap_or(0);
+            preset.warmup_sec = preset.warmup_sec.max(required);
+            if preset.warmup_sec > 86_400
+                || preset.rules.iter().any(|rule| {
+                    !matches!(
+                        crate::scam::window_rules::WindowRulesModule.supports(rule),
+                        AlgorithmSupport::Supported { .. }
+                    )
+                })
+            {
+                return Err(config_error("unsupported algorithm parameters or warm-up"));
+            }
         }
+    }
+    for preset in [&pair.new_market, &pair.established] {
+        // Sparse block changes are bounded by the provider and input validator;
+        // elapsed time / bucketMs is no longer a point count.
         if bundle
             .support
             .iter()
@@ -1032,10 +1054,11 @@ fn validate_bundle(
             "*" | env!("CARGO_PKG_VERSION")
         )
         || !(compat.builder_range == "*" || compat.builder_range == builder)
-        || compat
-            .algorithm
-            .as_ref()
-            .is_some_and(|a| a.id.is_empty() || a.version.is_empty() || a.contract_version != 1)
+        || compat.algorithm.as_ref().is_some_and(|a| {
+            a.id.is_empty()
+                || a.version.is_empty()
+                || a.contract_version != scam_filter::CONTRACT_VERSION
+        })
         || bundle.presets.is_empty()
         || bundle.support.is_empty()
     {
@@ -1622,6 +1645,11 @@ impl Plan {
                 || history.builder_version != installed.builder_version
                 || history.points.len() as u64 > self.config.limits.max_points
                 || history.missing.len() as u64 > self.config.limits.max_points
+                || history.points.windows(2).any(|w| w[0].t_ms >= w[1].t_ms)
+                || history
+                    .missing
+                    .windows(2)
+                    .any(|w| w[0].to_ms > w[1].from_ms)
                 || history
                     .points
                     .iter()
@@ -1659,10 +1687,28 @@ impl Plan {
         let mut history = grid.history.clone();
         history.from_ms = from;
         history.warmup.from_ms = from;
-        // This is a data-availability flag, not a cached direction/zigzag state.
-        // Never promote false to true. SF2 checks selected warm-up gaps/invalid
-        // points and requires the module's freshly computed warmupComplete too.
-        history.points.retain(|point| point.t_ms >= from);
+        // Preserve the value effective at the selected boundary, including when
+        // it falls between sparse changes. A gap or pre-creation value cannot seed it.
+        let boundary = from.max(created.unwrap_or(0));
+        let seed = history
+            .points
+            .iter()
+            .rev()
+            .find(|point| point.t_ms <= boundary)
+            .filter(|point| {
+                created.is_none_or(|c| point.t_ms >= c)
+                    && !history
+                        .missing
+                        .iter()
+                        .any(|gap| gap.from_ms <= boundary && gap.to_ms > point.t_ms)
+            })
+            .cloned();
+        history.points.retain(|point| point.t_ms >= boundary);
+        if let Some(mut seed) = seed.filter(|point| point.t_ms < boundary) {
+            seed.t_ms = boundary;
+            history.points.insert(0, seed);
+        }
+        // Never promote an unverified host history to verified while slicing.
         history.missing = clip_intervals(&history.missing, from, end);
         let profile_from = end.saturating_sub(
             preset

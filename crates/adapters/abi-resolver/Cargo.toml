@@ -17,7 +17,7 @@ serde_json.workspace = true
 hex.workspace = true
 thiserror.workspace = true
 tracing = "0.1"
-rusqlite = { version = "0.32", features = ["bundled"], optional = true }
+rusqlite = { version = "0.41.1", default-features = false, features = ["bundled", "cache", "libsqlite3-sys"], optional = true }
 
 [features]
 # `sqlite` enables the SQLite-backed Sourcify dump tier (`SqliteSourcifyIndex`)

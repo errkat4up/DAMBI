@@ -198,9 +198,9 @@ yarn build:ext         # chrome (webpack) + dashboard (vite) → dist/chrome/
 yarn dev:chrome        # webpack --watch; run `cd dashboard && yarn dev` alongside for the dashboard
 ```
 
-Build-time config is via env vars — most importantly `DAMBI_SERVER_URL` (the
-policy-server the extension calls; default `http://127.0.0.1:8788`) and
-`REGISTRY_BASE_URL`. See [`browser-extension/README.md`](browser-extension/README.md)
+The extension defaults to `https://dambi-sub.duckdns.org`. Set
+`DAMBI_SERVER_URL=http://127.0.0.1:8788` for a local policy-server.
+Set `REGISTRY_BASE_URL` separately for the registry. See [`browser-extension/README.md`](browser-extension/README.md)
 for the full matrix, load instructions, and the local-server workflow.
 
 ### policy-server (local)
@@ -221,23 +221,24 @@ in-extension OAuth flow. For a prod-like local Kubernetes loop see
 
 ## Deployment
 
-The reference deployment of `policy-server` runs on **Google Cloud Run** in
-`asia-northeast1`, fronted by a DuckDNS custom domain:
+The reference deployment of `policy-server` uses **Google Cloud Run** in
+`asia-northeast1`. The repository uses the following deployment settings.
 
 | | |
 | --- | --- |
 | Cloud Run service | `dambi-policy-server` |
 | Region | `asia-northeast1` |
 | Service URL | `https://dambi-policy-server-3b4i4svugq-an.a.run.app` |
-| Public origin | `https://errkat4up-dambi.duckdns.org` |
+| Public origin | `https://dambi-sub.duckdns.org` |
 
-The custom domain is the origin every client is built against — it is the
-default of `DAMBI_SERVER_URL` (extension, `browser-extension/webpack/env.js`),
-of `VITE_DAMBI_SERVER_URL` (dashboard), and of `PUBLIC_API_URL` /
-`DASHBOARD_URL` / the OAuth redirect on the server side. Always point clients
-at the custom domain rather than the generated `run.app` hostname: the latter
-changes if the service is recreated, and the OAuth redirect URI is registered
-against the former.
+Route the DuckDNS hostname to the HTTPS endpoint serving the policy-server.
+For the Cloud Run deployment, use the DNS records provided by the domain
+mapping or the IP of its configured load balancer. Set `PUBLIC_API_URL` and
+the production dashboard origin (`DASHBOARD_URL` and `CORS_ALLOWED_ORIGINS`)
+in the deployed service. Set `GOOGLE_REDIRECT_URI` to
+`https://dambi-sub.duckdns.org/auth/google/callback` and register that exact
+URI in the Google OAuth client. Check `https://dambi-sub.duckdns.org/readyz`
+before releasing an extension built with the new origin.
 
 Build an image with `gcloud builds submit --config cloudbuild.yaml` (the
 Dockerfile lives at `crates/policy-server/server/Dockerfile` but needs the repo

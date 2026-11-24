@@ -1,11 +1,13 @@
 //! SF2: bounded, synchronous algorithm boundary shared by Native and WASM.
 //!
-//! No detector, RPC provider, CoreSession wiring or policy verdict composition.
+//! The built-in window-rules adapter delegates detection to scam-filter.
+//! RPC and policy verdict composition remain outside this boundary.
 //! PinnedInvocation is supplied by the native plan owner, never trusted from a
 //! host fact. Missing/error results remain errors; this module cannot emit quiet.
 
 pub mod types;
 mod validation;
+pub(crate) mod window_rules;
 
 #[cfg(test)]
 mod tests;
@@ -20,8 +22,8 @@ pub use types::*;
 
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
-/// The real library implements this port during algorithm handoff. No implicit
-/// default implementation exists. Implementations must honor all work/size
+/// WindowRulesModule translates the supplied library into this SDK port. A
+/// verified bundle must select its exact identity. Implementations honor work/size
 /// limits and return errors rather than panic; this is not a trap/OOM sandbox.
 pub trait AlgorithmModule {
     fn identity(&self) -> AlgorithmIdentity;
@@ -89,7 +91,7 @@ impl<'a> AlgorithmAdapter<'a> {
         let identity = module.identity();
         let mode = module.analysis_mode();
         if identity != pinned.binding.algorithm
-            || identity.contract_version != 1
+            || identity.contract_version != scam_filter::CONTRACT_VERSION
             || identity.id.is_empty()
             || identity.version.is_empty()
             || module.work_unit().is_empty()
@@ -289,6 +291,7 @@ fn map_rule_reason(reason: &AlgorithmRuleReason) -> FailureReason {
             FailureReason::DataMissing
         }
         AlgorithmRuleReason::WarmupIncomplete => FailureReason::InitialStateUnknown,
+        AlgorithmRuleReason::HistoryUnverified => FailureReason::HistoryUnverified,
         AlgorithmRuleReason::ResolutionTooCoarse => FailureReason::UnsupportedResolution,
         AlgorithmRuleReason::MetricUnavailable => FailureReason::FieldUnavailable,
     }

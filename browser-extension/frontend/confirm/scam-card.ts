@@ -45,6 +45,7 @@ const REASON_COPY: Record<string, string> = {
   data_missing: "자료 누락",
   field_unavailable: "필요한 필드 조회 불가",
   initial_state_unknown: "초기 상태 확인 불가",
+  history_unverified: "블록 단위 원본 이력 확인 불가",
   age_unknown: "풀 나이 확인 불가",
   market_too_young: "관찰 기간 부족",
   stale_data: "자료 유효 시간 초과",

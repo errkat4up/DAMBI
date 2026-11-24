@@ -3,7 +3,8 @@ import { createHash, sign } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { CoreError, createCore } from "@dambi/core";
-import { createScamBundleApiSource } from "@dambi/core/adapters";
+import { createScamBundleApiSource, createScamFactProvider } from "@dambi/core/adapters";
+import { scamProviderRpcFixture } from "./adapters/helpers/scam-provider-fixture.mjs";
 
 // Public SDK + production WASM only. No fixture installer, algorithm stub,
 // network, key generation or build is performed by this test.
@@ -39,7 +40,7 @@ function payload(sequence = "1", overrides = {}) {
     warmupSec: 1, maxDataAgeSec: 30 };
   return { kind: "scam_bundle", schema: "0.1", sequence, issuedAtMs: NOW - 60_000,
     expiresAtMs: NOW + 60_000, env: "staging", profile: "default",
-    compatibility: { engineRange: "*", builderRange: "dambi-v2/1", contractVersion: "0.1", algorithm: null },
+    compatibility: { engineRange: "*", builderRange: "dambi-v2/2", contractVersion: "0.1", algorithm: null },
     support: [{ chainId: 91342, venue: "uniswap_v2", factories: [FACTORY], quoteTokens: [WETH],
       exemptTokens: [WETH], allowedBucketMs: [1_000, 2_000], confirmDepth: 2 }],
     presets: [{ id: "signed-demo", purpose: "demo",
@@ -90,6 +91,63 @@ async function open(t, state) {
   return core;
 }
 const evaluate = (core, plan) => core.evaluate(plan, { planId: plan.planId, results: {} });
+
+test("SF6 signed bundle selects the real detector through RPC builders and production WASM", async (t) => {
+  const state = setup();
+  const bundle = payload();
+  bundle.compatibility.algorithm = { id: "dambi.scam.window-rules", version: "0.2.0", contractVersion: 2 };
+  bundle.presets[0].newMarket.rules[0].lookbackSec = 20;
+  bundle.presets[0].newMarket.bucketMs = 2_000;
+  state.setScam(async () => signed(bundle));
+  const raw = scamProviderRpcFixture({ now: NOW, chainId: 91342, factory: FACTORY,
+    pool: "0xcaafb95fc292c10a526f03fa480407bb438dac67",
+    token: "0x0274c57358c3a6b8a08b7297ba51665c303a471f", quoteToken: WETH });
+  const provider = createScamFactProvider({ rpc: raw.rpc, history: raw.history, profile: raw.profile,
+    factorySupport: raw.factorySupport,
+    policy: { fetch: async (_calls, { planId }) => ({ planId, results: {} }) },
+    limits: { timeoutMs: 500, maxCalls: 16, maxTargets: 8, maxRequestBytes: 100_000, maxResultBytes: 100_000 } });
+  state.config.ports.fact = provider;
+  const core = await open(t, state);
+  const verdict = await core.check(request);
+  assert.equal(verdict.scam.status, "warn");
+  const target = verdict.scam.targets[0];
+  assert.equal(target.analysisMode, "real");
+  assert.equal(target.binding.algorithm.contractVersion, 2);
+  assert.equal(target.binding.builderVersion, "dambi-v2/2");
+  assert.equal(target.rules[0].evidence.observed, 2);
+  assert.equal(target.rules[0].state, "fired");
+  assert.equal(target.binding.selectionReason, "lower_bound_mature");
+  assert.equal(target.binding.fromMs, NOW - 2_000 - 11_000,
+    "The selected horizon receives the value effective between sparse union points");
+
+  const bad = structuredClone(bundle);
+  bad.sequence = "2";
+  bad.compatibility.algorithm.version = "9.9.9";
+  state.setScam(async () => signed(bad));
+  await assert.rejects(core.refreshScam(), code("INVALID_SCAM_BUNDLE"));
+  assert.equal((await core.check(request)).scam.pinned.bundleSequence, "1");
+
+  bundle.sequence = "2";
+  for (const candidate of [bundle.presets[0].newMarket, bundle.presets[0].established]) {
+    candidate.rules[0].count = 3;
+  }
+  state.setScam(async () => signed(bundle));
+  await core.refreshScam();
+  const quiet = await core.check(request);
+  assert.equal(quiet.scam.status, "quiet");
+  assert.equal(quiet.scam.targets[0].rules[0].state, "clear");
+  assert.equal(quiet.scam.targets[0].rules[0].evidence.observed, 2);
+
+  bundle.sequence = "3";
+  for (const candidate of [bundle.presets[0].newMarket, bundle.presets[0].established]) {
+    candidate.rules[0].changeMode = "cumulative";
+  }
+  state.setScam(async () => signed(bundle));
+  await core.refreshScam();
+  const plan = await core.plan(request);
+  assert.equal(plan.scamCalls.find((call) => call.method === "scam.pool_history").params.warmupSec, 86_400);
+  core.evaluate(plan, { planId: plan.planId, results: {} });
+});
 
 test("SF5-1 signed HTTP bundles cross production WASM and only new plans see a refresh", async (t) => {
   const state = setup();

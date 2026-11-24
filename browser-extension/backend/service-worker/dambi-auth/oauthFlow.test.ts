@@ -20,7 +20,7 @@ vi.mock("./tokenStore", () => ({
 }));
 
 vi.mock("./client", () => ({
-  getServerBaseUrl: () => "https://errkat4up-dambi.duckdns.org",
+  getServerBaseUrl: () => "https://dambi-sub.duckdns.org",
 }));
 
 import { parseTokensFromUrl, startGoogleLogin } from "./oauthFlow";

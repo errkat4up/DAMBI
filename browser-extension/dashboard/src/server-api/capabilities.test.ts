@@ -30,7 +30,7 @@ describe("dashboard capabilities API client", () => {
 
     expect(resp.chains).toEqual(["eip155:1", "eip155:42161", "eip155:8453"]);
     expect(fetchMock.mock.calls[0][0]).toBe(
-      "https://errkat4up-dambi.duckdns.org/capabilities/sync-chains",
+      "https://dambi-sub.duckdns.org/capabilities/sync-chains",
     );
   });
 });

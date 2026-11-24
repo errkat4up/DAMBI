@@ -210,7 +210,7 @@ export async function buildTokenProfile(
         topics: params.eventKinds.map((kind) => ADMIN_EVENT_TOPICS[kind]) });
       if (scan.logs.length > options.maxLogs || scan.missing.length > options.maxLogs) return fail("resource_limit");
       const gap = (start: number, stop: number, reason: MissingInterval["reason"]): void => {
-        const fromMs = Math.max(from, start - 1), toMs = Math.min(end, stop);
+        const fromMs = Math.max(from, Math.min(start, end - 1)), toMs = Math.min(end, stop + 1);
         if (fromMs < toMs) missing.push({ fromMs, toMs, reason });
       };
       for (const range of scan.missing) {
@@ -238,9 +238,10 @@ export async function buildTokenProfile(
       // Both timelines are sorted; keep this linear in events + missing ranges.
       let gapIndex = 0, kept = 0;
       for (const event of events) {
-        while (gapIndex < missing.length && missing[gapIndex].toMs < event.tMs) gapIndex++;
+        while (gapIndex < missing.length && missing[gapIndex].toMs <= event.tMs
+          && !(missing[gapIndex].toMs === end && event.tMs === end)) gapIndex++;
         const gap = missing[gapIndex];
-        if (!gap || event.tMs <= gap.fromMs) events[kept++] = event;
+        if (!gap || event.tMs < gap.fromMs) events[kept++] = event;
       }
       events.length = kept;
     }

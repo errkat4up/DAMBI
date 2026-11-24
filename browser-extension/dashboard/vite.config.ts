@@ -83,7 +83,7 @@ export default defineConfig(({ mode }) => {
   // Server base URL is UNIFIED with the webpack (service-worker) build:
   // both read `DAMBI_SERVER_URL`, so a single env var switches the whole
   // extension (dashboard + service worker) between local/test and prod —
-  //   DAMBI_SERVER_URL=https://errkat4up-dambi.duckdns.org yarn build:ext
+  //   DAMBI_SERVER_URL=https://dambi-sub.duckdns.org yarn build:ext
   // `loadEnv(mode, dir, "")` reads .env files + process.env with no prefix
   // filter; legacy `VITE_DAMBI_SERVER_URL` is still honored as a fallback.
   const serverUrl = resolveServerUrlEnv(mode);

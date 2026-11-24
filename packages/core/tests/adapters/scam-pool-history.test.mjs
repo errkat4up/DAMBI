@@ -99,7 +99,7 @@ test("pool history replays a saved GIWA Sync without mistaking its synthetic sur
   assert.deepEqual(logCalls[0].params[0].topics, [[V2_SYNC_TOPIC]]);
 });
 
-test("pool history seeds from historical reserves and uses each block's final Sync on distinct frozen grids", async () => {
+test("pool history preserves the boundary and every changed block under both resolution declarations", async () => {
   const last = sync(12, 2, 150, 300);
   const f = fixture({ logs: [last, sync(12, 1, 120, 240), { ...last }] });
   const grids = [{ bucketMs: 2_000, gridOriginMs: 0 }, { bucketMs: 3_000, gridOriginMs: 500 }];
@@ -107,12 +107,12 @@ test("pool history seeds from historical reserves and uses each block's final Sy
   assert.equal(value.histories.length, 2);
   assert.deepEqual(value.histories.map(({ gridOriginMs, history }) => [history.bucketMs, gridOriginMs]), [[2_000, 0], [3_000, 500]]);
   const first = value.histories[0].history, second = value.histories[1].history;
-  assert.deepEqual(first.points.map((point) => point.tMs), [10, 12, 14, 16, 18, 20].map(time));
-  assert.deepEqual(first.points.map((point) => point.reserveToken), ["100", "150", "150", "150", "150", "150"]);
-  assert.deepEqual(second.points.map((point) => point.tMs), [1_011_500, 1_014_500, 1_017_500]);
+  assert.deepEqual(first.points.map((point) => point.tMs), [10, 12].map(time));
+  assert.deepEqual(first.points.map((point) => point.reserveToken), ["100", "150"]);
+  assert.deepEqual(second.points, first.points, "Resolution metadata cannot drop or shift a block change");
   assert.equal(second.points[0].reserveToken, "100");
   assert.equal(second.points[1].reserveToken, "150");
-  assert.equal(second.points.some((point) => point.tMs === time(20)), false, "No extra off-grid point at T");
+  assert.equal(second.points.some((point) => point.tMs === time(20)), false, "Unchanged spans need no synthetic point at T");
   assert.deepEqual(first.warmup, { fromMs: time(10), complete: true });
   assert.deepEqual(first.missing, second.missing);
   const seedCalls = f.calls.filter((rpc) => rpc.method === "eth_call" && rpc.params[0].data === "0x0902f1ac");
@@ -134,7 +134,7 @@ test("pool history maps reversed token order without rounding raw integers or dr
   assert.deepEqual(points[0], { tMs: time(10), reserveToken: large.toString(), reserveQuote: "0", decimalsToken: 18, decimalsQuote: 6 });
   assert.deepEqual(points.find((point) => point.tMs === time(15)), { tMs: time(15), reserveToken: "0",
     reserveQuote: (large - 1n).toString(), decimalsToken: 18, decimalsQuote: 6 });
-  assert.equal(points.length, 11);
+  assert.equal(points.length, 2);
   assert.deepEqual(value.coverage.missing, []);
 });
 
@@ -170,7 +170,7 @@ test("pool history uses optional log times for identical grids while keeping act
   }
 });
 
-test("pool history carries raw chunk gaps through the millisecond before a later Sync on every candidate", async () => {
+test("pool history carries half-open chunk gaps up to the next confirmed Sync on every candidate", async () => {
   const make = (unavailableGapHeader = false, timestamped = false) => fixture({ maxBlocksPerQuery: 4,
     logs: [sync(12, 0, 120, 240), sync(19, 0, 190, 380)].map((log) => timestamped ? withTimestamp(log) : log), handle: (rpc) => {
       if (rpc.method === "eth_getLogs" && rpc.params[0].fromBlock === q(15)) return new Response("unavailable", { status: 500 });
@@ -183,12 +183,12 @@ test("pool history carries raw chunk gaps through the millisecond before a later
   const timed = make(false, true);
   assert.deepEqual((await timed.build(settings)).value, value);
   assert.deepEqual(timed.preflights, [["15"]], "Missing-range boundaries always use actual headers");
-  const interval = { fromMs: time(15) - 1, toMs: time(19) - 1 };
+  const interval = { fromMs: time(15), toMs: time(19) };
   assert.deepEqual(value.coverage.missing, [{ ...interval, reason: "rpc_error" }]);
   assert.deepEqual(value.histories.map(({ history }) => history.missing), [[interval], [interval]]);
-  assert.deepEqual(value.histories[0].history.points.map((point) => point.tMs), [10, 11, 12, 13, 14, 19, 20].map(time));
+  assert.deepEqual(value.histories[0].history.points.map((point) => point.tMs), [10, 12, 19].map(time));
   assert.equal(value.histories[0].history.points.find((point) => point.tMs === time(19)).reserveToken, "190");
-  assert.equal(value.histories[0].history.warmup.complete, true, "The gap is after the warm-up horizon");
+  assert.equal(value.histories[0].history.warmup.complete, true, "Faithful history includes explicitly marked gaps");
   await assert.rejects(make(true).build(), failure("rpc_error"), "A missing block timestamp is not manufactured from the one-second hint");
 });
 
@@ -196,34 +196,40 @@ test("pool history distinguishes complete empty logs from failed seed history an
   const failSeed = (rpc) => rpc.method === "eth_call" && rpc.params[0].data === "0x0902f1ac"
     ? new Response("archive unavailable", { status: 500 }) : undefined;
   const empty = (await fixture().build()).value;
-  assert.equal(empty.histories[0].history.points.length, 11);
+  assert.equal(empty.histories[0].history.points.length, 1);
   assert.ok(empty.histories[0].history.points.every((point) => point.reserveToken === "100" && point.reserveQuote === "200"));
   assert.deepEqual(empty.coverage.missing, []);
   const absent = (await fixture({ handle: failSeed }).build()).value;
   assert.deepEqual(absent.histories[0].history.points, []);
   assert.deepEqual(absent.coverage.missing, [{ fromMs: time(10), toMs: time(20), reason: "rpc_error" }]);
-  assert.equal(absent.histories[0].history.warmup.complete, false);
+  assert.equal(absent.histories[0].history.warmup.complete, true, "Fidelity does not imply coverage");
   const recovered = (await fixture({ handle: failSeed, logs: [sync(15, 0, 150, 300)] }).build()).value;
-  assert.deepEqual(recovered.coverage.missing, [{ fromMs: time(10), toMs: time(15) - 1, reason: "rpc_error" }]);
-  assert.deepEqual(recovered.histories[0].history.points.map((point) => point.tMs), [15, 16, 17, 18, 19, 20].map(time));
-  assert.equal(recovered.histories[0].history.warmup.complete, false);
+  assert.deepEqual(recovered.coverage.missing, [{ fromMs: time(10), toMs: time(15), reason: "rpc_error" }]);
+  assert.deepEqual(recovered.histories[0].history.points.map((point) => point.tMs), [15].map(time));
+  assert.equal(recovered.histories[0].history.warmup.complete, true);
   const preGenesis = fixture({ head: 5, logs: [sync(2, 0, 20, 40)] });
   const initial = (await preGenesis.build({ lookbackSec: 1_010 }, { maxPoints: 1_100 })).value;
   assert.equal(initial.coverage.fromBlock, "0");
-  assert.deepEqual(initial.coverage.missing, [{ fromMs: 0, toMs: time(2) - 1, reason: "unavailable_history" }]);
-  assert.deepEqual(initial.histories[0].history.points.map((point) => point.tMs), [2, 3, 4, 5].map(time));
-  assert.equal(initial.histories[0].history.warmup.complete, false);
+  assert.deepEqual(initial.coverage.missing, [{ fromMs: 0, toMs: time(2), reason: "unavailable_history" }]);
+  assert.deepEqual(initial.histories[0].history.points.map((point) => point.tMs), [2].map(time));
+  assert.equal(initial.histories[0].history.warmup.complete, true);
   assert.equal(preGenesis.calls.filter((rpc) => rpc.method === "eth_call" && rpc.params[0].data === "0x0902f1ac").length, 0);
 });
 
 test("pool history treats malformed Sync blocks as unavailable instead of accepting their later same-block values", async () => {
   const malformed = { ...sync(14, 0, 140, 280), data: `0x${word(1n << 112n)}${word(280)}` };
-  const logs = [sync(14, 1, 141, 282), malformed, sync(17, 0, 170, 340)];
+  const logs = [sync(14, 1, 141, 282), malformed, sync(17, 0, 100, 200)];
   const { value } = await fixture({ logs }).build();
   assert.deepEqual((await fixture({ logs: logs.map(withTimestamp) }).build()).value, value);
-  assert.deepEqual(value.coverage.missing, [{ fromMs: time(14) - 1, toMs: time(17) - 1, reason: "unavailable_history" }]);
-  assert.deepEqual(value.histories[0].history.points.map((point) => point.tMs), [10, 11, 12, 13, 17, 18, 19, 20].map(time));
-  assert.equal(value.histories[0].history.points.find((point) => point.tMs === time(17)).reserveToken, "170");
+  assert.deepEqual(value.coverage.missing, [{ fromMs: time(14), toMs: time(17), reason: "unavailable_history" }]);
+  assert.deepEqual(value.histories[0].history.points.map((point) => point.tMs), [10, 17].map(time));
+  assert.equal(value.histories[0].history.points.find((point) => point.tMs === time(17)).reserveToken, "100",
+    "Recovery is retained even when the reserves match the last value before the gap");
+  const final = (await fixture({ logs: [{ ...sync(20, 0, 200, 400), data: "0x" }] }).build()).value;
+  assert.deepEqual(final.coverage.missing,
+    [{ fromMs: time(20) - 1, toMs: time(20), reason: "unavailable_history" }],
+    "An unavailable final block cannot disappear as a zero-length half-open gap");
+  assert.deepEqual(final.histories[0].history.points.map((point) => point.tMs), [time(10)]);
 });
 
 test("pool history reports unavailable decimals without an invented 18-decimal fallback or unnecessary log fetch", async () => {
@@ -251,9 +257,9 @@ test("pool history rejects incompatible requests and impossible budgets before d
     { confirmDepth: 1 }, { subject: { ...subject(), token: QUOTE } }, { lookbackSec: 86_401 },
     { candidateResolutions: [{ bucketMs: 0, gridOriginMs: 0 }] },
   ]) await assert.rejects(buildPoolHistory(batch, pool, params(pool.subject, override), limits), failure("invalid_request"));
-  await assert.rejects(buildPoolHistory(batch, pool, params(pool.subject), { ...limits, maxPoints: 10 }), failure("resource_limit"));
   await assert.rejects(buildPoolHistory(batch, pool, params(pool.subject), { ...limits, blockTimeHintMs: 0 }), failure("invalid_config"));
   assert.equal(dataCalls, 0);
+  await assert.rejects(fixture({ logs: [sync(12, 0, 120, 240), sync(13, 0, 130, 260)] }).build({}, { maxPoints: 2 }), failure("resource_limit"));
   await assert.rejects(fixture({ logs: [sync(12, 0, 120, 240), sync(13, 0, 130, 260)] }).build({}, { maxLogs: 1 }), failure("resource_limit"));
   const limited = fixture({ logs: [sync(12, 0, 120, 240), sync(13, 0, 130, 260)] });
   await assert.rejects(limited.build({}, { maxBlockLookups: 4 }), failure("resource_limit"));

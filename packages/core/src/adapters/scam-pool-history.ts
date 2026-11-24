@@ -7,12 +7,12 @@ import { createBlockTimeIndex } from "./scam-block-time.js";
 import { address, type RpcLog } from "./scam-rpc-codec.js";
 import { ScamRpcError, type ScamRpcBatch, type VerifiedPool } from "./scam-rpc.js";
 
-export const SCAM_DATA_BUILDER_VERSION = "dambi-v2/1";
+export const SCAM_DATA_BUILDER_VERSION = "dambi-v2/2";
 export const V2_SYNC_TOPIC = "0x1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1";
 const SCHEMA = "scam.pool_history/1";
 
 export interface PoolHistoryBuildLimits {
-  /** Total candidate grid positions, including missing positions, before work. */
+  /** Total emitted boundary/change points across candidate histories. */
   readonly maxPoints: number;
   readonly maxLogs: number;
   readonly maxBlockLookups: number;
@@ -58,11 +58,6 @@ function syncReserves(log: RpcLog): Reserves | undefined {
   return { reserve0: a.toString(), reserve1: b.toString() };
 }
 
-function firstGrid(from: number, origin: number, bucket: number): bigint {
-  const start = BigInt(from), step = BigInt(bucket), phase = BigInt(origin) % step;
-  return start + (phase - start % step + step) % step;
-}
-
 /** Uses getReserves at the start boundary plus forward Sync updates. No
  * Swap/Mint/Burn inversion is attempted when historical state is unavailable.
  * Missing log ranges invalidate carried state until a later confirmed Sync.
@@ -70,7 +65,7 @@ function firstGrid(from: number, origin: number, bucket: number): bigint {
 export async function buildPoolHistory(
   batch: ScamRpcBatch, pool: VerifiedPool, supplied: PoolHistoryParams, suppliedLimits: PoolHistoryBuildLimits,
 ): Promise<PoolHistoryValue> {
-  // Own configuration before the first await; never adjust the pinned grids.
+  // Own configuration before the first await. Resolution metadata never samples away blocks.
   const limits = { ...suppliedLimits };
   if (![limits.maxPoints, limits.maxLogs, limits.maxBlockLookups, limits.blockTimeHintMs].every((v) => integer(v, 1))) return fail("invalid_config");
   if (!supplied || supplied.dataSchema !== SCHEMA || supplied.builderVersion !== SCAM_DATA_BUILDER_VERSION
@@ -82,19 +77,15 @@ export async function buildPoolHistory(
       || !Array.isArray(supplied.candidateResolutions) || !supplied.candidateResolutions.length
       || supplied.candidateResolutions.length > 2) return fail("invalid_request");
   const { lookbackSec, warmupSec } = supplied;
-  const grids: { bucketMs: number; gridOriginMs: number; first: bigint }[] = [];
+  const grids: { bucketMs: number; gridOriginMs: number }[] = [];
   const end = batch.reference.block.timestampMs;
   const span = (BigInt(lookbackSec) + BigInt(warmupSec)) * 1000n;
   if (span > BigInt(Number.MAX_SAFE_INTEGER)) return fail("invalid_request");
   const from = Number(BigInt(end) > span ? BigInt(end) - span : 0n);
-  let positions = 0n;
   for (const grid of supplied.candidateResolutions) {
     if (!grid || !integer(grid.bucketMs, 1) || !integer(grid.gridOriginMs)) return fail("invalid_request");
     if (grids.some((g) => g.bucketMs === grid.bucketMs && g.gridOriginMs === grid.gridOriginMs)) continue;
-    const first = firstGrid(from, grid.gridOriginMs, grid.bucketMs);
-    if (first <= BigInt(end)) positions += (BigInt(end) - first) / BigInt(grid.bucketMs) + 1n;
-    if (positions > BigInt(limits.maxPoints)) return fail("resource_limit");
-    grids.push({ bucketMs: grid.bucketMs, gridOriginMs: grid.gridOriginMs, first });
+    grids.push({ bucketMs: grid.bucketMs, gridOriginMs: grid.gridOriginMs });
   }
   const times = createBlockTimeIndex(batch, { maxBlocks: limits.maxBlockLookups, blockTimeHintMs: limits.blockTimeHintMs });
   const boundary = await times.atOrBefore(from);
@@ -116,8 +107,10 @@ export async function buildPoolHistory(
     }
   }
   const missing: MissingInterval[] = [];
-  const states: State[] = seed ? [{ ...seed, tMs: boundary.before!.timestampMs }] : [];
-  let completeWarmup = !!seed;
+  // The historical call remains bound to its real evidence block. Only the
+  // effective boundary value is placed at fromMs; never backfill a future Sync.
+  const states: State[] = seed ? [{ ...seed, tMs: from }] : [];
+  let completeWarmup = true;
   if (unavailable.length) {
     // Cannot construct the wire snapshot's required decimals. Do not emit
     // fabricated values, and do not spend the remaining budget fetching logs.
@@ -175,39 +168,37 @@ export async function buildPoolHistory(
     for (const marker of markers) {
       if (marker.kind === "gap") {
         blockedThrough = marker.through > blockedThrough ? marker.through : blockedThrough;
-        // Times are integer milliseconds: (t-1, ...] includes the bad block
-        // at t, while a later recovered Sync at r closes the gap at r-1.
-        open ??= { fromMs: Math.max(from, marker.tMs - 1), reason: marker.reason };
+        // Half-open gaps end at the next confirmed Sync. At the final instant
+        // reserve one millisecond so a failed final block cannot appear complete.
+        open ??= { fromMs: Math.max(from, Math.min(marker.tMs, end - 1)), reason: marker.reason };
       } else if (marker.block > blockedThrough) {
+        const recovered = !!open;
         if (open) {
-          const toMs = marker.tMs - 1;
+          const toMs = marker.tMs;
           if (open.fromMs < toMs) missing.push({ ...open, toMs });
           open = undefined;
         }
-        states.push({ ...marker.reserves, tMs: marker.tMs });
+        const previous = states[states.length - 1];
+        if (previous && marker.tMs <= previous.tMs) return fail("invalid_response");
+        if (recovered || !previous || previous.reserve0 !== marker.reserves.reserve0 || previous.reserve1 !== marker.reserves.reserve1) {
+          states.push({ ...marker.reserves, tMs: marker.tMs });
+          if (states.length * grids.length > limits.maxPoints) return fail("resource_limit");
+        }
       }
     }
     if (open && open.fromMs < end) missing.push({ ...open, toMs: end });
-    // Availability only, not a claim that direction/high-low algorithm state is initialized.
-    const countingStart = Math.max(0, end - lookbackSec * 1000);
-    completeWarmup = states.some((state) => state.tMs <= from)
-      && !missing.some((gap) => gap.fromMs < countingStart && gap.toMs > from);
+    // Fidelity, not coverage or recovered algorithm state: every changed block
+    // is retained and every unavailable span is marked. The detector checks W.
   }
   const tokenIs0 = pool.token0 === pool.subject.token;
   const d0 = decimals[0].status === "fulfilled" ? decimals[0].value : undefined;
   const d1 = decimals[1].status === "fulfilled" ? decimals[1].value : undefined;
-  const histories = grids.map(({ bucketMs, gridOriginMs, first }): PoolHistoryValue["histories"][number] => {
+  if (states.length * grids.length > limits.maxPoints) return fail("resource_limit");
+  const histories = grids.map(({ bucketMs, gridOriginMs }): PoolHistoryValue["histories"][number] => {
     const points: PoolSnapshot[] = [];
-    let stateIndex = 0, missingIndex = 0;
-    let latest: State | undefined;
     if (d0 !== undefined && d1 !== undefined) {
-      for (let at = first; at <= BigInt(end); at += BigInt(bucketMs)) {
-        const tMs = Number(at);
-        while (stateIndex < states.length && states[stateIndex].tMs <= tMs) latest = states[stateIndex++];
-        while (missingIndex < missing.length && missing[missingIndex].toMs < tMs) missingIndex++;
-        const gap = missing[missingIndex];
-        if (!latest || gap && gap.fromMs < tMs && tMs <= gap.toMs) continue;
-        points.push({ tMs, reserveToken: tokenIs0 ? latest.reserve0 : latest.reserve1,
+      for (const latest of states) {
+        points.push({ tMs: latest.tMs, reserveToken: tokenIs0 ? latest.reserve0 : latest.reserve1,
           reserveQuote: tokenIs0 ? latest.reserve1 : latest.reserve0,
           decimalsToken: tokenIs0 ? d0 : d1, decimalsQuote: tokenIs0 ? d1 : d0 });
       }

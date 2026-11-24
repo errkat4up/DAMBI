@@ -47,7 +47,7 @@ const LISTINGS_PAGE_SIZE = 8;
 const SERVER_URL_KEY = "dambi_server_url";
 const SERVER_PRESETS = [
   { labelKey: "settings.presetLocal", url: "http://127.0.0.1:8788" },
-  { labelKey: "settings.presetProd", url: "https://errkat4up-dambi.duckdns.org" },
+  { labelKey: "settings.presetProd", url: "https://dambi-sub.duckdns.org" },
 ];
 const LANGUAGES: Array<{ code: "ko" | "en"; labelKey: string }> = [
   { code: "ko", labelKey: "settings.languageKo" },
