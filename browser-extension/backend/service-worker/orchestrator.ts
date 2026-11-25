@@ -1,7 +1,11 @@
 import Browser from "webextension-polyfill";
 import type { ScamDisplay } from "@lib/scam-display";
-import { beginScamCheck } from "./scam-filter";
 import { storeScamDisplay } from "./scam-confirm";
+import type { BackdoorDisplay } from "@lib/backdoor-display";
+import type { WindowDisplay } from "@lib/window-display";
+import { beginScamChecks, type ScamChecksHandle } from "./scam-checks";
+import { consumeForwarded, rememberForwarded, type RequestSource } from "./forwarded-requests";
+import { storeBackdoorDisplay, storeWindowDisplay } from "./backdoor-confirm";
 import { markPhase, captureTimeout } from "./diagnostics";
 import {
   tryDeclarativeRouteV3,
@@ -211,6 +215,44 @@ export async function decideMessage(
   );
 }
 
+/** Request kinds the wrapper hands on to the wallet once allowed. */
+const reachesWallet = (message: Message): boolean =>
+  isTransaction(message) || isTypedSignature(message) || isUntypedSignature(message);
+
+/**
+ * The live entry point for a wallet request arriving from a page.
+ *
+ * A request the wrapper allowed reaches the wallet, where the bypass observer
+ * sees it and reports it again as `bypassed`. That copy is recognised by its
+ * fingerprint and dropped here: no verdict, window, notification or audit row.
+ * Returns `null` for such a copy.
+ *
+ * Any other `bypassed` message is a genuine bypass and is observed only (see
+ * `decideInner`).
+ */
+export async function decideWalletRequest(
+  message: Message,
+  source: RequestSource | undefined,
+  options: DecisionOptions = {},
+): Promise<DecisionResult | null> {
+  const bypassed = "bypassed" in message.data && !!message.data.bypassed;
+  if (bypassed && consumeForwarded(source, message.data)) return null;
+  const decision = await decideMessage(message, options);
+  // Only a request that is about to be handed to the wallet leaves a fingerprint.
+  if (!bypassed && decision.ok && reachesWallet(message)) {
+    rememberForwarded(source, message.data);
+  }
+  return decision;
+}
+
+/** Stands in for the scam checks on a message that starts none. */
+const NO_SCAM_CHECKS: ScamChecksHandle = {
+  promise: Promise.resolve({}),
+  offer: () => undefined,
+  close: () => undefined,
+  cancel: () => undefined,
+};
+
 function txSummaryForDiag(message: Message): Record<string, unknown> {
   const summary: Record<string, unknown> = {
     requestId: message.requestId,
@@ -246,14 +288,22 @@ async function decideInner(
   };
   await pendingPut(pending);
 
-  let scamCheck: ReturnType<typeof beginScamCheck> | undefined;
+  // Scam checks (SDK window rules + pool backdoor) sit behind one shared gate:
+  // they start only when the lifecycle's decoded actions buy a token the user
+  // does not hold, run within their own deadlines alongside the policy
+  // lifecycle, and only ever add a warning. The SDK's policy verdict never
+  // replaces the user's policy.
+  //
+  // A bypass row is observe-only: the wallet already has the request and no
+  // answer goes back to the page. It gets a policy verdict, an audit row and
+  // the risky-verdict notification, but no scam check and no window — a window
+  // whose buttons cannot stop anything would only mislead.
+  const observeOnly = pending.bypassed;
+  const scamChecks = observeOnly ? NO_SCAM_CHECKS : beginScamChecks(message);
   let decided: DecisionResult | undefined;
   try {
-    // Independent analysis runs within its own deadline, alongside the existing
-    // policy lifecycle. Its SDK policy verdict never replaces the user's policy.
-    scamCheck = beginScamCheck(message);
     const { result: lifecycle, timedOut } = await withTimeout(
-      runLifecycle(message),
+      runLifecycle(message, (actions) => scamChecks.offer(actions)),
       HARD_TIMEOUT_MS,
       {
         // Deny-closed for venue orders: a timeout must BLOCK, not offer a
@@ -271,7 +321,10 @@ async function decideInner(
       await captureTimeout(message.requestId, txSummaryForDiag(message));
     }
     const { verdict } = lifecycle;
-    const scam = await scamCheck.promise;
+    // Nothing decoded (venue / signature / route miss) → no check was started.
+    scamChecks.close();
+    // Each is present only for a warning; anything else opens no window.
+    const { scam, backdoor, window: windowRules } = await scamChecks.promise;
 
     // 표시 전용 advisory 데스크톱 알림 — 라이브 위험(fail|warn) verdict 에서만.
     // fire-and-forget: `ok`·confirm 창·`dambi:verdict-decision` 채널 어디에도
@@ -306,15 +359,19 @@ async function decideInner(
     }
 
     let ok = false;
-    // An opted-in scam check also requires review of an otherwise passing
+    // A scam warning also requires review of an otherwise passing
     // transaction. The original policy verdict remains unchanged.
     let userDecision: "trusted" | "cancelled" | null = null;
-    if (verdict.kind === "pass") {
-      ok = scam === undefined || await openVerdictWindowAndAwait(
+    if (observeOnly) {
+      // Nothing is asked and nothing is answered; `ok` only mirrors the verdict.
+      ok = verdict.kind === "pass";
+    } else if (verdict.kind === "pass") {
+      const review = scam !== undefined || backdoor !== undefined || windowRules !== undefined;
+      ok = !review || await openVerdictWindowAndAwait(
         message.requestId, message.data.hostname, verdict,
-        confirmDetailsForMessage(message), options.onAwaitingUser, scam,
+        confirmDetailsForMessage(message), options.onAwaitingUser, scam, backdoor, windowRules,
       );
-      if (scam !== undefined) userDecision = ok ? "trusted" : "cancelled";
+      if (review) userDecision = ok ? "trusted" : "cancelled";
     } else if (verdict.kind === "fail") {
       // Surface the matched policies in a popup so the user understands
       // why the dApp's transaction returned 4001. The popup is
@@ -325,6 +382,8 @@ async function decideInner(
         verdict,
         confirmDetailsForMessage(message),
         scam,
+        backdoor,
+        windowRules,
       );
     } else {
       // 별도 스캠 검토가 없을 때 Warn 설정(modal)에 따라 모달을 띄운다. modal="both" 면
@@ -333,7 +392,7 @@ async function decideInner(
       // 토스트는 onRiskyVerdict 경로에서 별도로 발사되므로 사용자는 여전히 통지받음.
       // FAIL 차단에는 영향 없음(위 분기에서 항상 모달+차단).
       await ensureNotifySettings();
-      if (scam !== undefined || shouldWarnModal()) {
+      if (scam !== undefined || backdoor !== undefined || windowRules !== undefined || shouldWarnModal()) {
         ok = await openVerdictWindowAndAwait(
           message.requestId,
           message.data.hostname,
@@ -341,6 +400,8 @@ async function decideInner(
           confirmDetailsForMessage(message),
           options.onAwaitingUser,
           scam,
+          backdoor,
+          windowRules,
         );
         userDecision = ok ? "trusted" : "cancelled";
       } else {
@@ -412,18 +473,20 @@ async function decideInner(
       });
     }
     const verdict = engineErrorVerdict(err);
-    const scam = await scamCheck?.promise;
+    // The lifecycle may have thrown after handing over its decoded actions.
+    scamChecks.close();
+    const { scam, backdoor, window: windowRules } = await scamChecks.promise;
     let ok = verdict.kind === "pass";
     let userDecision: "trusted" | "cancelled" | null = null;
     // A legacy route miss can become pass here. It must still display an
     // opted-in scam result instead of silently bypassing pre-sign review.
-    if (scam !== undefined) {
+    if (scam !== undefined || backdoor !== undefined || windowRules !== undefined) {
       if (verdict.kind === "fail") {
         await openVerdictWindow(message.requestId, message.data.hostname,
-          verdict, confirmDetailsForMessage(message), scam);
+          verdict, confirmDetailsForMessage(message), scam, backdoor, windowRules);
       } else {
         ok = await openVerdictWindowAndAwait(message.requestId, message.data.hostname,
-          verdict, confirmDetailsForMessage(message), options.onAwaitingUser, scam);
+          verdict, confirmDetailsForMessage(message), options.onAwaitingUser, scam, backdoor, windowRules);
         userDecision = ok ? "trusted" : "cancelled";
       }
     }
@@ -434,7 +497,7 @@ async function decideInner(
     // hard-coded to false.
     return { ok, verdict };
   } finally {
-    scamCheck?.cancel();
+    scamChecks.cancel();
     await pendingDelete(message.requestId);
   }
 }
@@ -706,7 +769,11 @@ function logDecision(message: Message, verdict: VerdictDto): void {
   }
 }
 
-async function runLifecycle(message: Message): Promise<LifecycleResult> {
+async function runLifecycle(
+  message: Message,
+  /** Receives the decoded `Action[]` as soon as the route produces it. */
+  onDecoded?: (actions: readonly unknown[]) => void,
+): Promise<LifecycleResult> {
   // Venue request (Hyperliquid `/exchange`, ...) — its own v2 path. It never
   // carries EVM calldata, so it does not go through the `tryDeclarativeRouteV3`
   // calldata branch below; instead the JSON intent is converted to
@@ -756,6 +823,8 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
         submittedAt: Math.floor(Date.now() / 1000),
       });
       markPhase(message.requestId, "route_done", { outcome: v3Outcome.kind });
+      // Reuse this decode for the pool-backdoor check instead of decoding twice.
+      if (v3Outcome.kind === "hit") onDecoded?.(v3Outcome.value.actions);
       declarativeV3Meta = auditFromDeclarativeV3Outcome(v3Outcome, nature);
       console.info("[Dambi] declarative-route-v3", {
         requestId: message.requestId,
@@ -1975,9 +2044,13 @@ async function openVerdictWindow(
   verdict: VerdictDto,
   details: ConfirmDetails | null = null,
   scam?: ScamDisplay,
+  backdoor?: BackdoorDisplay,
+  windowRules?: WindowDisplay,
 ): Promise<void> {
   if (scam) await storeScamDisplay(requestId, scam);
-  const url = buildConfirmUrl(requestId, hostname, verdict, details, scam !== undefined);
+  if (backdoor) await storeBackdoorDisplay(requestId, backdoor);
+  if (windowRules) await storeWindowDisplay(requestId, windowRules);
+  const url = buildConfirmUrl(requestId, hostname, verdict, details, scam !== undefined, backdoor !== undefined, windowRules !== undefined);
   try {
     await Browser.windows.create({
       url,
@@ -2008,6 +2081,8 @@ async function openVerdictWindowAndAwait(
   details: ConfirmDetails | null = null,
   onAwaitingUser?: () => void,
   scam?: ScamDisplay,
+  backdoor?: BackdoorDisplay,
+  windowRules?: WindowDisplay,
 ): Promise<boolean> {
   const all =
     ((
@@ -2022,7 +2097,9 @@ async function openVerdictWindowAndAwait(
   await Browser.storage.session.set({ [PENDING_DECISION_KEY]: all });
 
   if (scam) await storeScamDisplay(requestId, scam);
-  const url = buildConfirmUrl(requestId, hostname, verdict, details, scam !== undefined);
+  if (backdoor) await storeBackdoorDisplay(requestId, backdoor);
+  if (windowRules) await storeWindowDisplay(requestId, windowRules);
+  const url = buildConfirmUrl(requestId, hostname, verdict, details, scam !== undefined, backdoor !== undefined, windowRules !== undefined);
   let win: Browser.Windows.Window;
   try {
     win = await Browser.windows.create({
@@ -2103,6 +2180,8 @@ function buildConfirmUrl(
   verdict: VerdictDto,
   details: ConfirmDetails | null = null,
   hasScam = false,
+  hasBackdoor = false,
+  hasWindowRules = false,
 ): string {
   const params = new URLSearchParams({
     requestId,
@@ -2112,6 +2191,14 @@ function buildConfirmUrl(
   if (details) params.set("details", JSON.stringify(details));
   if (hasScam) {
     params.set("scam", "1");
+    if (verdict.kind !== "fail") params.set("review", "1");
+  }
+  if (hasBackdoor) {
+    params.set("backdoor", "1");
+    if (verdict.kind !== "fail") params.set("review", "1");
+  }
+  if (hasWindowRules) {
+    params.set("window", "1");
     if (verdict.kind !== "fail") params.set("review", "1");
   }
   return Browser.runtime.getURL(`confirm.html?${params.toString()}`);

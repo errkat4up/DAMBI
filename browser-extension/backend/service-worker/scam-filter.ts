@@ -10,6 +10,13 @@ import { RequestType, type Message } from "@lib/types";
 import type { ScamDisplay } from "@lib/scam-display";
 
 export const SCAM_HOST_CONFIG_KEY = "scam-filter:host-config";
+/**
+ * The user's own `ScamSettings` (enabled, presetId, overrides, additionalRules),
+ * kept apart from the deployment input above (sources, keys, RPC, limits) so the
+ * dashboard can change one without rewriting the other. Has no effect until a
+ * host configuration exists.
+ */
+export const SCAM_USER_SETTINGS_KEY = "scam-filter:settings";
 const CHECK_TIMEOUT_MS = 2_500;
 const PREPARE_TIMEOUT_MS = 60_000;
 type UnavailableReason = Extract<ScamDisplay, { kind: "unavailable" }>["reason"];
@@ -268,13 +275,47 @@ export function createScamHost(dependencies: HostDependencies) {
   return { warm, begin, invalidate };
 }
 
-const host = createScamHost({ readConfig: async () => (await Browser.storage.local.get(SCAM_HOST_CONFIG_KEY))[SCAM_HOST_CONFIG_KEY] });
+/**
+ * The host configuration with the user's settings laid over
+ * `scam.config.settings`. Only the four user-owned fields are taken, and only
+ * when they have the right basic type; `locale` and everything else stay as
+ * deployed. The result still goes through `configuration()` and the Core.
+ */
+export function withUserSettings(hostConfig: unknown, userSettings: unknown): unknown {
+  if (!record(hostConfig) || !record(userSettings)) return hostConfig;
+  const scam = hostConfig.scam;
+  const config = record(scam) ? scam.config : undefined;
+  const settings = record(config) ? config.settings : undefined;
+  if (!record(scam) || !record(config) || !record(settings)) return hostConfig;
+  const picked: Record<string, unknown> = {};
+  if (typeof userSettings.enabled === "boolean") picked.enabled = userSettings.enabled;
+  if (typeof userSettings.presetId === "string" && userSettings.presetId) picked.presetId = userSettings.presetId;
+  if (Array.isArray(userSettings.overrides)) picked.overrides = userSettings.overrides;
+  if (Array.isArray(userSettings.additionalRules)) picked.additionalRules = userSettings.additionalRules;
+  return { ...hostConfig, scam: { ...scam, config: { ...config, settings: { ...settings, ...picked } } } };
+}
+
+async function readStoredConfig(): Promise<unknown> {
+  const stored = await Browser.storage.local.get([SCAM_HOST_CONFIG_KEY, SCAM_USER_SETTINGS_KEY]);
+  return withUserSettings(stored[SCAM_HOST_CONFIG_KEY], stored[SCAM_USER_SETTINGS_KEY]);
+}
+
+/** Whether a host configuration is stored at all (valid or not). No network. */
+export async function scamHostConfigured(): Promise<boolean> {
+  try {
+    return (await Browser.storage.local.get(SCAM_HOST_CONFIG_KEY))[SCAM_HOST_CONFIG_KEY] !== undefined;
+  } catch {
+    return false;
+  }
+}
+
+const host = createScamHost({ readConfig: readStoredConfig });
 let listening = false;
 function listenForConfiguration(): void {
   if (listening) return;
   listening = true;
   Browser.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local" || !(SCAM_HOST_CONFIG_KEY in changes)) return;
+    if (area !== "local" || !(SCAM_HOST_CONFIG_KEY in changes || SCAM_USER_SETTINGS_KEY in changes)) return;
     host.invalidate();
     host.warm();
   });

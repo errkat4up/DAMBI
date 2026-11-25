@@ -36,6 +36,10 @@ interface WasmExports {
   // `(chain_id, verifying_contract, primary_type)` (+ optional witness_type);
   // decodes the raw EIP-712 `message` to the same ActionBody tree.
   declarative_route_typed_data_v3_json(input_json: string): string;
+  // Scam Filter window rules — the unmodified `scam-filter` crate.
+  // Contract: `crates/policy-engine-wasm/src/scam_window_exports.rs`.
+  scam_window_analyze_json(input_json: string): string;
+  scam_window_events_json(input_json: string): string;
   // Stateless policy-RPC plan + evaluate (v2 ActionBody model).
   // Contract: `crates/policy-engine-wasm/src/action_eval_exports.rs`.
   // Returns `{ ok, data: { planned: [...] } }` / `{ ok: false, error }`.
@@ -578,4 +582,14 @@ export async function simulateStep(
   return unwrap<SimulateStepOutput>(
     exports.simulate_step_json(JSON.stringify(input)),
   );
+}
+
+/**
+ * Evaluate window rules over one pool's history with the `scam-filter` crate.
+ * `request` is the crate's `AnalysisRequest`; the result is its `ScamAnalysis`.
+ * Throws `EngineError` on invalid input or an exceeded limit.
+ */
+export async function scamWindowAnalyze<T = unknown>(request: unknown): Promise<T> {
+  const exports = await load();
+  return unwrap<T>(exports.scam_window_analyze_json(JSON.stringify(request)));
 }

@@ -1,5 +1,9 @@
 import Browser from "webextension-polyfill";
 import { scamConfirmKey } from "@lib/scam-display";
+import { backdoorConfirmKey, readStoredBackdoorDisplay } from "@lib/backdoor-display";
+import { renderBackdoorCard } from "./backdoor-card";
+import { readStoredWindowDisplay, windowConfirmKey } from "@lib/window-display";
+import { renderWindowCard } from "./window-card";
 import {
   readStoredScamDisplay,
   renderScamCard,
@@ -44,6 +48,8 @@ const hostname = params.get("hostname") ?? "";
 const verdictRaw = params.get("verdict") ?? '{"kind":"fail"}';
 const detailsRaw = params.get("details") ?? "";
 const scamRequested = params.get("scam") === "1";
+const backdoorRequested = params.get("backdoor") === "1";
+const windowRequested = params.get("window") === "1";
 const reviewRequired = params.get("review") === "1";
 
 let verdict: VerdictDto;
@@ -209,6 +215,32 @@ async function loadScamCard(slot: HTMLElement): Promise<void> {
   }
 }
 
+/** Adds the addresses to the warning already on screen. The warning never waits on storage. */
+async function loadBackdoorCard(slot: HTMLElement): Promise<void> {
+  const key = backdoorConfirmKey(requestId);
+  try {
+    const stored = await Browser.storage.session.get(key);
+    const display = readStoredBackdoorDisplay(stored[key], requestId, Date.now());
+    if (display) slot.replaceChildren(renderBackdoorCard(display));
+    void Browser.storage.session.remove(key).catch(() => {});
+  } catch {
+    /* the warning without addresses stays */
+  }
+}
+
+/** Adds what fired to the warning already on screen. The warning never waits on storage. */
+async function loadWindowCard(slot: HTMLElement): Promise<void> {
+  const key = windowConfirmKey(requestId);
+  try {
+    const stored = await Browser.storage.session.get(key);
+    const display = readStoredWindowDisplay(stored[key], requestId, Date.now());
+    if (display) slot.replaceChildren(renderWindowCard(display));
+    void Browser.storage.session.remove(key).catch(() => {});
+  } catch {
+    /* the warning without details stays */
+  }
+}
+
 function render(): void {
   const root = document.getElementById("root");
   if (!root) return;
@@ -216,7 +248,7 @@ function render(): void {
   const kind = verdict.kind;
   const isFail = kind === "fail";
   const isWarn = kind === "warn";
-  const isPassReview = kind === "pass" && (scamRequested || reviewRequired);
+  const isPassReview = kind === "pass" && (scamRequested || backdoorRequested || windowRequested || reviewRequired);
   const visualKind = isPassReview ? "review" : kind;
   const c = isPassReview
     ? { head: "서명 전 검사 결과", sub: "정책 판정과 Scam Filter 검사 정보를 확인한 뒤 진행 여부를 선택하세요." }
@@ -281,6 +313,16 @@ function render(): void {
     scamSlot.setAttribute("aria-live", "polite");
     body.appendChild(scamSlot);
   }
+  let backdoorSlot: HTMLElement | null = null;
+  if (backdoorRequested) {
+    backdoorSlot = el("div", { class: "scam-slot" }, [renderBackdoorCard()]);
+    body.appendChild(backdoorSlot);
+  }
+  let windowSlot: HTMLElement | null = null;
+  if (windowRequested) {
+    windowSlot = el("div", { class: "scam-slot" }, [renderWindowCard()]);
+    body.appendChild(windowSlot);
+  }
 
   const matched = verdict.matched ?? [];
   if (matched.length === 0) {
@@ -342,6 +384,8 @@ function render(): void {
   root.appendChild(body);
   root.appendChild(footer);
   // Storage must never delay the existing cancel/deny controls.
+  if (backdoorSlot) void loadBackdoorCard(backdoorSlot);
+  if (windowSlot) void loadWindowCard(windowSlot);
   if (scamSlot) void loadScamCard(scamSlot).finally(() => {
     if (approveBtn) approveBtn.disabled = false;
   });

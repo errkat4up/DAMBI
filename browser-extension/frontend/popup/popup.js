@@ -418,7 +418,7 @@ function renderSettingsOverlay() {
 
   ovl.querySelector("#setBack").addEventListener("click", closeSettings);
   ovl.querySelectorAll(".pc-preset").forEach((b) => b.addEventListener("click", () => {
-    state.settings = { preset: b.dataset.p, ...S.SETTINGS_PRESETS[b.dataset.p] };
+    state.settings = { ...state.settings, preset: b.dataset.p, ...S.SETTINGS_PRESETS[b.dataset.p] };
     S.saveSettings(state.settings); renderSettingsOverlay();
   }));
   ovl.querySelectorAll(".set-seg").forEach((seg) => seg.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
@@ -682,7 +682,7 @@ function renderSheet() {
     '</div>';
   sheet.querySelectorAll(".pc-preset").forEach((b) => b.addEventListener("click", () => {
     const p = b.dataset.p;
-    state.settings = { preset: p, ...S.SETTINGS_PRESETS[p] };
+    state.settings = { ...state.settings, preset: p, ...S.SETTINGS_PRESETS[p] };
     S.saveSettings(state.settings);
     renderSheet();
   }));

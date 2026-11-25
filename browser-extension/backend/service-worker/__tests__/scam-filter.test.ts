@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CallOptions, CheckRequest, CorePlan, DambiCore, ScamReport, Verdict } from "@dambi/core";
 import type { ScamFactProvider } from "@dambi/core/adapters";
 import { RequestType, type Message, type TransactionPayload } from "@lib/types";
-import { createScamHost } from "../scam-filter";
+import { createScamHost, withUserSettings } from "../scam-filter";
 
 // These tests inject readConfig/open into createScamHost. Importing the module
 // must not load the extension-only polyfill or silently use real host storage.
@@ -206,5 +206,24 @@ describe("optional Scam Filter host", () => {
     await flush();
     expect(sdk.provider.prepare).not.toHaveBeenCalled();
     host.invalidate();
+  });
+});
+
+describe("withUserSettings", () => {
+  const hostConfig = { version: 1, mode: "local-demo", policy: { source: { baseUrl: "https://policy.example" } },
+    scam: { source: { env: "staging" }, config: { trust: { env: "staging" }, limits: { scamTimeoutMs: 2500 },
+      settings: { enabled: true, presetId: "deployed", overrides: [], additionalRules: [], locale: "ko" } } } };
+
+  it("lays the user's four fields over the deployed settings and leaves the rest alone", () => {
+    const user = { enabled: false, presetId: "mine", overrides: [{ id: "a", kind: "window_drop" }], additionalRules: [{ id: "b", kind: "event_count" }],
+      locale: "xx", trust: { env: "production" } };
+    expect(withUserSettings(hostConfig, user)).toEqual({ ...hostConfig, scam: { ...hostConfig.scam, config: { ...hostConfig.scam.config,
+      settings: { enabled: false, presetId: "mine", overrides: user.overrides, additionalRules: user.additionalRules, locale: "ko" } } } });
+  });
+
+  it("ignores fields of the wrong type and returns the host configuration unchanged without user settings", () => {
+    expect(withUserSettings(hostConfig, { enabled: "no", presetId: "", overrides: "x", additionalRules: null })).toEqual(hostConfig);
+    expect(withUserSettings(hostConfig, undefined)).toBe(hostConfig);
+    expect(withUserSettings(undefined, { enabled: false })).toBeUndefined(); // user settings alone configure nothing
   });
 });
