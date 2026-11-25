@@ -40,7 +40,7 @@
     },
     "token.security_flags": {
       "name": "token.security_flags",
-      "description": "External token-security feed for a decoded ERC-20 token. Reports honeypot/malicious flags and optional buy/sell tax bps when the feed can answer.",
+      "description": "External token-security feed for a decoded ERC-20 token. Reports honeypot/malicious flags, owner privileges (tokenOwnerPrivileges: balance_change, take_back_ownership, mint, hidden_owner, transfer_pause) and code traits (tokenCodeTraits: closed_source, proxy) as Set<String>, plus optional buy/sell tax bps, same-creator honeypot history and creator holding bps when the feed can answer.",
       "params": {
         "chain_id": {
           "type": "Long",

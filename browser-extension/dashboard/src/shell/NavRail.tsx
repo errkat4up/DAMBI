@@ -74,6 +74,7 @@ export function NavRail() {
         <RailItem to="/simulation" label={t("nav.simulation")} icon={<SimIcon />} />
         <RailItem to="/assets" label={t("nav.assets")} icon={<MonIcon />} />
         <RailItem to="/market" label={t("nav.market")} icon={<MarketIcon />} />
+        <RailItem to="/scam" label={t("nav.scam")} icon={<ScamIcon />} />
       </div>
 
       <div className="nav-divider" />
@@ -217,6 +218,12 @@ const MarketIcon = () => (
   <svg viewBox="0 0 24 24" {...stroke}>
     <path d="M3 8h18l-2 12H5z" />
     <path d="M8 8V5a4 4 0 0 1 8 0v3" />
+  </svg>
+);
+const ScamIcon = () => (
+  <svg viewBox="0 0 24 24" {...stroke}>
+    <path d="M12 3l8 3v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6z" />
+    <path d="M12 8.5v4M12 15.5h.01" />
   </svg>
 );
 const ProfileIcon = () => (

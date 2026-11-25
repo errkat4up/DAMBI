@@ -167,10 +167,10 @@ pub struct OutboundTransfer {
 /// `GoPlus`-trust-listed (famous) token is reported as all-clear to avoid
 /// false-positives on blue-chips (e.g. USDT carries mint/pause/blacklist/owner
 /// controls).
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct TokenSecurityFlags {
-    /// Buyable-but-not-sellable honeypot (or sell blocked), analysis-confirmed
-    /// (open-source). Deny-grade: an unambiguous total-loss outcome.
+    /// Buyable-but-not-sellable honeypot (or sell blocked) as the feed reports it,
+    /// closed-source contracts included.
     pub is_honeypot: bool,
     /// Any high-precision total-loss signal — honeypot, hidden owner, selfdestruct,
     /// airdrop-scam, counterfeit, or 100% sell tax. EXCLUDES blue-chip-common
@@ -181,6 +181,17 @@ pub struct TokenSecurityFlags {
     pub sell_tax_bps: Option<i64>,
     /// Current buy tax in basis points; `None` when unreported.
     pub buy_tax_bps: Option<i64>,
+    /// Owner/admin controls the feed reports as present, by stable name
+    /// (`balance_change`, `take_back_ownership`, `mint`, `hidden_owner`,
+    /// `transfer_pause`). Projected as a `Set<String>` so a policy's list blank
+    /// matches with `containsAny` — the user picks which controls warn.
+    pub owner_privileges: Vec<&'static str>,
+    /// Contract-code traits the feed reports (`closed_source`, `proxy`), same shape.
+    pub code_traits: Vec<&'static str>,
+    /// The token's creator has deployed a honeypot before; `None` when unreported.
+    pub same_creator_honeypot: Option<bool>,
+    /// Share of supply the creator holds, in basis points; `None` when unreported.
+    pub creator_hold_bps: Option<i64>,
 }
 
 /// AMM pool market-depth facts from a DEX-analytics subgraph, surfaced by
@@ -1353,9 +1364,11 @@ async fn address_reputation(params: &Value, external: &dyn ExternalEnrichment) -
 /// pre-resolved lowercase contract address, NOT the `{key}` object: `asset_address`
 /// reads a bare string / `.address`, it does not traverse into `key`) via the
 /// injected [`ExternalEnrichment`] feed (`GoPlus` `token_security` in production).
-/// Projects `{ tokenIsHoneypot, tokenIsMalicious, tokenSellTaxBps?, tokenBuyTaxBps? }`
-/// — the tax fields are OMITTED when the feed reported no parseable tax (so a
-/// quantity-cap policy stays dormant rather than comparing against a fabricated 0).
+/// Projects `{ tokenIsHoneypot, tokenIsMalicious, tokenOwnerPrivileges,
+/// tokenCodeTraits, tokenSellTaxBps?, tokenBuyTaxBps?, tokenSameCreatorHoneypot?,
+/// tokenCreatorHoldBps? }` — the optional fields are OMITTED when the feed reported
+/// no parseable value (so a quantity-cap policy stays dormant rather than comparing
+/// against a fabricated 0).
 /// `None` when the token is missing or the feed could not answer → result omitted
 /// (fail-open for the optional call), never a fabricated "clean".
 async fn token_security(params: &Value, external: &dyn ExternalEnrichment) -> Option<Value> {
@@ -1365,11 +1378,19 @@ async fn token_security(params: &Value, external: &dyn ExternalEnrichment) -> Op
     let mut out = serde_json::Map::new();
     out.insert("tokenIsHoneypot".to_owned(), json!(f.is_honeypot));
     out.insert("tokenIsMalicious".to_owned(), json!(f.is_malicious));
+    out.insert("tokenOwnerPrivileges".to_owned(), json!(f.owner_privileges));
+    out.insert("tokenCodeTraits".to_owned(), json!(f.code_traits));
     if let Some(bps) = f.sell_tax_bps {
         out.insert("tokenSellTaxBps".to_owned(), json!(bps));
     }
     if let Some(bps) = f.buy_tax_bps {
         out.insert("tokenBuyTaxBps".to_owned(), json!(bps));
+    }
+    if let Some(b) = f.same_creator_honeypot {
+        out.insert("tokenSameCreatorHoneypot".to_owned(), json!(b));
+    }
+    if let Some(bps) = f.creator_hold_bps {
+        out.insert("tokenCreatorHoldBps".to_owned(), json!(bps));
     }
     Some(Value::Object(out))
 }
@@ -1808,7 +1829,7 @@ mod tests {
             None
         }
         async fn token_security_flags(&self, _c: i64, _t: &str) -> Option<TokenSecurityFlags> {
-            self.0
+            self.0.clone()
         }
         async fn pool_liquidity(
             &self,
@@ -1833,7 +1854,7 @@ mod tests {
                 is_honeypot: true,
                 is_malicious: true,
                 sell_tax_bps: Some(2500),
-                buy_tax_bps: None,
+                ..Default::default()
             })),
         )
         .await
@@ -1841,7 +1862,36 @@ mod tests {
         // Honeypot + malicious projected; present sell tax emitted, absent buy tax omitted.
         assert_eq!(
             v,
-            serde_json::json!({ "tokenIsHoneypot": true, "tokenIsMalicious": true, "tokenSellTaxBps": 2500 })
+            serde_json::json!({
+                "tokenIsHoneypot": true, "tokenIsMalicious": true, "tokenSellTaxBps": 2500,
+                "tokenOwnerPrivileges": [], "tokenCodeTraits": []
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn token_security_projects_privileges_traits_and_creator() {
+        let params = serde_json::json!({ "token": "0x0000000000000000000000000000000000000004" });
+        let v = super::token_security(
+            &params,
+            &StubTokenSec(Some(TokenSecurityFlags {
+                owner_privileges: vec!["balance_change", "mint"],
+                code_traits: vec!["closed_source"],
+                same_creator_honeypot: Some(false),
+                creator_hold_bps: Some(1500),
+                ..Default::default()
+            })),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({
+                "tokenIsHoneypot": false, "tokenIsMalicious": false,
+                "tokenOwnerPrivileges": ["balance_change", "mint"],
+                "tokenCodeTraits": ["closed_source"],
+                "tokenSameCreatorHoneypot": false, "tokenCreatorHoldBps": 1500
+            })
         );
     }
 
@@ -1855,7 +1905,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             v,
-            serde_json::json!({ "tokenIsHoneypot": false, "tokenIsMalicious": false })
+            serde_json::json!({
+                "tokenIsHoneypot": false, "tokenIsMalicious": false,
+                "tokenOwnerPrivileges": [], "tokenCodeTraits": []
+            })
         );
     }
 
@@ -2225,15 +2278,17 @@ mod tests {
             &StubTokenSec(Some(TokenSecurityFlags {
                 is_honeypot: true,
                 is_malicious: true,
-                sell_tax_bps: None,
-                buy_tax_bps: None,
+                ..Default::default()
             })),
             &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(
             results["m::token-sec"],
-            serde_json::json!({ "tokenIsHoneypot": true, "tokenIsMalicious": true })
+            serde_json::json!({
+                "tokenIsHoneypot": true, "tokenIsMalicious": true,
+                "tokenOwnerPrivileges": [], "tokenCodeTraits": []
+            })
         );
     }
 

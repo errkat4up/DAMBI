@@ -14,7 +14,13 @@ import {
   removeWalletFromSync,
   type Ps2Request,
 } from "./policy-store/api";
-import { decideMessage } from "./orchestrator";
+import { decideWalletRequest } from "./orchestrator";
+import { sourceOf } from "./forwarded-requests";
+import {
+  handleScamSettingsRequest,
+  isScamSettingsRequest,
+  scamSettingsDeps,
+} from "./scam-settings-handlers";
 import { warmScamHost } from "./scam-filter";
 import {
   ensureLoaded as ensureNotifySettings,
@@ -229,7 +235,10 @@ async function handleMessage(
     return;
   }
 
-  const { ok } = await decideMessage(message, {
+  // A request Dambi already allowed is seen again by the bypass observer once
+  // it reaches the wallet; `decideWalletRequest` recognises that copy and
+  // returns null without judging it a second time.
+  const decision = await decideWalletRequest(message, sourceOf(port.sender), {
     onAwaitingUser: () => {
       try {
         port.postMessage({
@@ -260,10 +269,10 @@ async function handleMessage(
       });
     },
   });
-  if (!message.data.bypassed) {
+  if (decision && !message.data.bypassed) {
     const response: MessageResponse = {
       requestId: message.requestId,
-      data: ok,
+      data: decision.ok,
     };
     try {
       port.postMessage(response);
@@ -744,9 +753,16 @@ Browser.alarms.onAlarm.addListener((alarm) => {
 });
 
 Browser.runtime.onMessage.addListener(
-  (message: unknown, _sender, sendResponse: (r: unknown) => void) => {
+  (message: unknown, sender, sendResponse: (r: unknown) => void) => {
     const req = message as Partial<PopupRequest> | null;
     if (!req || typeof req !== "object") return;
+
+    // 스캠 필터 설정(/scam 페이지). 발신자 검사는 핸들러 안에서 한다 — 익스텐션
+    // 자체 페이지(및 개발 빌드의 대시보드 브리지)만 허용, 일반 웹페이지는 거부.
+    if (isScamSettingsRequest(req)) {
+      void handleScamSettingsRequest(req, sender, scamSettingsDeps()).then(sendResponse);
+      return true;
+    }
 
     // 정책 스토리지 v2 — ps2:* 패밀리는 단일 디스패처로. 핸들러별 분기 대신
     // api.ts의 switch가 메시지 모양을 ops로 위임한다(쓰기는 전부 mutate 큐).

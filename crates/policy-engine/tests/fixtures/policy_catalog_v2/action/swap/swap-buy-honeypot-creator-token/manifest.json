@@ -1,0 +1,51 @@
+{
+  "id": "swap-buy-honeypot-creator-token",
+  "schema_version": 2,
+  "trigger": {
+    "where": {
+      "action.tag": {
+        "eq": "swap"
+      }
+    }
+  },
+  "policy_rpc": [
+    {
+      "id": "out-token-sec",
+      "method": "token.security_flags",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "token": "$.action.tokenOut.key.address"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "tokenSameCreatorHoneypot",
+          "type": "Bool",
+          "from": "$.result.tokenSameCreatorHoneypot",
+          "required": false
+        },
+        {
+          "kind": "context",
+          "field": "tokenCreatorHoldBps",
+          "type": "Long",
+          "from": "$.result.tokenCreatorHoldBps",
+          "required": false
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": {
+    "fields": {
+      "tokenSameCreatorHoneypot": "Bool",
+      "tokenCreatorHoldBps": "Long"
+    }
+  },
+  "_template": {
+    "minCreatorHoldBps": {
+      "cedar_long": "0",
+      "default": "0 bps = any holding (creator history alone)",
+      "meaning": "Also require the creator to still hold at least this share of supply (basis points). Default 0 warns on the creator history alone: normal tokens 1.1% on ETH Uniswap V2 WETH pools 2023-06..2026-08, normal = pools alive and trading at day 30 (research s15/s16). The holding share was measured after the outcome, so raising this blank is not validated by data."
+    }
+  }
+}

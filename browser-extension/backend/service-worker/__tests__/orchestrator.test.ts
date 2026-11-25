@@ -64,9 +64,12 @@ const mocks = vi.hoisted(() => {
     runtimeMessageListeners,
     windowRemovedListeners,
     cancelScam,
-    beginScamCheck: vi.fn<(...args: unknown[]) => { promise: Promise<ScamDisplay | undefined>; cancel(): void }>(
-      () => ({ promise: Promise.resolve(undefined), cancel: cancelScam }),
-    ),
+    // The shared gate in front of the scam checks. Its own behaviour is covered
+    // in scam-checks.test.ts; here it only hands the orchestrator a result.
+    beginScamChecks: vi.fn<(...args: unknown[]) => {
+      promise: Promise<{ scam?: ScamDisplay; backdoor?: unknown; window?: unknown }>;
+      offer(actions: readonly unknown[]): void; close(): void; cancel(): void;
+    }>(() => ({ promise: Promise.resolve({}), offer: () => undefined, close: () => undefined, cancel: cancelScam })),
     shouldWarnModal: vi.fn(() => true),
     ensureDefaultPoliciesInstalled: vi.fn(async () => undefined),
     pendingPut: vi.fn(async () => undefined),
@@ -168,7 +171,7 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("webextension-polyfill", () => ({ default: mocks.browser }));
-vi.mock("../scam-filter", () => ({ beginScamCheck: mocks.beginScamCheck }));
+vi.mock("../scam-checks", () => ({ beginScamChecks: mocks.beginScamChecks }));
 vi.mock("../notify-settings", () => ({
   ensureLoaded: vi.fn(async () => undefined),
   shouldWarnModal: mocks.shouldWarnModal,
@@ -299,7 +302,8 @@ vi.mock("../venue/resolve-order-symbol", () => ({
   resolveOrderSymbol: vi.fn(async () => undefined),
 }));
 
-import { decideMessage, inferActor } from "../orchestrator";
+import { decideMessage, decideWalletRequest, inferActor } from "../orchestrator";
+import { resetForwarded } from "../forwarded-requests";
 
 function txMessage(requestId = "req-1"): Message {
   return {
@@ -459,8 +463,8 @@ describe("orchestrator", () => {
     mocks.localStore.clear();
     mocks.runtimeMessageListeners.length = 0;
     mocks.windowRemovedListeners.length = 0;
-    mocks.beginScamCheck.mockImplementation(() => ({
-      promise: Promise.resolve(undefined), cancel: mocks.cancelScam,
+    mocks.beginScamChecks.mockImplementation(() => ({
+      promise: Promise.resolve({}), offer: () => undefined, close: () => undefined, cancel: mocks.cancelScam,
     }));
     mocks.shouldWarnModal.mockReturnValue(true);
     // v3 route default: miss → fail-closed path. The v2 plan/dispatch/evaluate
@@ -509,18 +513,238 @@ describe("orchestrator", () => {
     },
   };
 
+  // What the gate hands over is always a warning; it filters everything else out.
   const scamDisplay: ScamDisplay = {
     version: 1, kind: "report", holding: "unknown",
     report: {
-      status: "insufficient", reasons: ["algorithm_unavailable"], targets: [],
+      status: "warn", reasons: ["rule_fired_marker"], targets: [],
       scopeNotice: "patterns_only_no_sellability_guarantee",
     },
   };
+  const backdoorDisplay = {
+    version: 1 as const, kind: "pool_backdoor" as const, chainId: 1,
+    token: "0x" + "b0".repeat(20), pool: "0x" + "a0".repeat(20), deployer: "0x" + "d0".repeat(20),
+  };
+  const windowDisplay = {
+    version: 1 as const, kind: "window_rules" as const, chainId: 1, token: "0x" + "b0".repeat(20), pool: "0x" + "a0".repeat(20),
+    presetId: "window-sensitive", poolAgeSec: 300,
+    rules: [{ id: "r1-up-burst-sensitive", observed: 8, threshold: 5, lookbackSec: 300, thresholdBps: 2000,
+      direction: "up" as const, changeMode: "step" as const, metric: "price_quote_per_token" as const }],
+  };
+  const scamChecks = (results: { scam?: ScamDisplay; backdoor?: typeof backdoorDisplay; window?: typeof windowDisplay }) => {
+    const offer = vi.fn();
+    const close = vi.fn();
+    return { promise: Promise.resolve(results), offer, close, cancel: mocks.cancelScam };
+  };
+
+  it("hands the decoded actions to the scam gate and opens no window when it reports nothing", async () => {
+    mocks.tryDeclarativeRouteV3.mockResolvedValueOnce(v3HitOutcome);
+    const gate = scamChecks({});
+    mocks.beginScamChecks.mockReturnValueOnce(gate);
+    const result = await decideMessage(txMessage("scam-gate-quiet"), {});
+    expect(result).toMatchObject({ ok: true, verdict: { kind: "pass" } });
+    expect(gate.offer).toHaveBeenCalledExactlyOnceWith(v3HitOutcome.value.actions);
+    expect(gate.close).toHaveBeenCalled();
+    expect(mocks.browser.windows.create).not.toHaveBeenCalled();
+    expect(mocks.cancelScam).toHaveBeenCalledOnce();
+  });
+
+  it("a fired window rule requires review of an otherwise passing request", async () => {
+    for (const ok of [false, true]) {
+      mocks.tryDeclarativeRouteV3.mockResolvedValueOnce(v3HitOutcome);
+      mocks.beginScamChecks.mockReturnValueOnce(scamChecks({ window: windowDisplay }));
+      const message = txMessage(`window-pass-${ok}`);
+      const onAwaitingUser = vi.fn();
+      const pending = decideMessage(message, { onAwaitingUser });
+      await vi.waitFor(() => expect(onAwaitingUser).toHaveBeenCalledOnce());
+      const url = lastConfirmUrl();
+      expect(url.searchParams.get("window")).toBe("1");
+      expect(url.searchParams.get("review")).toBe("1");
+      expect(url.searchParams.has("scam")).toBe(false);
+      expect(url.searchParams.has("backdoor")).toBe(false);
+      expect(url.toString()).not.toContain(windowDisplay.pool); // details travel through session storage
+      expect(mocks.sessionStore.get(`window:confirm:${message.requestId}`)).toMatchObject({ requestId: message.requestId, display: windowDisplay });
+      approve(message.requestId, ok);
+      expect(await pending).toMatchObject({ ok, verdict: { kind: "pass" } });
+    }
+  });
+
+  it("a flagged pool backdoor requires review of an otherwise passing request", async () => {
+    for (const ok of [false, true]) {
+      mocks.tryDeclarativeRouteV3.mockResolvedValueOnce(v3HitOutcome);
+      mocks.beginScamChecks.mockReturnValueOnce(scamChecks({ backdoor: backdoorDisplay }));
+      const message = txMessage(`backdoor-pass-${ok}`);
+      const onAwaitingUser = vi.fn();
+      const pending = decideMessage(message, { onAwaitingUser });
+      await vi.waitFor(() => expect(onAwaitingUser).toHaveBeenCalledOnce());
+      const url = lastConfirmUrl();
+      expect(url.searchParams.get("backdoor")).toBe("1");
+      expect(url.searchParams.get("review")).toBe("1");
+      expect(url.searchParams.has("scam")).toBe(false);
+      // Addresses travel through session storage, never the URL.
+      expect(url.toString()).not.toContain(backdoorDisplay.deployer);
+      expect(mocks.sessionStore.get(`backdoor:confirm:${message.requestId}`)).toMatchObject({ requestId: message.requestId, display: backdoorDisplay });
+      approve(message.requestId, ok);
+      expect(await pending).toMatchObject({ ok, verdict: { kind: "pass" } });
+    }
+  });
+
+  // ── Bypass observer rows ────────────────────────────────────────────
+  // `bypass-check.ts` reports every request it sees on the wallet's own stream
+  // as `bypassed`, including the ones the wrapper just allowed. Those copies
+  // are dropped by fingerprint; a genuine bypass row is observed only.
+  describe("bypass observer rows", () => {
+    const PAGE = { tabId: 7, origin: "https://app.example" };
+    const failVerdict = {
+      kind: "fail" as const,
+      matched: [{ policy_id: "deny-policy", reason: "blocked by policy", severity: "deny", origin: "tx" }],
+    };
+    /** The wallet-side copy: same transaction, the observer's own chain id guess. */
+    const bypassCopy = (m: Message, requestId: string, chainId = 1): Message =>
+      ({ requestId, data: { ...(m.data as object), chainId, bypassed: true } }) as Message;
+    const onChain = (m: Message, chainId: number): Message =>
+      ({ ...m, data: { ...(m.data as object), chainId } }) as Message;
+    const passes = () => mocks.tryDeclarativeRouteV3.mockResolvedValueOnce(v3HitOutcome);
+    const fails = () => { passes(); mocks.evaluateActionV2.mockResolvedValueOnce(failVerdict); };
+    const snapshot = () => ({
+      route: mocks.tryDeclarativeRouteV3.mock.calls.length,
+      scam: mocks.beginScamChecks.mock.calls.length,
+      windows: mocks.browser.windows.create.mock.calls.length,
+      audit: mocks.auditAppend.mock.calls.length,
+    });
+
+    beforeEach(() => resetForwarded());
+
+    it("the copy of a request the wrapper allowed is dropped: no verdict, window, notification or audit row", async () => {
+      passes();
+      const wrapped = txMessage("fw-pass");
+      expect(await decideWalletRequest(wrapped, PAGE, {})).toMatchObject({ ok: true });
+      const before = snapshot();
+      const onRiskyVerdict = vi.fn();
+      const onAwaitingUser = vi.fn();
+      expect(await decideWalletRequest(bypassCopy(wrapped, "fw-pass-copy"), PAGE, { onRiskyVerdict, onAwaitingUser })).toBeNull();
+      expect(snapshot()).toEqual(before);
+      expect(onRiskyVerdict).not.toHaveBeenCalled();
+      expect(onAwaitingUser).not.toHaveBeenCalled();
+      expect(mocks.pendingPut).toHaveBeenCalledTimes(1);
+    });
+
+    it("a flagged request the user continued opens its window once, not again for the copy", async () => {
+      passes();
+      mocks.beginScamChecks.mockReturnValueOnce(scamChecks({ backdoor: backdoorDisplay }));
+      const wrapped = txMessage("fw-flagged");
+      const onAwaitingUser = vi.fn();
+      const pending = decideWalletRequest(wrapped, PAGE, { onAwaitingUser });
+      await vi.waitFor(() => expect(onAwaitingUser).toHaveBeenCalledOnce());
+      approve(wrapped.requestId, true);
+      expect(await pending).toMatchObject({ ok: true });
+      expect(await decideWalletRequest(bypassCopy(wrapped, "fw-flagged-copy"), PAGE, {})).toBeNull();
+      expect(mocks.browser.windows.create).toHaveBeenCalledTimes(1);
+      expect(mocks.beginScamChecks).toHaveBeenCalledTimes(1);
+      expect(mocks.auditAppend).toHaveBeenCalledTimes(1);
+    });
+
+    it("the copy still matches when the dApp is on another chain (the observer reports chain 1)", async () => {
+      passes();
+      const wrapped = onChain(txMessage("fw-base"), 8453);
+      expect(await decideWalletRequest(wrapped, PAGE, {})).toMatchObject({ ok: true });
+      expect(await decideWalletRequest(bypassCopy(wrapped, "fw-base-copy", 1), PAGE, {})).toBeNull();
+      expect(mocks.auditAppend).toHaveBeenCalledTimes(1);
+    });
+
+    it("a genuine bypass row is observed only: no scam check, no window, one audit row, one notification on fail", async () => {
+      fails();
+      const onRiskyVerdict = vi.fn();
+      const onAwaitingUser = vi.fn();
+      const result = await decideWalletRequest(bypassCopy(txMessage("real-bypass-fail"), "real-bypass-fail"), PAGE, { onRiskyVerdict, onAwaitingUser });
+      expect(result).toMatchObject({ ok: false, verdict: { kind: "fail" } });
+      expect(mocks.beginScamChecks).not.toHaveBeenCalled();
+      expect(mocks.browser.windows.create).not.toHaveBeenCalled();
+      expect(onAwaitingUser).not.toHaveBeenCalled();
+      expect(mocks.auditAppend).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ bypassed: true, verdict: "fail" }));
+      expect(onRiskyVerdict).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ severity: "fail" }));
+    });
+
+    it("a genuine bypass row with a warning does not wait for the user", async () => {
+      // Route miss → fail-closed warn, which on the wrapper path opens a window and waits.
+      const onRiskyVerdict = vi.fn();
+      const result = await decideWalletRequest(bypassCopy(txMessage("real-bypass-warn"), "real-bypass-warn"), PAGE, { onRiskyVerdict });
+      expect(result).toMatchObject({ ok: false, verdict: { kind: "warn" } });
+      expect(mocks.browser.windows.create).not.toHaveBeenCalled();
+      expect(mocks.beginScamChecks).not.toHaveBeenCalled();
+      expect(mocks.auditAppend).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ bypassed: true, verdict: "warn" }));
+      expect(onRiskyVerdict).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ severity: "warn" }));
+    });
+
+    it("a clean genuine bypass row leaves an audit row and nothing else", async () => {
+      passes();
+      const onRiskyVerdict = vi.fn();
+      expect(await decideWalletRequest(bypassCopy(txMessage("real-bypass-pass"), "real-bypass-pass"), PAGE, { onRiskyVerdict })).toMatchObject({ verdict: { kind: "pass" } });
+      expect(mocks.beginScamChecks).not.toHaveBeenCalled();
+      expect(mocks.browser.windows.create).not.toHaveBeenCalled();
+      expect(onRiskyVerdict).not.toHaveBeenCalled();
+      expect(mocks.auditAppend).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ bypassed: true, verdict: "pass" }));
+    });
+
+    it("the same request sent twice is decided twice, and each copy is matched once", async () => {
+      const wrapped = txMessage("fw-twice-1");
+      passes();
+      expect(await decideWalletRequest(wrapped, PAGE, {})).toMatchObject({ ok: true });
+      passes();
+      expect(await decideWalletRequest({ ...wrapped, requestId: "fw-twice-2" }, PAGE, {})).toMatchObject({ ok: true });
+      expect(mocks.tryDeclarativeRouteV3).toHaveBeenCalledTimes(2);
+      expect(mocks.auditAppend).toHaveBeenCalledTimes(2);
+      expect(await decideWalletRequest(bypassCopy(wrapped, "fw-twice-copy-1"), PAGE, {})).toBeNull();
+      expect(await decideWalletRequest(bypassCopy(wrapped, "fw-twice-copy-2"), PAGE, {})).toBeNull();
+      // A third copy has no fingerprint left: it is a genuine bypass row.
+      passes();
+      expect(await decideWalletRequest(bypassCopy(wrapped, "fw-twice-copy-3"), PAGE, {})).not.toBeNull();
+      expect(mocks.auditAppend).toHaveBeenCalledTimes(3);
+      expect(mocks.auditAppend).toHaveBeenLastCalledWith(expect.objectContaining({ bypassed: true }));
+    });
+
+    it("a request the wrapper blocked leaves no fingerprint", async () => {
+      // Blocked by policy.
+      fails();
+      const denied = txMessage("fw-denied");
+      expect(await decideWalletRequest(denied, PAGE, {})).toMatchObject({ ok: false });
+      // Cancelled by the user in the warning window.
+      passes();
+      mocks.beginScamChecks.mockReturnValueOnce(scamChecks({ backdoor: backdoorDisplay }));
+      const cancelled = { ...txMessage("fw-cancelled"), data: { ...txMessage().data, transaction: { from: OWNER, to: ROUTER, value: "0x1", data: "0xabcdef" } } } as Message;
+      const onAwaitingUser = vi.fn();
+      const pending = decideWalletRequest(cancelled, PAGE, { onAwaitingUser });
+      await vi.waitFor(() => expect(onAwaitingUser).toHaveBeenCalledOnce());
+      approve(cancelled.requestId, false);
+      expect(await pending).toMatchObject({ ok: false });
+
+      const auditBefore = mocks.auditAppend.mock.calls.length;
+      passes();
+      expect(await decideWalletRequest(bypassCopy(denied, "fw-denied-copy"), PAGE, {})).not.toBeNull();
+      passes();
+      expect(await decideWalletRequest(bypassCopy(cancelled, "fw-cancelled-copy"), PAGE, {})).not.toBeNull();
+      expect(mocks.auditAppend.mock.calls.length).toBe(auditBefore + 2);
+    });
+
+    it("a copy from another tab or another origin is not matched", async () => {
+      passes();
+      const wrapped = txMessage("fw-elsewhere");
+      expect(await decideWalletRequest(wrapped, PAGE, {})).toMatchObject({ ok: true });
+      passes();
+      expect(await decideWalletRequest(bypassCopy(wrapped, "fw-other-tab"), { ...PAGE, tabId: 8 }, {})).not.toBeNull();
+      passes();
+      expect(await decideWalletRequest(bypassCopy(wrapped, "fw-other-origin"), { ...PAGE, origin: "https://evil.example" }, {})).not.toBeNull();
+      passes();
+      expect(await decideWalletRequest(bypassCopy(wrapped, "fw-no-source"), undefined, {})).not.toBeNull();
+      // The fingerprint is still there for the real copy.
+      expect(await decideWalletRequest(bypassCopy(wrapped, "fw-real-copy"), PAGE, {})).toBeNull();
+    });
+  });
 
   it("SF5-2: an otherwise passing request waits for Scam review and respects cancel or approval", async () => {
     for (const ok of [false, true]) {
       mocks.tryDeclarativeRouteV3.mockResolvedValueOnce(v3HitOutcome);
-      mocks.beginScamCheck.mockReturnValueOnce({ promise: Promise.resolve(scamDisplay), cancel: mocks.cancelScam });
+      mocks.beginScamChecks.mockReturnValueOnce(scamChecks({ scam: scamDisplay }));
       const message = txMessage(`scam-pass-${ok}`);
       const onAwaitingUser = vi.fn();
       let settled = false;
@@ -531,7 +755,7 @@ describe("orchestrator", () => {
       expect(url.searchParams.get("scam")).toBe("1");
       expect(url.searchParams.get("review")).toBe("1");
       expect(JSON.parse(url.searchParams.get("verdict")!)).toEqual({ kind: "pass" });
-      expect(url.toString()).not.toContain("algorithm_unavailable");
+      expect(url.toString()).not.toContain("rule_fired_marker");
       expect(mocks.sessionStore.get(scamConfirmKey(message.requestId))).toMatchObject({
         requestId: message.requestId, display: scamDisplay, expiresAtMs: expect.any(Number),
       });
@@ -545,7 +769,7 @@ describe("orchestrator", () => {
     mocks.tryDeclarativeRouteV3.mockResolvedValueOnce(v3HitOutcome);
     const verdict = { kind: "fail", matched: [{ policy_id: "deny-1", reason: "blocked", severity: "deny", origin: "action" }] };
     mocks.evaluateActionV2.mockResolvedValueOnce(verdict);
-    mocks.beginScamCheck.mockReturnValueOnce({ promise: Promise.resolve(scamDisplay), cancel: mocks.cancelScam });
+    mocks.beginScamChecks.mockReturnValueOnce(scamChecks({ scam: scamDisplay }));
     const onAwaitingUser = vi.fn();
     const result = await decideMessage(txMessage("scam-deny"), { onAwaitingUser });
     expect(result).toEqual({ ok: false, verdict });
@@ -557,7 +781,7 @@ describe("orchestrator", () => {
 
   it("SF5-2: disabling ordinary warning modals does not skip an opted-in Scam review", async () => {
     mocks.shouldWarnModal.mockReturnValue(false);
-    mocks.beginScamCheck.mockReturnValueOnce({ promise: Promise.resolve(scamDisplay), cancel: mocks.cancelScam });
+    mocks.beginScamChecks.mockReturnValueOnce(scamChecks({ scam: scamDisplay }));
     const result = await decideAndApprove(txMessage("scam-warn-modal-disabled"), false);
     expect(result).toMatchObject({ ok: false, verdict: { kind: "warn" } });
     expect(lastConfirmUrl().searchParams.get("review")).toBe("1");
@@ -567,7 +791,7 @@ describe("orchestrator", () => {
   it("SF5-2: a legacy route_failed fallback pass still requires Scam review", async () => {
     mocks.tryDeclarativeRouteV3.mockResolvedValueOnce(v3HitOutcome);
     mocks.resolveBundlesForWallet.mockRejectedValueOnce(new mocks.MockEngineError("route_failed", "legacy route miss"));
-    mocks.beginScamCheck.mockReturnValueOnce({ promise: Promise.resolve(scamDisplay), cancel: mocks.cancelScam });
+    mocks.beginScamChecks.mockReturnValueOnce(scamChecks({ scam: scamDisplay }));
     const result = await decideAndApprove(txMessage("scam-legacy-pass"), false);
     expect(result).toMatchObject({ ok: false, verdict: { kind: "pass" } });
     expect(mocks.evaluateActionV2).not.toHaveBeenCalled();

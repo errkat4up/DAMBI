@@ -3,7 +3,7 @@
  *
  * 팝업 설정 오버레이(`frontend/popup/popup.js` renderSettingsOverlay)가
  * `chrome.storage.sync` 의 `"settings"` 키에 `{preset, desk, modal, ribbon, sound}`
- * 를 저장한다. 이 모듈은 그 값을 SW 쪽에서 읽어 캐시하고, OS 데스크톱 알림 ·
+ * (+ 프리셋과 무관한 `backdoor`) 를 저장한다. 이 모듈은 그 값을 SW 쪽에서 읽어 캐시하고, OS 데스크톱 알림 ·
  * 인페이지 토스트(리본) · WARN 인터셉트 모달을 사용자 설정대로 게이팅한다.
  *
  * 순환 import 회피: `webextension-polyfill` 만 의존하므로 index 와 orchestrator
@@ -29,6 +29,11 @@ export interface NotifySettings {
   ribbon: boolean;
   /** 차단 시 알림음 — 현재 미구현(범위 외). */
   sound: boolean;
+  /**
+   * 풀 백도어 검사 on/off. 알림 강도 프리셋과 무관한 독립 설정이다(프리셋을
+   * 바꿔도 유지). 꺼져 있으면 검사용 조회 요청을 하나도 보내지 않는다.
+   */
+  backdoor: boolean;
 }
 
 // frontend/popup/store.js 의 SETTINGS_PRESETS.std + SETTINGS_DEFAULT 와 동일하게
@@ -39,6 +44,7 @@ export const NOTIFY_DEFAULTS: NotifySettings = {
   modal: "both",
   ribbon: true,
   sound: false,
+  backdoor: true,
 };
 
 const STORAGE_KEY = "settings";
@@ -59,6 +65,8 @@ function coerce(raw: unknown): NotifySettings {
       r.modal === "block" || r.modal === "both" ? r.modal : NOTIFY_DEFAULTS.modal,
     ribbon: typeof r.ribbon === "boolean" ? r.ribbon : NOTIFY_DEFAULTS.ribbon,
     sound: typeof r.sound === "boolean" ? r.sound : NOTIFY_DEFAULTS.sound,
+    backdoor:
+      typeof r.backdoor === "boolean" ? r.backdoor : NOTIFY_DEFAULTS.backdoor,
   };
 }
 

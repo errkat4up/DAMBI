@@ -29,6 +29,8 @@ crate-type = ["cdylib", "rlib"]
 alloy-primitives.workspace = true
 dambi-core.workspace = true
 policy-engine.workspace = true
+# Window-rule algorithm, called unmodified by `scam_window_exports.rs`.
+scam-filter.workspace = true
 # Direct cedar-policy dep for the editor-facing exports
 # (`cedar_exports.rs`). policy-engine itself already pulls cedar in,
 # but exposing parse + Authorizer directly avoids leaking the

@@ -22,6 +22,7 @@ mod dto;
 mod exports;
 pub mod field_catalog;
 mod policy_request_exports;
+mod scam_window_exports;
 mod sim_step_exports;
 mod trigger_exports;
 

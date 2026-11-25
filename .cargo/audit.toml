@@ -8,5 +8,10 @@
 # signatures with public keys only; no secret-key operations) and through
 # alloy-primitives' optional k256 (never built). Remove after upgrading p256 to
 # 0.14 together with Alloy 1.x.
+#
+# `chrono` 0.4 (RUSTSEC-2026-0543, "unmaintained", issued 2026-11-17) is a
+# transitive dep of cedar-policy-core. Not a vulnerability and no patched
+# version exists; nothing in this repo depends on chrono directly. Remove when
+# Cedar moves off chrono.
 [advisories]
-ignore = ["RUSTSEC-2026-0173", "RUSTSEC-2026-0387"]
+ignore = ["RUSTSEC-2026-0173", "RUSTSEC-2026-0387", "RUSTSEC-2026-0543"]

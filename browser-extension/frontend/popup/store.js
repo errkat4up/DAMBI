@@ -117,7 +117,11 @@
     std: { desk: "both", modal: "both", ribbon: true, sound: false },
     loud: { desk: "all", modal: "both", ribbon: true, sound: true },
   };
-  const SETTINGS_DEFAULT = { preset: "std", ...SETTINGS_PRESETS.std };
+  // `backdoor`(풀 백도어 검사)는 알림 강도 프리셋에 속하지 않는 독립 설정이다. 켜고 끄는
+  // 화면은 대시보드의 /scam 페이지에 있고 팝업에는 없다. 팝업은 값을 건드리지 않고
+  // 보존만 한다(프리셋 버튼이 이 필드를 지우지 않게 — popup.js).
+  // backend/service-worker/notify-settings.ts 의 NOTIFY_DEFAULTS 와 같게 유지할 것.
+  const SETTINGS_DEFAULT = { preset: "std", ...SETTINGS_PRESETS.std, backdoor: true };
   const MAX_WALLET_LABEL_CHARS = 80;
 
 
