@@ -1919,6 +1919,7 @@ dependencies = [
  "policy-engine",
  "policy-state",
  "policy-transition",
+ "scam-filter",
  "serde",
  "serde_json",
  "thiserror",
