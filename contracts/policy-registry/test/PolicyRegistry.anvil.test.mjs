@@ -1,0 +1,213 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { randomBytes } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+// Manual isolated acceptance entry point:
+//   forge build --root contracts/policy-registry
+//   DAMBI_TEST_RPC_URL=http://127.0.0.1:8545 node --test contracts/policy-registry/test/PolicyRegistry.anvil.test.mjs
+// Requires Anvil chain 31337, cast, and registryV2's installed tsx dependencies.
+// No process/chain reset, live endpoint, preconfigured account or secret is used.
+// Output is a measurement at execution time, not checked-in evidence.
+const endpoint = process.env.DAMBI_TEST_RPC_URL;
+if (endpoint) {
+  const url = new URL(endpoint);
+  assert.ok(url.protocol === "http:" && ["127.0.0.1", "[::1]"].includes(url.hostname)
+    && !url.username && !url.password && !url.hash, "DAMBI_TEST_RPC_URL must be literal loopback HTTP");
+}
+const requireRegistry = createRequire(new URL("../../../registryV2/package.json", import.meta.url));
+let nextId = 0;
+async function rpc(method, params = []) {
+  const id = ++nextId;
+  const response = await fetch(endpoint, {
+    method: "POST", redirect: "error", signal: AbortSignal.timeout(15_000),
+    headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+  });
+  assert.equal(response.ok, true);
+  const result = await response.json();
+  assert.equal(result.id, id);
+  if (result.error) throw new Error(JSON.stringify(result.error));
+  return result.result;
+}
+function calldata(signature, ...args) {
+  return execFileSync("cast", ["calldata", signature, ...args.map(String)], { encoding: "utf8" }).trim();
+}
+async function receipt(hash) {
+  for (let i = 0; i < 100; i++) {
+    const value = await rpc("eth_getTransactionReceipt", [hash]);
+    if (value) return value;
+    await new Promise((done) => setTimeout(done, 20));
+  }
+  throw new Error("receipt timeout");
+}
+async function send(from, to, data, extra = {}) {
+  const hash = await rpc("eth_sendTransaction", [{ from, ...(to ? { to } : {}), data, gas: "0x1c9c380", ...extra }]);
+  return receipt(hash);
+}
+async function account() {
+  const address = "0x" + randomBytes(20).toString("hex");
+  await rpc("anvil_setBalance", [address, "0x3635c9adc5dea00000"]);
+  await rpc("anvil_impersonateAccount", [address]);
+  return address;
+}
+
+test("real registry and fixed publisher: CAS, receipts, retries, revocation, rotation and local gas", {
+  skip: !endpoint && "set DAMBI_TEST_RPC_URL to an isolated Anvil node", timeout: 180_000,
+}, async (t) => {
+  assert.equal(BigInt(await rpc("eth_chainId")), 31337n, "not a local development chain");
+  assert.match(await rpc("web3_clientVersion"), /anvil/i, "requires isolated Anvil, not a forwarded live RPC");
+  const { tsImport } = await import(requireRegistry.resolve("tsx/esm/api"));
+  const tool = await tsImport(fileURLToPath(new URL("../../../registryV2/scripts/publish-onchain-policy.ts", import.meta.url)), import.meta.url);
+  const { p256 } = await import(requireRegistry.resolve("@noble/curves/nist.js"));
+  const owner = await account();
+  const next = await account();
+  const outsider = await account();
+  t.after(async () => {
+    for (const who of [owner, next, outsider]) await rpc("anvil_stopImpersonatingAccount", [who]);
+  });
+  const artifact = JSON.parse(await readFile(new URL("../out/PolicyRegistry.sol/PolicyRegistry.json", import.meta.url), "utf8"));
+  const constructor = execFileSync("cast", ["abi-encode", "constructor(address)", owner], { encoding: "utf8" }).trim();
+  const deployment = await send(owner, undefined, artifact.bytecode.object + constructor.slice(2));
+  assert.equal(deployment.status, "0x1");
+  const registry = deployment.contractAddress;
+  assert.ok(registry);
+  const secret = p256.utils.randomSecretKey();
+  const config = {
+    rpcUrl: endpoint, network: "local", registry, sender: owner,
+    env: "staging", profile: "default", finality: "finalized",
+    trustedPublicKeyHex: Buffer.from(p256.getPublicKey(secret, false)).toString("hex"),
+  };
+  const client = new tool.RegistryClient(config);
+  const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
+  const prepare = (c = client) => tool.prepareOnchainPolicy(c, {
+    repoRoot, set: "day1-safety", expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    signing: { mode: "local", privKeyHex: Buffer.from(secret).toString("hex"), keyId: "ephemeral-anvil-policy" },
+  });
+  let submissions = 0;
+  const submit = async (tx) => {
+    submissions++;
+    assert.equal(tx.chainId, 31337);
+    const { chainId, ...request } = tx;
+    return rpc("eth_sendTransaction", [request]);
+  };
+  const first = await prepare();
+  assert.equal(first.expectedCurrent, 0);
+  assert.equal(JSON.parse(first.signed.payload).registry_ref, tool.registryReference(config));
+  const scope = tool.scopeId(config);
+  const encodedScope = await rpc("eth_call", [{ to: registry, data: calldata("scopeId(string,string)", "staging", "default") }, "latest"]);
+  assert.equal(encodedScope.toLowerCase(), scope);
+  const data = tool.publicationData(client, first);
+  // Actual authority and data-integrity failures, not mocked publisher responses.
+  assert.equal((await send(outsider, registry, data)).status, "0x0");
+  const badDigest = calldata("publish(bytes32,uint256,uint256,bytes32,bytes,bytes,string)", scope, 0, 1,
+    "0x" + "00".repeat(32), "0x" + Buffer.from(first.signed.payload).toString("hex"),
+    "0x" + Buffer.from(first.signed.signature, "base64").toString("hex"), first.signed.key_id);
+  assert.equal((await send(owner, registry, badDigest)).status, "0x0");
+  let firstHash;
+  const published = await tool.publishOnchainPolicy(client, first, submit, {
+    pollMs: 20, onSubmitted(hash) { firstHash = hash; },
+  });
+  assert.equal(published.outcome, "confirmed");
+  assert.equal(published.receipt.transactionHash, firstHash);
+  const stored = await client.read(1);
+  assert.equal(stored.payload, first.signed.payload);
+  assert.equal(stored.signature, first.signed.signature);
+  assert.equal(stored.digest, tool.sha256(Buffer.from(first.signed.payload)));
+  assert.equal(stored.status, 1);
+  assert.equal(submissions, 1);
+  const resumed = await tool.publishOnchainPolicy(client, first, submit, { transactionHash: firstHash, pollMs: 20 });
+  assert.equal(resumed.outcome, "confirmed");
+  const reconciled = await tool.publishOnchainPolicy(client, first, submit, { pollMs: 20 });
+  assert.equal(reconciled.outcome, "reconciled");
+  assert.equal(submissions, 1, "completed retry must not send another transaction");
+  // Contract-level retry also preserves the original immutable record.
+  assert.equal((await send(owner, registry, data)).status, "0x1");
+  assert.equal((await client.read()).head, 1);
+
+  // Two genuinely different signed candidates prepared from the same head.
+  const second = await prepare();
+  const third = await prepare();
+  const signer = await tsImport(fileURLToPath(new URL("../../../registryV2/scripts/publish-policy-bundle.ts", import.meta.url)), import.meta.url);
+  const competingPayload = JSON.parse(third.signed.payload);
+  competingPayload.expires_at += 1;
+  third.signed = await signer.signPayload(competingPayload, {
+    mode: "local", privKeyHex: Buffer.from(secret).toString("hex"), keyId: first.signed.key_id,
+  });
+  const secondData = tool.publicationData(client, second);
+  const thirdData = tool.publicationData(client, third);
+  // Both simulate successfully before either is submitted. Sequential EVM
+  // execution must nevertheless allow exactly one conditional state change.
+  await Promise.all([secondData, thirdData].map((d) => rpc("eth_call", [{ from: owner, to: registry, data: d }, "latest"])));
+  const nonce = BigInt(await rpc("eth_getTransactionCount", [owner, "pending"]));
+  const contenders = await Promise.all([
+    send(owner, registry, secondData, { nonce: "0x" + nonce.toString(16) }),
+    send(owner, registry, thirdData, { nonce: "0x" + (nonce + 1n).toString(16) }),
+  ]);
+  assert.deepEqual(contenders.map((r) => r.status), ["0x1", "0x0"]);
+  assert.equal((await client.read(1)).status, 2);
+  assert.equal((await client.read(2)).payload, second.signed.payload);
+  await assert.rejects(tool.publishOnchainPolicy(client, third, submit), /conflict/);
+  await assert.rejects(tool.publishOnchainPolicy(client, first, submit), /SUPERSEDED/);
+  assert.equal((await send(owner, registry, data)).status, "0x0", "history cannot reactivate");
+  // A failed receipt cannot be mistaken for publication success, even when a
+  // different transaction has installed the intended version.
+  await assert.rejects(tool.publishOnchainPolicy(client, second, submit, {
+    transactionHash: contenders[1].transactionHash, pollMs: 0,
+  }), /receipt/);
+
+  const oldRevocation = await send(owner, registry, calldata("revoke(bytes32,uint256)", scope, 1));
+  assert.equal(oldRevocation.status, "0x1");
+  assert.equal((await client.read(1)).status, 3);
+  assert.equal((await client.read()).status, 1);
+  const revocation = await send(owner, registry, calldata("revoke(bytes32,uint256)", scope, 2));
+  assert.equal(revocation.status, "0x1");
+  assert.equal((await client.read()).head, 2);
+  assert.equal((await client.read()).status, 3);
+  assert.equal((await send(owner, registry, secondData)).status, "0x0");
+  await assert.rejects(tool.publishOnchainPolicy(client, second, submit), /REVOKED/);
+  assert.equal((await send(owner, registry, calldata("revoke(bytes32,uint256)", scope, 2))).status, "0x1");
+
+  assert.equal((await send(owner, registry, calldata("proposePublisher(address)", next))).status, "0x1");
+  assert.equal((await send(next, registry, calldata("revoke(bytes32,uint256)", scope, 1))).status, "0x0");
+  assert.equal((await send(owner, registry, calldata("cancelPublisherTransfer()"))).status, "0x1");
+  assert.equal((await send(next, registry, calldata("acceptPublisher()"))).status, "0x0");
+  assert.equal((await send(owner, registry, calldata("proposePublisher(address)", next))).status, "0x1");
+  assert.equal((await send(outsider, registry, calldata("acceptPublisher()"))).status, "0x0");
+  assert.equal((await send(next, registry, calldata("acceptPublisher()"))).status, "0x1");
+  assert.equal((await send(owner, registry, calldata("revoke(bytes32,uint256)", scope, 1))).status, "0x0");
+  await assert.rejects(client.guard(), /publisher/);
+  const rotated = new tool.RegistryClient({ ...config, sender: next });
+  const afterRevocation = await prepare(rotated);
+  assert.equal(afterRevocation.expectedCurrent, 2);
+  const rotation = await tool.publishOnchainPolicy(rotated, afterRevocation, submit, { pollMs: 20 });
+  assert.equal(rotation.outcome, "confirmed");
+  assert.equal((await rotated.read()).head, 3);
+  assert.equal((await rotated.read(2)).status, 3);
+
+  const measurements = {
+    deploymentGas: BigInt(deployment.gasUsed).toString(),
+    initialPublicationGas: BigInt(published.receipt.gasUsed).toString(),
+    replacementGas: BigInt(contenders[0].gasUsed).toString(),
+    revocationGas: BigInt(revocation.gasUsed).toString(),
+    payloadBytes: Buffer.byteLength(first.signed.payload),
+    signatureBytes: Buffer.from(first.signed.signature, "base64").length,
+  };
+  const budgets = process.env.DAMBI_TEST_POLICY_BUDGETS ? JSON.parse(process.env.DAMBI_TEST_POLICY_BUDGETS) : null;
+  if (budgets) {
+    for (const [name, measured] of Object.entries(measurements)) {
+      assert.ok(Object.hasOwn(budgets, name), `missing approved budget: ${name}`);
+      assert.match(String(budgets[name]), /^[1-9][0-9]*$/, `invalid budget: ${name}`);
+      assert.ok(BigInt(measured) <= BigInt(budgets[name]), `${name} exceeds supplied budget; evaluate one storage alternative before acceptance`);
+    }
+  }
+  t.diagnostic(JSON.stringify({
+    kind: "local-Anvil-receipt-measurement", chainId: 31337, measurements,
+    budgetAssessment: budgets ? "compared-to-explicit-test-input" : "pending-no-approved-numeric-budget",
+    ethereum: "not measured; local gas units are not Ethereum fee evidence or GIWA L1-data fees",
+    giwa: "not measured; requires separate external execution approval",
+    review: "test output is not independent review approval",
+  }));
+});
