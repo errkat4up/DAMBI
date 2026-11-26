@@ -180,6 +180,77 @@ Node; the standalone consumer gate below checks browser behavior with local
 fixtures. Check deployed CORS for your browser origin. The deployment's republishing
 schedule needs separate operational confirmation.
 
+## Onchain policy transport (F5, implementation awaiting verification)
+
+`createOnchainPolicySource` is exported by `@dambi/core/adapters`. It reads the
+F4 `scopeId(string,string)` and `read(bytes32,uint256)` interface. A sequence of
+zero selects the head. The returned tuple is `(head, status, digest, payload,
+signature, keyId)`; status numbers are Missing=0, Active=1, Superseded=2,
+Revoked=3. The adapter preserves the signed UTF-8 payload and converts the raw
+64-byte P1363 signature to padded Base64. Core must still validate the signature,
+signed registry reference, scope, sequence, expiry and policy semantics.
+
+Configuration requires `rpcUrl`, optional `headers`, `chainId`,
+`registryAddress`, independently pinned `expectedRuntimeCode`, `env`,
+`profile: "default"`, `finality: "safe" | "finalized"`, `maxResponseBytes`,
+`timeoutMs`, `maxBlockAgeMs`, `maxStateAgeMs`, `refreshIntervalMs` and
+`allowedClockSkewMs`. Optional `fetch` and `clock` are captured at construction.
+Durations are milliseconds; block timestamps returned to Core are Unix seconds.
+No GIWA finality support or operational timing values are assumed or certified.
+
+Every fetch checks chain ID and exact runtime bytes, then performs both calls at
+one EIP-1898 `{blockHash, requireCanonical:true}` selector. State and body come
+from the same `read` tuple. A final explicit-height header comparison and chain
+ID recheck precede publication. Unsupported hash selectors fail explicitly;
+there is no number-only or latest fallback. This is consistency checking against
+one trusted RPC, not a light client, independent finality proof or code-proxy
+implementation attestation. Do not pin a proxy's wrapper code as if it attested
+its implementation.
+
+The one-entry memory cache retains same-block identity and first-observation
+metadata only. Every explicit fetch performs network reads and rejects failures;
+it never substitutes a cached envelope for a chain mismatch, missing policy,
+unsupported method or outage. Reobserving the same block cannot extend its
+observation deadline. A new instance must check the chain again. Changing
+endpoint/authentication requires a new source, with no inherited cache or
+in-flight work. Revoked is returned as state, not converted into a fetch error.
+Missing and RPC failures remain distinct adapter errors.
+
+`refreshDue()` is a host scheduling hint, not permission to evaluate a cached
+policy. Hosts should create a fresh source/Core on startup, refresh on resume,
+and consult the hint before subsequent checks. `refreshPolicies()` remains the
+installation API. F1 must enforce the last accepted state's deadline during
+both planning and evaluation, including after failed refreshes; the transport
+cannot replace that enforcement. Registry RPC settings are independent from
+`createEvmFactProvider`'s transaction-chain settings. A GIWA policy source does
+not authorize Ethereum Facts from a GIWA RPC.
+
+The supplied source excerpts do not include F1's policy port, registry trust
+configuration, signed `registry_ref` schema, or runtime/Rust implementation.
+Consequently this change does **not** establish final F1/F4 wire compatibility,
+positive onchain Core installation, old-plan invalidation, host cache-expiry
+enforcement, or consumer deny propagation. Those remain explicit integration
+requirements, not properties inferred from fake RPC success. Do not enable this
+transport for signing until those gates pass against the final F1/F4 sources.
+The negative real-Core test checks that transport success cannot authorize an
+invalid signature; it is not a substitute for those positive lifecycle tests.
+
+Reproduction commands for the new tests, after obtaining matching built Core
+WASM assets (the commands below have not been run as part of this change):
+
+```sh
+node node_modules/typescript/bin/tsc -p packages/core/tsconfig.build.json
+node --test packages/core/tests/adapters/onchain-policy.test.mjs \
+  packages/core/tests/adapters/onchain-policy-core.test.mjs
+```
+
+The existing `core:test:adapters` script has an explicit file list and does not
+include these new files. Use the explicit command above. The fake server binds
+loopback and accepts only policy-read JSON-RPC methods; it is not an EVM chain.
+Real local-chain plus consumer deny acceptance, QA execution logs and independent
+review remain pending. No remote RPC, deployment or credentials are required by
+these tests.
+
 ## Optional ERC-20 Fact adapter (development)
 
 `createEvmFactProvider` implements `FactProvider` for `portfolio.balance` calls

@@ -6,6 +6,14 @@ export type AdapterErrorCode =
   | "HTTP_ERROR"
   | "INVALID_RESPONSE"
   | "RESPONSE_TOO_LARGE"
+  | "CHAIN_MISMATCH"
+  | "REGISTRY_MISMATCH"
+  | "RPC_ERROR"
+  | "RPC_UNSUPPORTED"
+  | "REORG"
+  | "POLICY_MISSING"
+  | "STATE_EXPIRED"
+  | "TIMEOUT"
   | "ABORTED";
 
 export class AdapterError extends Error {

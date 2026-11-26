@@ -1,3 +1,5 @@
+export { createOnchainPolicySource } from "./onchain-policy.js";
+export type { OnchainPolicySource, OnchainPolicySourceOptions } from "./onchain-policy.js";
 export { createPolicyApiSource } from "./policy-api.js";
 export type { PolicyApiSourceOptions } from "./policy-api.js";
 export { createScamBundleApiSource } from "./scam-bundle-api.js";
