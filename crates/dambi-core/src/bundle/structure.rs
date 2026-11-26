@@ -55,7 +55,10 @@ pub(super) fn validate_payload(value: &Value) -> Result<(), PolicyParseError> {
         let parsed: super::RegistryRef = serde_json::from_value(reference.clone())
             .map_err(|_| structure_error("$/registry_ref", "invalid Registry identity"))?;
         if !parsed.is_valid() {
-            return Err(structure_error("$/registry_ref", "invalid Registry chain or address"));
+            return Err(structure_error(
+                "$/registry_ref",
+                "invalid Registry chain or address",
+            ));
         }
     } else if !reference.is_null() && !reference.is_string() {
         return Err(structure_error(

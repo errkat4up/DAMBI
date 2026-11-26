@@ -43,18 +43,17 @@
         "profile": { "$ref": "#/$defs/nonEmptyString" },
         "registry_ref": {
           "description": "HTTP uses null. Registry mode signs chain/address here, env/profile at payload level, and sequence as version. Legacy strings remain semantically unsupported. Registry mode requires non-null expires_at.",
-          "anyOf": [
-            { "type": ["string", "null"] },
-            {
-              "type": "object",
-              "required": ["chainId", "registryAddress"],
-              "properties": {
-                "chainId": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
-                "registryAddress": { "type": "string", "pattern": "^0x[0-9a-f]{40}$", "not": { "const": "0x0000000000000000000000000000000000000000" } }
-              },
-              "additionalProperties": false
+          "type": ["string", "null", "object"],
+          "required": ["chainId", "registryAddress"],
+          "properties": {
+            "chainId": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+            "registryAddress": {
+              "type": "string",
+              "description": "Exactly 40 lowercase hex digits after 0x, excluding the zero address. The pattern includes the nonzero constraint without a nested not schema and rejects trailing line terminators.",
+              "pattern": "^0x(?!0{40})[0-9a-f]{40}(?![\\s\\S])"
             }
-          ]
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

@@ -116,10 +116,22 @@ impl CoreSession {
         };
         let store = match (&config.trust.registry, policy.observation()?) {
             (Some(registry), Some(observation)) => SnapshotStore::new_with_registry(
-                config.store_config()?, decoder, policy.input(), registry.clone(), observation, now_ms,
+                config.store_config()?,
+                decoder,
+                policy.input(),
+                registry.clone(),
+                observation,
+                now_ms,
             )?,
-            (None, None) => SnapshotStore::new(config.store_config()?, decoder, policy.input(), now_ms)?,
-            _ => return Err(SessionError::new("POLICY_SCOPE_MISMATCH", "Registry mode requires an initial RPC observation; cached body alone is insufficient")),
+            (None, None) => {
+                SnapshotStore::new(config.store_config()?, decoder, policy.input(), now_ms)?
+            }
+            _ => {
+                return Err(SessionError::new(
+                    "POLICY_SCOPE_MISMATCH",
+                    "Registry mode requires an initial RPC observation; cached body alone is insufficient",
+                ))
+            }
         };
         let owner = NEXT_SESSION
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
@@ -618,11 +630,15 @@ impl CoreSession {
             let policy = Policy::parse(policy_json, self.limits.max_policy_bytes)?;
             let prepared = match policy.observation()? {
                 Some(observation) if observation.status == "revoked" => {
-                    self.store.commit_registry_revocation(&ticket, observation, now_ms)?;
+                    self.store
+                        .commit_registry_revocation(&ticket, observation, now_ms)?;
                     return Ok(());
                 }
                 Some(observation) => self.store.prepare_registry_refresh(
-                    &ticket, policy.input(), observation, now_ms,
+                    &ticket,
+                    policy.input(),
+                    observation,
+                    now_ms,
                 )?,
                 None => self.store.prepare_refresh(&ticket, policy.input(), now_ms)?,
             };

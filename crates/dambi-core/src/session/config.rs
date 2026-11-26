@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 use crate::bundle::{KeyRole, PolicyValidationConfig, VerificationKey};
-use crate::snapshot::{SignedPolicyInput, SnapshotStoreConfig, RegistryConfig, RegistryObservation};
+use crate::snapshot::{RegistryConfig, RegistryObservation, SignedPolicyInput, SnapshotStoreConfig};
 
 use super::{parse_json, SessionError, MAX_SAFE_INTEGER};
 
@@ -72,8 +72,14 @@ impl Config {
                 "maxBundleAgeSec may be omitted but cannot be null",
             ));
         }
-        if value.pointer("/trust/registry").is_some_and(serde_json::Value::is_null) {
-            return Err(SessionError::new("INVALID_CONFIG", "registry may be omitted but cannot be null"));
+        if value
+            .pointer("/trust/registry")
+            .is_some_and(serde_json::Value::is_null)
+        {
+            return Err(SessionError::new(
+                "INVALID_CONFIG",
+                "registry may be omitted but cannot be null",
+            ));
         }
         let config: Self = serde_json::from_value(value)
             .map_err(|error| SessionError::new("INVALID_CONFIG", error.to_string()))?;
@@ -191,19 +197,31 @@ impl Policy {
                 "keyId must be a string when present",
             ));
         }
-        if value.get("registryState").is_some_and(serde_json::Value::is_null) {
-            return Err(SessionError::new("INVALID_POLICY_BUNDLE", "registryState cannot be null"));
+        if value
+            .get("registryState")
+            .is_some_and(serde_json::Value::is_null)
+        {
+            return Err(SessionError::new(
+                "INVALID_POLICY_BUNDLE",
+                "registryState cannot be null",
+            ));
         }
         serde_json::from_value(value)
             .map_err(|error| SessionError::new("INVALID_POLICY_BUNDLE", error.to_string()))
     }
 
     pub fn observation(&self) -> Result<Option<RegistryObservation>, SessionError> {
-        let Some(value) = &self.registry_state else { return Ok(None) };
+        let Some(value) = &self.registry_state else {
+            return Ok(None);
+        };
         if value == &serde_json::json!({"status":"unavailable"}) {
-            return Err(SessionError::new("POLICY_FETCH_FAILED", "Registry state is unavailable; previous block lease was not extended"));
+            return Err(SessionError::new(
+                "POLICY_FETCH_FAILED",
+                "Registry state is unavailable; previous block lease was not extended",
+            ));
         }
-        serde_json::from_value(value.clone()).map(Some)
+        serde_json::from_value(value.clone())
+            .map(Some)
             .map_err(|error| SessionError::new("INVALID_POLICY_BUNDLE", error.to_string()))
     }
 

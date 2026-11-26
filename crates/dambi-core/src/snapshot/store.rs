@@ -9,14 +9,13 @@ use std::sync::{
 };
 
 use crate::bundle::{
-    parse_policy_bundle, validate_policy_bundle_with_registry, RegistryRef,
-    PolicyUpdate, PolicyValidationConfig, TrustedKeys,
-    ValidatedPolicyBundle, VerificationKey,
+    parse_policy_bundle, validate_policy_bundle_with_registry, PolicyUpdate, PolicyValidationConfig,
+    RegistryRef, TrustedKeys, ValidatedPolicyBundle, VerificationKey,
 };
 
 use super::{
-    prepare_decoder, DecoderInput, SignedPolicyInput, SnapshotError, SnapshotErrorKind,
-    VerifiedDecoderSnapshot, RegistryConfig, RegistryObservation,
+    prepare_decoder, DecoderInput, RegistryConfig, RegistryObservation, SignedPolicyInput,
+    SnapshotError, SnapshotErrorKind, VerifiedDecoderSnapshot,
 };
 
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -71,7 +70,8 @@ impl Snapshot {
     pub fn ensure_usable(&self, now_ms: u64) -> Result<(), SnapshotError> {
         self.lifecycle.ensure_live()?;
         if let Some(gate) = &self.lifecycle.registry {
-            gate.lock().map_err(|_| registry_lock_error())?
+            gate.lock()
+                .map_err(|_| registry_lock_error())?
                 .ensure_usable(self.policy.sequence(), now_ms)?;
         }
         self.policy.ensure_fresh(now_ms).map_err(Into::into)
@@ -136,7 +136,13 @@ impl SnapshotStore {
         observation: RegistryObservation,
         now_ms: u64,
     ) -> Result<Self, SnapshotError> {
-        Self::new_inner(config, decoder_input, initial, Some((registry, observation)), now_ms)
+        Self::new_inner(
+            config,
+            decoder_input,
+            initial,
+            Some((registry, observation)),
+            now_ms,
+        )
     }
 
     fn new_inner(
@@ -146,9 +152,11 @@ impl SnapshotStore {
         registry: Option<(RegistryConfig, RegistryObservation)>,
         now_ms: u64,
     ) -> Result<Self, SnapshotError> {
-        let gate = registry.map(|(registry, observation)| {
-            RegistryGate::new(registry, &config.policy, observation, now_ms)
-        }).transpose()?;
+        let gate = registry
+            .map(|(registry, observation)| {
+                RegistryGate::new(registry, &config.policy, observation, now_ms)
+            })
+            .transpose()?;
         let reference = gate.as_ref().map(|gate| gate.config.reference());
         check_byte_limit(config.max_policy_bytes, "maxPolicyBytes")?;
         check_byte_limit(config.max_decoder_bytes, "maxDecoderBytes")?;
@@ -283,8 +291,12 @@ impl SnapshotStore {
     ) -> Result<PolicyUpdate, SnapshotError> {
         self.check_attempt(&prepared.owner, prepared.generation)?;
         self.pending = None;
-        let mut registry = self.lifecycle.registry.as_ref()
-            .map(|gate| gate.lock().map_err(|_| registry_lock_error())).transpose()?;
+        let mut registry = self
+            .lifecycle
+            .registry
+            .as_ref()
+            .map(|gate| gate.lock().map_err(|_| registry_lock_error()))
+            .transpose()?;
         let deadline = match (&registry, &prepared.observation) {
             (Some(gate), Some(observation)) => {
                 bind_policy(observation, &prepared.policy)?;
@@ -324,7 +336,10 @@ impl SnapshotStore {
         now_ms: u64,
     ) -> Result<(), SnapshotError> {
         self.check_attempt(&ticket.owner, ticket.generation)?;
-        let gate = self.lifecycle.registry.as_ref()
+        let gate = self
+            .lifecycle
+            .registry
+            .as_ref()
             .ok_or_else(|| scope_error("Registry state supplied in HTTP mode"))?;
         let mut gate = gate.lock().map_err(|_| registry_lock_error())?;
         if observation.status != "revoked" {
@@ -395,7 +410,9 @@ fn validate_input(
         max_policy_bytes,
     )?;
     let verified = keys.verify_policy_bundle(parsed)?;
-    Ok(validate_policy_bundle_with_registry(verified, config, registry, now_ms)?)
+    Ok(validate_policy_bundle_with_registry(
+        verified, config, registry, now_ms,
+    )?)
 }
 
 fn check_byte_limit(limit: usize, name: &str) -> Result<(), SnapshotError> {
@@ -413,7 +430,10 @@ fn scope_error(message: &str) -> SnapshotError {
 }
 
 fn registry_lock_error() -> SnapshotError {
-    SnapshotError::new(SnapshotErrorKind::InvalidConfig, "Registry state lock poisoned")
+    SnapshotError::new(
+        SnapshotErrorKind::InvalidConfig,
+        "Registry state lock poisoned",
+    )
 }
 
 fn rejected_state(message: &str) -> SnapshotError {
@@ -421,20 +441,34 @@ fn rejected_state(message: &str) -> SnapshotError {
 }
 
 fn hex32(value: &str) -> bool {
-    value.len() == 66 && value.starts_with("0x")
-        && value[2..].bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    value.len() == 66
+        && value.starts_with("0x")
+        && value[2..]
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-fn bind_policy(observation: &RegistryObservation, policy: &ValidatedPolicyBundle) -> Result<(), SnapshotError> {
+fn bind_policy(
+    observation: &RegistryObservation,
+    policy: &ValidatedPolicyBundle,
+) -> Result<(), SnapshotError> {
     use sha2::{Digest, Sha256};
     if observation.status != "active" {
-        return Err(SnapshotError::new(SnapshotErrorKind::PolicyExpired, "Registry policy is revoked"));
+        return Err(SnapshotError::new(
+            SnapshotErrorKind::PolicyExpired,
+            "Registry policy is revoked",
+        ));
     }
-    let digest = format!("0x{}", hex::encode(Sha256::digest(
-        policy.signature_verified().parsed().payload_bytes(),
-    )));
+    let digest = format!(
+        "0x{}",
+        hex::encode(Sha256::digest(
+            policy.signature_verified().parsed().payload_bytes(),
+        ))
+    );
     if observation.version != policy.sequence() || observation.payload_digest != digest {
-        return Err(rejected_state("Registry version/digest does not bind the signed body"));
+        return Err(rejected_state(
+            "Registry version/digest does not bind the signed body",
+        ));
     }
     Ok(())
 }
@@ -449,41 +483,82 @@ struct RegistryGate {
 }
 
 impl RegistryGate {
-    fn new(config: RegistryConfig, policy: &PolicyValidationConfig, last: RegistryObservation, now: u64) -> Result<Self, SnapshotError> {
+    fn new(
+        config: RegistryConfig,
+        policy: &PolicyValidationConfig,
+        last: RegistryObservation,
+        now: u64,
+    ) -> Result<Self, SnapshotError> {
         if !config.reference().is_valid()
             || !matches!(config.finality.as_str(), "safe" | "finalized")
             || !(1..=MAX_SAFE_INTEGER).contains(&config.max_state_age_ms)
         {
-            return Err(SnapshotError::new(SnapshotErrorKind::InvalidConfig, "invalid local Registry configuration"));
+            return Err(SnapshotError::new(
+                SnapshotErrorKind::InvalidConfig,
+                "invalid local Registry configuration",
+            ));
         }
-        let mut gate = Self { config, env: policy.env.clone(), profile: policy.profile.clone(), last, deadline: 0 };
+        let mut gate = Self {
+            config,
+            env: policy.env.clone(),
+            profile: policy.profile.clone(),
+            last,
+            deadline: 0,
+        };
         gate.deadline = gate.validate_observation(&gate.last, now)?;
         Ok(gate)
     }
 
-    fn validate_observation(&self, next: &RegistryObservation, now: u64) -> Result<u64, SnapshotError> {
-        if next.chain_id != self.config.chain_id || next.registry_address != self.config.registry_address
-            || next.env != self.env || next.profile != self.profile || next.finality != self.config.finality
+    fn validate_observation(
+        &self,
+        next: &RegistryObservation,
+        now: u64,
+    ) -> Result<u64, SnapshotError> {
+        if next.chain_id != self.config.chain_id
+            || next.registry_address != self.config.registry_address
+            || next.env != self.env
+            || next.profile != self.profile
+            || next.finality != self.config.finality
         {
-            return Err(scope_error("Registry scope/finality does not match local trust"));
+            return Err(scope_error(
+                "Registry scope/finality does not match local trust",
+            ));
         }
-        if now > MAX_SAFE_INTEGER || next.observed_at_ms > now
-            || next.block_number > MAX_SAFE_INTEGER || next.block_timestamp > MAX_SAFE_INTEGER
+        if now > MAX_SAFE_INTEGER
+            || next.observed_at_ms > now
+            || next.block_number > MAX_SAFE_INTEGER
+            || next.block_timestamp > MAX_SAFE_INTEGER
             || !(1..=MAX_SAFE_INTEGER).contains(&next.version)
             || !matches!(next.status.as_str(), "active" | "revoked")
-            || !hex32(&next.block_hash) || !hex32(&next.payload_digest)
+            || !hex32(&next.block_hash)
+            || !hex32(&next.payload_digest)
         {
-            return Err(SnapshotError::new(SnapshotErrorKind::InvalidPolicyBundle, "invalid Registry observation"));
+            return Err(SnapshotError::new(
+                SnapshotErrorKind::InvalidPolicyBundle,
+                "invalid Registry observation",
+            ));
         }
         let block_ms = next.block_timestamp * 1000;
         if block_ms > next.observed_at_ms {
-            return Err(SnapshotError::new(SnapshotErrorKind::InvalidPolicyBundle, "Registry block timestamp is in the future"));
+            return Err(SnapshotError::new(
+                SnapshotErrorKind::InvalidPolicyBundle,
+                "Registry block timestamp is in the future",
+            ));
         }
-        let deadline = block_ms.checked_add(self.config.max_state_age_ms)
+        let deadline = block_ms
+            .checked_add(self.config.max_state_age_ms)
             .filter(|deadline| *deadline <= MAX_SAFE_INTEGER)
-            .ok_or_else(|| SnapshotError::new(SnapshotErrorKind::InvalidPolicyBundle, "Registry deadline exceeds safe time"))?;
+            .ok_or_else(|| {
+                SnapshotError::new(
+                    SnapshotErrorKind::InvalidPolicyBundle,
+                    "Registry deadline exceeds safe time",
+                )
+            })?;
         if now >= deadline {
-            return Err(SnapshotError::new(SnapshotErrorKind::PolicyExpired, "last acknowledged Registry block lease expired"));
+            return Err(SnapshotError::new(
+                SnapshotErrorKind::PolicyExpired,
+                "last acknowledged Registry block lease expired",
+            ));
         }
         Ok(deadline)
     }
@@ -491,8 +566,10 @@ impl RegistryGate {
     fn validate_next(&self, next: &RegistryObservation, now: u64) -> Result<u64, SnapshotError> {
         let deadline = self.validate_observation(next, now)?;
         let old = &self.last;
-        if next.block_number < old.block_number || next.block_timestamp < old.block_timestamp
-            || next.observed_at_ms < old.observed_at_ms || next.version < old.version
+        if next.block_number < old.block_number
+            || next.block_timestamp < old.block_timestamp
+            || next.observed_at_ms < old.observed_at_ms
+            || next.version < old.version
         {
             return Err(rejected_state("Registry observation moved backwards"));
         }
@@ -500,27 +577,40 @@ impl RegistryGate {
             let mut repeated = next.clone();
             repeated.observed_at_ms = old.observed_at_ms;
             if &repeated != old {
-                return Err(rejected_state("conflicting Registry state at the same block height"));
+                return Err(rejected_state(
+                    "conflicting Registry state at the same block height",
+                ));
             }
         }
         if next.version == old.version
             && (next.payload_digest != old.payload_digest
                 || (old.status == "revoked" && next.status != "revoked"))
         {
-            return Err(rejected_state("Registry version content changed or revoked version reactivated"));
+            return Err(rejected_state(
+                "Registry version content changed or revoked version reactivated",
+            ));
         }
         Ok(deadline)
     }
 
     fn ensure_usable(&self, version: u64, now: u64) -> Result<(), SnapshotError> {
         if self.last.status == "revoked" {
-            return Err(SnapshotError::new(SnapshotErrorKind::PolicyExpired, "Registry policy is revoked; replan after a new active version"));
+            return Err(SnapshotError::new(
+                SnapshotErrorKind::PolicyExpired,
+                "Registry policy is revoked; replan after a new active version",
+            ));
         }
         if version != self.last.version {
-            return Err(SnapshotError::new(SnapshotErrorKind::PolicyExpired, "Registry policy was superseded; replan required"));
+            return Err(SnapshotError::new(
+                SnapshotErrorKind::PolicyExpired,
+                "Registry policy was superseded; replan required",
+            ));
         }
         if now > MAX_SAFE_INTEGER || now < self.last.observed_at_ms || now >= self.deadline {
-            return Err(SnapshotError::new(SnapshotErrorKind::PolicyExpired, "last acknowledged Registry block lease expired or clock regressed"));
+            return Err(SnapshotError::new(
+                SnapshotErrorKind::PolicyExpired,
+                "last acknowledged Registry block lease expired or clock regressed",
+            ));
         }
         Ok(())
     }

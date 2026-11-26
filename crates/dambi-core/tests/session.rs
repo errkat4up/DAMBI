@@ -668,15 +668,25 @@ fn registry_state_enforces_block_lease_revocation_replacement_and_restart() {
     repeat["registryState"]["observedAtMs"] = json!(NOW + 1999);
     registry_refresh(&mut core, &repeat, NOW + 1999).unwrap();
     let pinned = core.plan(&request("7").to_string(), NOW + 1999).unwrap();
-    let unavailable = json!({"payload":"","signature":"","registryState":{"status":"unavailable"}});
-    error_code(registry_refresh(&mut core, &unavailable, NOW + 1999), "POLICY_FETCH_FAILED");
-    error_code(core.plan(&request("7").to_string(), NOW + 2000), "POLICY_EXPIRED");
+    let unavailable =
+        json!({"payload":"","signature":"","registryState":{"status":"unavailable"}});
+    error_code(
+        registry_refresh(&mut core, &unavailable, NOW + 1999),
+        "POLICY_FETCH_FAILED",
+    );
+    error_code(
+        core.plan(&request("7").to_string(), NOW + 2000),
+        "POLICY_EXPIRED",
+    );
     let denied = evaluate(&mut core, &pinned, &empty_facts(&pinned), NOW + 2000);
     assert_eq!(denied["source"], "fail_closed");
     assert_eq!(denied["decision"], "deny");
     assert!(diagnostic(&denied, "trust_expired"));
     repeat["registryState"]["observedAtMs"] = json!(NOW + 2000);
-    error_code(registry_refresh(&mut core, &repeat, NOW + 2000), "POLICY_EXPIRED");
+    error_code(
+        registry_refresh(&mut core, &repeat, NOW + 2000),
+        "POLICY_EXPIRED",
+    );
 
     let renewed = registry_wire(42, 101, NOW / 1000 + 2, NOW + 2000);
     assert_eq!(renewed["payload"], initial["payload"]);
@@ -697,21 +707,36 @@ fn registry_state_enforces_block_lease_revocation_replacement_and_restart() {
     revoked["payload"] = json!("");
     revoked["signature"] = json!("");
     registry_refresh(&mut core, &revoked, NOW + 3000).unwrap();
-    error_code(core.plan(&request("7").to_string(), NOW + 3000), "POLICY_EXPIRED");
+    error_code(
+        core.plan(&request("7").to_string(), NOW + 3000),
+        "POLICY_EXPIRED",
+    );
     let denied = evaluate(&mut core, &old, &empty_facts(&old), NOW + 3000);
     assert_eq!(denied["source"], "fail_closed");
     assert_eq!(denied["decision"], "deny");
     assert!(diagnostic(&denied, "trust_expired"));
     let reactivated = registry_wire(43, 104, NOW / 1000 + 3, NOW + 3000);
-    error_code(registry_refresh(&mut core, &reactivated, NOW + 3000), "POLICY_SEQUENCE_REJECTED");
+    error_code(
+        registry_refresh(&mut core, &reactivated, NOW + 3000),
+        "POLICY_SEQUENCE_REJECTED",
+    );
     let recovered = registry_wire(44, 105, NOW / 1000 + 3, NOW + 3000);
     registry_refresh(&mut core, &recovered, NOW + 3000).unwrap();
 
     let mut cached_only = recovered.clone();
     cached_only.as_object_mut().unwrap().remove("registryState");
-    error_code(CoreSession::new(&cfg, &cached_only.to_string(), NOW + 3000), "POLICY_SCOPE_MISMATCH");
-    error_code(CoreSession::new(&cfg, &unavailable.to_string(), NOW + 3000), "POLICY_FETCH_FAILED");
-    error_code(CoreSession::new(&cfg, &initial.to_string(), NOW + 3000), "POLICY_EXPIRED");
+    error_code(
+        CoreSession::new(&cfg, &cached_only.to_string(), NOW + 3000),
+        "POLICY_SCOPE_MISMATCH",
+    );
+    error_code(
+        CoreSession::new(&cfg, &unavailable.to_string(), NOW + 3000),
+        "POLICY_FETCH_FAILED",
+    );
+    error_code(
+        CoreSession::new(&cfg, &initial.to_string(), NOW + 3000),
+        "POLICY_EXPIRED",
+    );
     CoreSession::new(&cfg, &recovered.to_string(), NOW + 3000).unwrap();
 }
 
@@ -721,13 +746,41 @@ fn registry_rejects_tampering_scope_rollback_conflicts_and_late_refreshes() {
     let initial = registry_wire(42, 100, NOW / 1000, NOW);
     let mut core = CoreSession::new(&cfg, &initial.to_string(), NOW).unwrap();
     for (pointer, value, expected) in [
-        ("/payload", json!(format!("{} ", initial["payload"].as_str().unwrap())), "INVALID_SIGNATURE"),
-        ("/registryState/chainId", json!(1), "POLICY_SCOPE_MISMATCH"),
-        ("/registryState/profile", json!("foreign"), "POLICY_SCOPE_MISMATCH"),
-        ("/registryState/finality", json!("latest"), "POLICY_SCOPE_MISMATCH"),
-        ("/registryState/blockNumber", json!(99), "POLICY_SEQUENCE_REJECTED"),
-        ("/registryState/blockHash", json!(format!("0x{:064x}", 999)), "POLICY_SEQUENCE_REJECTED"),
-        ("/registryState/version", json!(41), "POLICY_SEQUENCE_REJECTED"),
+        (
+            "/payload",
+            json!(format!("{} ", initial["payload"].as_str().unwrap())),
+            "INVALID_SIGNATURE",
+        ),
+        (
+            "/registryState/chainId",
+            json!(1),
+            "POLICY_SCOPE_MISMATCH",
+        ),
+        (
+            "/registryState/profile",
+            json!("foreign"),
+            "POLICY_SCOPE_MISMATCH",
+        ),
+        (
+            "/registryState/finality",
+            json!("latest"),
+            "POLICY_SCOPE_MISMATCH",
+        ),
+        (
+            "/registryState/blockNumber",
+            json!(99),
+            "POLICY_SEQUENCE_REJECTED",
+        ),
+        (
+            "/registryState/blockHash",
+            json!(format!("0x{:064x}", 999)),
+            "POLICY_SEQUENCE_REJECTED",
+        ),
+        (
+            "/registryState/version",
+            json!(41),
+            "POLICY_SEQUENCE_REJECTED",
+        ),
     ] {
         let mut bad = initial.clone();
         *bad.pointer_mut(pointer).unwrap() = value;
@@ -737,14 +790,28 @@ fn registry_rejects_tampering_scope_rollback_conflicts_and_late_refreshes() {
     foreign["registry_ref"]["chainId"] = json!(1);
     let mut bad: Value = serde_json::from_str(&wire(signed_policy(foreign))).unwrap();
     bad["registryState"] = initial["registryState"].clone();
-    error_code(registry_refresh(&mut core, &bad, NOW), "POLICY_SCOPE_MISMATCH");
+    error_code(
+        registry_refresh(&mut core, &bad, NOW),
+        "POLICY_SCOPE_MISMATCH",
+    );
     let earlier = core.begin_refresh().unwrap();
     let latest = core.begin_refresh().unwrap();
     let replacement = registry_wire(43, 101, NOW / 1000, NOW);
-    core.commit_refresh(latest, &replacement.to_string(), NOW).unwrap();
-    error_code(core.commit_refresh(earlier, &registry_wire(100, 200, NOW / 1000, NOW).to_string(), NOW), "ABORTED");
+    core.commit_refresh(latest, &replacement.to_string(), NOW)
+        .unwrap();
+    error_code(
+        core.commit_refresh(
+            earlier,
+            &registry_wire(100, 200, NOW / 1000, NOW).to_string(),
+            NOW,
+        ),
+        "ABORTED",
+    );
     let plan = core.plan(&request("7").to_string(), NOW).unwrap();
-    assert_eq!(evaluate(&mut core, &plan, &empty_facts(&plan), NOW)["metadata"]["policyVersion"], "43");
+    assert_eq!(
+        evaluate(&mut core, &plan, &empty_facts(&plan), NOW)["metadata"]["policyVersion"],
+        "43"
+    );
 }
 
 fn scam_config() -> Value {

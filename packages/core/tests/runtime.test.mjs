@@ -176,6 +176,73 @@ test("Registry initial loading and rejection categories agree in Native and WASM
   await assert.rejects(boundaryCore.plan(request()), code("POLICY_EXPIRED"));
 });
 
+test("signed Registry structure and explicit expiry agree in Native and WASM", async (t) => {
+  const original = registryPolicy();
+  const payload = JSON.parse(original.payload);
+  const reference = payload.registry_ref;
+  const makePolicy = (changes) => {
+    const policy = signed({ ...payload, ...changes });
+    return { ...policy, registryState: {
+      ...original.registryState,
+      payloadDigest: `0x${createHash("sha256").update(policy.payload).digest("hex")}`,
+    } };
+  };
+  // Re-sign every mutation and bind its digest, so these exercise structural
+  // and semantic validation rather than merely failing signature verification.
+  for (const [changes, expected] of [
+    [{ registry_ref: { ...reference, registryAddress: `0x${"0".repeat(40)}` } }, "INVALID_POLICY_BUNDLE"],
+    [{ registry_ref: { ...reference, registryAddress: `${CONTRACT}\n` } }, "INVALID_POLICY_BUNDLE"],
+    [{ registry_ref: { ...reference, registryAddress: `0x${"A".repeat(40)}` } }, "INVALID_POLICY_BUNDLE"],
+    [{ registry_ref: { ...reference, extra: true } }, "INVALID_POLICY_BUNDLE"],
+    [{ registry_ref: { chainId: 91342 } }, "INVALID_POLICY_BUNDLE"],
+    [{ registry_ref: { ...reference, chainId: 0 } }, "INVALID_POLICY_BUNDLE"],
+    [{ registry_ref: null }, "POLICY_SCOPE_MISMATCH"],
+    [{ registry_ref: "legacy-reference" }, "POLICY_SCOPE_MISMATCH"],
+    [{ expires_at: null }, "INVALID_POLICY_BUNDLE"],
+    [{ expires_at: payload.issued_at }, "INVALID_POLICY_BUNDLE"],
+    [{ expires_at: NOW / 1000 }, "POLICY_EXPIRED"],
+  ]) {
+    const policy = makePolicy(changes);
+    const setup = registryHarness(policy);
+    await assert.rejects(createCore(setup.config), code(expected), JSON.stringify(changes));
+    assert.throws(() => native(setup.local, policy, request()),
+      (error) => error.status === 1 && String(error.stderr).includes(`native session: ${expected}:`),
+      JSON.stringify(changes));
+  }
+
+  // Expiry is independent of the still-live block lease. The original signed
+  // body cannot be kept usable by repeatedly observing that block.
+  const policy = makePolicy({ expires_at: NOW / 1000 + 1 });
+  const setup = registryHarness(policy);
+  const core = await createCore(setup.config);
+  t.after(() => core.dispose());
+  assert.deepEqual(await core.check(request()), native(setup.local, policy, request()).verdict);
+  setup.setNow(NOW + 999);
+  setup.setPolicy({ ...policy, registryState: { ...policy.registryState, observedAtMs: NOW + 999 } });
+  await core.refreshPolicies();
+  const pinned = await core.plan(request());
+  setup.setNow(NOW + 1000);
+  await assert.rejects(core.refreshPolicies(), code("POLICY_EXPIRED"));
+  await assert.rejects(core.plan(request()), code("POLICY_EXPIRED"));
+  const verdict = core.evaluate(pinned, emptyFacts(pinned));
+  assert.equal(verdict.decision, "deny");
+  assert.equal(verdict.source, "fail_closed");
+  assert.equal(verdict.metadata.policyVersion, "42");
+  assert.ok(verdict.diagnostics.some(({ code }) => code === "trust_expired"));
+
+  // The identical null wire path remains valid in HTTP mode. A Registry body
+  // must not silently switch an HTTP-configured session into Registry mode.
+  const http = signed({ ...payload, registry_ref: null, expires_at: null });
+  const httpSetup = harness(http);
+  const httpCore = await createCore(httpSetup.config);
+  t.after(() => httpCore.dispose());
+  assert.deepEqual(await httpCore.check(request()), native(httpSetup.local, http, request()).verdict);
+  const registryBodyOnly = { payload: original.payload, signature: original.signature };
+  await assert.rejects(createCore(harness(registryBodyOnly).config), code("UNSUPPORTED_REGISTRY_REF"));
+  assert.throws(() => native(httpSetup.local, registryBodyOnly, request()),
+    (error) => error.status === 1 && String(error.stderr).includes("native session: UNSUPPORTED_REGISTRY_REF:"));
+});
+
 test("Registry WASM refresh enforces fixed block lease, races, revocation and replan", async (t) => {
   const initial = registryPolicy();
   const setup = registryHarness(initial);

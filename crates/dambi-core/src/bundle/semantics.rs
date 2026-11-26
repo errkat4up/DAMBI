@@ -18,7 +18,9 @@ impl RegistryRef {
         (1..=MAX_SAFE_INTEGER).contains(&self.chain_id)
             && self.registry_address.len() == 42
             && self.registry_address.starts_with("0x")
-            && self.registry_address[2..].bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+            && self.registry_address[2..]
+                .bytes()
+                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
             && self.registry_address[2..].bytes().any(|b| b != b'0')
     }
 }
@@ -160,7 +162,8 @@ impl ValidatedPolicyBundle {
         let Some(previous) = previous else {
             return Ok(PolicyUpdate::Replace);
         };
-        if self.env() != previous.env() || self.profile() != previous.profile()
+        if self.env() != previous.env()
+            || self.profile() != previous.profile()
             || self.verified.parsed().payload()["registry_ref"]
                 != previous.verified.parsed().payload()["registry_ref"]
         {
