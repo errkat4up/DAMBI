@@ -125,6 +125,142 @@ function native(config, policy, req, facts) {
   }));
 }
 
+function registryPolicy(version = 42, block = 100, timestamp = NOW / 1000, observed = NOW) {
+  const policy = signed({ ...JSON.parse(initialPolicy.payload), sequence: version,
+    registry_ref: { chainId: 91342, registryAddress: CONTRACT }, expires_at: NOW / 1000 + 300000 });
+  return { ...policy, registryState: {
+    status: "active", chainId: 91342, registryAddress: CONTRACT, env: "staging", profile: "default",
+    version, payloadDigest: `0x${createHash("sha256").update(policy.payload).digest("hex")}`,
+    finality: "finalized", blockNumber: block, blockHash: `0x${block.toString(16).padStart(64, "0")}`,
+    blockTimestamp: timestamp, observedAtMs: observed,
+  } };
+}
+
+function registryHarness(policy = registryPolicy()) {
+  const setup = harness(policy);
+  setup.local.trust.registry = { chainId: 91342, registryAddress: CONTRACT,
+    finality: "finalized", maxStateAgeMs: 2000 };
+  return setup;
+}
+
+test("Registry initial loading and rejection categories agree in Native and WASM", async (t) => {
+  const policy = registryPolicy();
+  const setup = registryHarness(policy);
+  const core = await createCore(setup.config);
+  t.after(() => core.dispose());
+  const plan = await core.plan(request());
+  const reference = native(setup.local, policy, request());
+  assert.deepEqual(core.evaluate(plan, emptyFacts(plan)), reference.verdict);
+  assert.deepEqual(withoutCallIds(plan), withoutCallIds(reference.plan));
+  const cachedOnly = { payload: policy.payload, signature: policy.signature };
+  const unavailable = { payload: "", signature: "", registryState: { status: "unavailable" } };
+  const expired = registryPolicy(42, 100, NOW / 1000 - 2);
+  for (const [input, expected] of [
+    [cachedOnly, "POLICY_SCOPE_MISMATCH"], [unavailable, "POLICY_FETCH_FAILED"],
+    [expired, "POLICY_EXPIRED"],
+    [{ ...policy, payload: `${policy.payload} ` }, "INVALID_SIGNATURE"],
+    [{ ...policy, registryState: { ...policy.registryState, chainId: 1 } }, "POLICY_SCOPE_MISMATCH"],
+    [{ ...policy, registryState: { ...policy.registryState, finality: "latest" } }, "POLICY_SCOPE_MISMATCH"],
+  ]) {
+    await assert.rejects(createCore(registryHarness(input).config), code(expected));
+    assert.throws(() => native(setup.local, input, request()),
+      (error) => error.status === 1 && String(error.stderr).includes(`native session: ${expected}:`));
+  }
+  const boundary = registryPolicy(42, 100, NOW / 1000 - 1);
+  const boundarySetup = registryHarness(boundary);
+  boundarySetup.local.trust.registry.maxStateAgeMs = 1001;
+  const boundaryCore = await createCore(boundarySetup.config);
+  t.after(() => boundaryCore.dispose());
+  assert.deepEqual(await boundaryCore.check(request()), native(boundarySetup.local, boundary, request()).verdict);
+  boundarySetup.setNow(NOW + 1);
+  await assert.rejects(boundaryCore.plan(request()), code("POLICY_EXPIRED"));
+});
+
+test("Registry WASM refresh enforces fixed block lease, races, revocation and replan", async (t) => {
+  const initial = registryPolicy();
+  const setup = registryHarness(initial);
+  const core = await createCore(setup.config);
+  t.after(() => core.dispose());
+  for (const [change, expected] of [
+    [{ blockNumber: 99 }, "POLICY_SEQUENCE_REJECTED"],
+    [{ blockHash: `0x${"f".repeat(64)}` }, "POLICY_SEQUENCE_REJECTED"],
+    [{ version: 41 }, "POLICY_SEQUENCE_REJECTED"],
+    [{ profile: "foreign" }, "POLICY_SCOPE_MISMATCH"],
+  ]) {
+    setup.setPolicy({ ...initial, registryState: { ...initial.registryState, ...change } });
+    await assert.rejects(core.refreshPolicies(), code(expected));
+  }
+  setup.setNow(NOW + 1999);
+  setup.setPolicy({ ...initial, registryState: { ...initial.registryState, observedAtMs: NOW + 1999 } });
+  await core.refreshPolicies();
+  const pinned = await core.plan(request());
+  setup.setPolicy({ payload: "", signature: "", registryState: { status: "unavailable" } });
+  await assert.rejects(core.refreshPolicies(), code("POLICY_FETCH_FAILED"));
+  setup.setNow(NOW + 2000);
+  await assert.rejects(core.plan(request()), code("POLICY_EXPIRED"));
+  const expired = core.evaluate(pinned, emptyFacts(pinned));
+  assert.equal(expired.decision, "deny");
+  assert.equal(expired.source, "fail_closed");
+  assert.ok(expired.diagnostics.some(({ code }) => code === "trust_expired"));
+  const renewed = registryPolicy(42, 101, NOW / 1000 + 2, NOW + 2000);
+  assert.equal(renewed.payload, initial.payload);
+  setup.setPolicy(renewed);
+  await core.refreshPolicies();
+  const old = await core.plan(request());
+  const firstStarted = deferred(), firstResponse = deferred();
+  let calls = 0;
+  const replacement = registryPolicy(43, 102, NOW / 1000 + 2, NOW + 2000);
+  setup.setFetcher(() => {
+    if (calls++ === 0) { firstStarted.resolve(); return firstResponse.promise; }
+    return Promise.resolve(replacement);
+  });
+  const superseded = assert.rejects(core.refreshPolicies(), code("ABORTED"));
+  await firstStarted.promise;
+  await core.refreshPolicies();
+  firstResponse.resolve(registryPolicy(100, 200, NOW / 1000 + 2, NOW + 2000));
+  await superseded;
+  const denied = core.evaluate(old, emptyFacts(old));
+  assert.equal(denied.source, "fail_closed");
+  assert.equal(denied.metadata.policyVersion, "42");
+  const active = await core.plan(request());
+  const revoked = { payload: "", signature: "", registryState: {
+    ...replacement.registryState, status: "revoked", blockNumber: 103,
+    blockHash: `0x${(103).toString(16).padStart(64, "0")}`,
+  } };
+  setup.setFetcher(async () => revoked);
+  await core.refreshPolicies();
+  const revokedVerdict = core.evaluate(active, emptyFacts(active));
+  assert.equal(revokedVerdict.decision, "deny");
+  assert.equal(revokedVerdict.source, "fail_closed");
+  assert.ok(revokedVerdict.diagnostics.some(({ code }) => code === "trust_expired"));
+  await assert.rejects(core.plan(request()), code("POLICY_EXPIRED"));
+  setup.setFetcher(async () => registryPolicy(43, 104, NOW / 1000 + 2, NOW + 2000));
+  await assert.rejects(core.refreshPolicies(), code("POLICY_SEQUENCE_REJECTED"));
+  setup.setFetcher(async () => registryPolicy(44, 105, NOW / 1000 + 2, NOW + 2000));
+  await core.refreshPolicies();
+  const recovered = await core.plan(request());
+  assert.equal(core.evaluate(recovered, emptyFacts(recovered)).metadata.policyVersion, "44");
+});
+
+test("HTTP 72-hour boundary remains identical in Native and WASM", async (t) => {
+  const payload = JSON.parse(initialPolicy.payload);
+  payload.issued_at = NOW / 1000 - 259200;
+  payload.expires_at = null;
+  const policy = signed(payload);
+  const setup = harness(policy);
+  await assert.rejects(createCore(setup.config), code("POLICY_EXPIRED"));
+  assert.throws(() => native(setup.local, policy, request()),
+    (error) => error.status === 1 && String(error.stderr).includes("native session: POLICY_EXPIRED:"));
+  payload.issued_at++;
+  const fresh = signed(payload);
+  const liveSetup = harness(fresh);
+  const core = await createCore(liveSetup.config);
+  t.after(() => core.dispose());
+  assert.deepEqual(await core.check(request()), native(liveSetup.local, fresh, request()).verdict);
+  liveSetup.setNow(NOW + 1000);
+  await assert.rejects(core.refreshPolicies(), code("POLICY_EXPIRED"));
+});
+
 function withoutCallIds(plan) {
   return plan.calls.map(({ callId: _callId, ...call }) => call);
 }

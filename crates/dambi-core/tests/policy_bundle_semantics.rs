@@ -145,6 +145,31 @@ fn assert_kind(error: PolicySemanticError, expected: PolicySemanticErrorKind) {
 }
 
 #[test]
+fn registry_expiry_is_explicit_and_does_not_change_http_72_hour_semantics() {
+    use dambi_core::bundle::{validate_policy_bundle_with_registry, RegistryRef};
+    let reference = RegistryRef {
+        chain_id: 91342,
+        registry_address: "0x1111111111111111111111111111111111111111".into(),
+    };
+    let mut payload = base();
+    payload["registry_ref"] = serde_json::to_value(&reference).unwrap();
+    let validate_registry = |payload: &Value, now| validate_policy_bundle_with_registry(
+        signed_raw(payload.to_string().as_bytes(), None), &config(), Some(&reference), now,
+    );
+    assert_kind(validate_registry(&payload, NOW_MS).unwrap_err(), PolicySemanticErrorKind::InvalidPolicyBundle);
+    payload["expires_at"] = json!(ISSUED_SEC + DEFAULT_AGE_SEC + 60);
+    let deadline = (ISSUED_SEC + DEFAULT_AGE_SEC + 60) * 1000;
+    assert_eq!(validate_registry(&payload, deadline - 1).unwrap().valid_until_ms(), deadline);
+    assert_kind(validate_registry(&payload, deadline).unwrap_err(), PolicySemanticErrorKind::PolicyExpired);
+    payload["registry_ref"] = Value::Null;
+    assert_kind(validate(&payload, &config(), deadline - 1).unwrap_err(), PolicySemanticErrorKind::PolicyExpired);
+    payload["expires_at"] = Value::Null;
+    let http_deadline = (ISSUED_SEC + DEFAULT_AGE_SEC) * 1000;
+    validate(&payload, &config(), http_deadline - 1).unwrap();
+    assert_kind(validate(&payload, &config(), http_deadline).unwrap_err(), PolicySemanticErrorKind::PolicyExpired);
+}
+
+#[test]
 fn node_day1_authenticates_and_validates_all_five_policies() {
     let parsed = parse_policy_envelope(DAY1, LIMIT).unwrap();
     let original = parsed.payload_bytes().to_vec();

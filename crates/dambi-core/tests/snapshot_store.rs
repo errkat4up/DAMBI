@@ -12,6 +12,52 @@ use std::sync::Arc;
 use support::*;
 
 #[test]
+fn retained_registry_snapshot_renews_only_on_new_blocks_and_rechecks_at_commit() {
+    use dambi_core::snapshot::{RegistryConfig, RegistryObservation};
+    let mut payload = policy_value(42);
+    payload["registry_ref"] = json!({"chainId":91342,"registryAddress":CONTRACT});
+    payload["expires_at"] = json!(NOW / 1000 + 100);
+    let policy = signed_policy(payload);
+    let observation = RegistryObservation {
+        status: "active".into(), chain_id: 91342, registry_address: CONTRACT.into(),
+        env: "staging".into(), profile: "default".into(), version: 42,
+        payload_digest: digest(&policy.payload), finality: "finalized".into(),
+        block_number: 100, block_hash: format!("0x{:064x}", 100),
+        block_timestamp: NOW / 1000, observed_at_ms: NOW,
+    };
+    let mut store = SnapshotStore::new_with_registry(
+        config(), artifact(vec![approve_bundle()]).input(), policy.input(),
+        RegistryConfig { chain_id: 91342, registry_address: CONTRACT.into(),
+            finality: "finalized".into(), max_state_age_ms: 2000 },
+        observation.clone(), NOW,
+    ).unwrap();
+    let pinned = store.current(NOW).unwrap();
+    let ticket = store.begin_refresh().unwrap();
+    let prepared = store.prepare_registry_refresh(&ticket, policy.input(), observation.clone(), NOW).unwrap();
+    expect_code(store.commit_refresh(prepared, NOW + 2000), "POLICY_EXPIRED");
+    expect_code(pinned.ensure_usable(NOW + 2000), "POLICY_EXPIRED");
+    let mut newer = observation;
+    newer.block_number += 1;
+    newer.block_hash = format!("0x{:064x}", newer.block_number);
+    newer.block_timestamp += 2;
+    newer.observed_at_ms += 2000;
+    let ticket = store.begin_refresh().unwrap();
+    let prepared = store.prepare_registry_refresh(&ticket, policy.input(), newer.clone(), NOW + 2000).unwrap();
+    assert_eq!(store.commit_refresh(prepared, NOW + 2000).unwrap(), PolicyUpdate::Unchanged);
+    assert!(Arc::ptr_eq(&pinned, &store.current(NOW + 2000).unwrap()));
+    pinned.ensure_usable(NOW + 3999).unwrap();
+    expect_code(pinned.ensure_usable(NOW + 4000), "POLICY_EXPIRED");
+    newer.status = "revoked".into();
+    newer.block_number += 1;
+    newer.block_hash = format!("0x{:064x}", newer.block_number);
+    let ticket = store.begin_refresh().unwrap();
+    store.commit_registry_revocation(&ticket, newer, NOW + 2000).unwrap();
+    expect_code(pinned.ensure_usable(NOW + 2000), "POLICY_EXPIRED");
+    assert_eq!(pinned.policy().sequence(), 42);
+    assert_approve(&pinned, CONTRACT, BUNDLE_ID);
+}
+
+#[test]
 fn initialization_publishes_one_complete_pair_and_owns_the_input_data() {
     let mut decoder = artifact(vec![approve_bundle()]);
     let mut policy = day1();

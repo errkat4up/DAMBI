@@ -50,10 +50,17 @@ pub(super) fn validate_payload(value: &Value) -> Result<(), PolicyParseError> {
         ));
     }
     non_empty_string(&payload["profile"], "$/profile")?;
-    if !payload["registry_ref"].is_null() && !payload["registry_ref"].is_string() {
+    let reference = &payload["registry_ref"];
+    if reference.is_object() {
+        let parsed: super::RegistryRef = serde_json::from_value(reference.clone())
+            .map_err(|_| structure_error("$/registry_ref", "invalid Registry identity"))?;
+        if !parsed.is_valid() {
+            return Err(structure_error("$/registry_ref", "invalid Registry chain or address"));
+        }
+    } else if !reference.is_null() && !reference.is_string() {
         return Err(structure_error(
             "$/registry_ref",
-            "registry_ref must be a string or null",
+            "registry_ref must be a Registry identity, legacy string or null",
         ));
     }
     Ok(())
