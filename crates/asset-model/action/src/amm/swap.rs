@@ -17,7 +17,8 @@ pub struct SwapAction {
     pub venue: AmmVenue,
     /// Deterministic user-signed intent.
     pub params: SwapParams,
-    /// Inputs fetched at simulation time.
+    /// Inputs fetched at simulation time. An omitted input has not been observed.
+    #[serde(default)]
     pub live_inputs: SwapLiveInputs,
 }
 
@@ -39,7 +40,11 @@ pub struct SwapParams {
     #[tsify(type = "string")]
     pub recipient: Address,
     /// Slippage tolerance in basis points, applied across the whole route.
-    pub slippage_bp: u32,
+    /// `None` means no tolerance against a reference quote was observed. It is
+    /// distinct from an explicitly supplied zero and from a zero output floor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
+    pub slippage_bp: Option<u32>,
 }
 
 /// User intent is just amount-in/out plus a limit — the actual *route* lives in `SwapLiveInputs.route`.
@@ -68,20 +73,28 @@ pub enum SwapDirection {
 }
 
 /// Simulation-time inputs for a swap: actual route, expected output, price impact, gas.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+/// Source descriptors alone are not observations; neither values nor observation
+/// times may be inferred from them.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Tsify)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct SwapLiveInputs {
     /// Concrete executed route. Single-pool / single-hop has `paths.len() == 1 && hops.len() == 1`.
     /// Aggregator / multi-hop cases express split and cross-protocol routes here.
-    pub route: LiveField<SwapRoute>,
-    /// Estimated `token_out` summed across all paths.
-    #[tsify(type = "LiveField<string>")]
-    pub expected_amount_out: LiveField<U256>,
-    /// Estimated price impact in basis points.
-    pub price_impact_bp: LiveField<u32>,
-    /// Estimated gas cost of the swap.
-    #[tsify(type = "LiveField<string>")]
-    pub gas_estimate: LiveField<U256>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
+    pub route: Option<LiveField<SwapRoute>>,
+    /// Estimated `token_out` summed across all paths. Absence is not zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional, type = "LiveField<string>")]
+    pub expected_amount_out: Option<LiveField<U256>>,
+    /// Estimated price impact in basis points. An observed zero is retained.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
+    pub price_impact_bp: Option<LiveField<u32>>,
+    /// Estimated gas cost of the swap. Absence is not a free transaction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional, type = "LiveField<string>")]
+    pub gas_estimate: Option<LiveField<U256>>,
 }
 
 /// Concrete execution route for a swap — unified split + multi-hop + cross-protocol representation.

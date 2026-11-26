@@ -3,6 +3,7 @@ import { createHash, sign } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { CoreError, createCore } from "@dambi/core";
+import { describeCheck } from "../../../examples/sdk-adapters/client.mjs";
 
 // Real packaged WASM, locally signed policy fixtures, and mocked external I/O.
 // Missing artifacts fail normally; this suite never builds or substitutes an engine.
@@ -150,6 +151,8 @@ test("check evaluates no-Fact approve and distinguishes unsupported requests fro
   const warn = await core.check(request("approve", MAX_U256));
   assert.equal(allow.decision, "allow");
   assert.equal(allow.source, "evaluated");
+  assert.equal(describeCheck(allow).status, "evaluated");
+  assert.equal(describeCheck(allow).signingAuthorized, false);
   assert.equal(warn.decision, "warn");
   assert.ok(hasReason(warn, "unlimited-approval-deny"));
   assert.equal(warn.metadata.policyVersion, "42");
@@ -217,7 +220,10 @@ test("raw transfer retains U256 precision and catalog optional semantics while r
   const requiredSetup = harness({ policy: signed([requiredEntry]) });
   const required = await open(t, requiredSetup);
   requiredSetup.setFacts(async (_calls, { planId }) => ({ planId, results: {} }));
-  failClosed(await required.check(request()), "required_fact_missing");
+  const missingRequired = await required.check(request());
+  failClosed(missingRequired, "required_fact_missing");
+  assert.equal(describeCheck(missingRequired).status, "fact_evaluation_failed");
+  assert.equal(describeCheck(missingRequired).reviewEligible, false);
   requiredSetup.setFacts(async (calls, context) => batch(calls, context, () => ({ ...fact(), value: "0x64" })));
   failClosed(await required.check(request()), "projection_failed");
   requiredSetup.setFacts(async (calls, context) => batch(calls, context, () => ({ ...fact(), source: "" })));
@@ -261,12 +267,33 @@ test("partial Unknown and sibling Fact fetch failure preserve decoded policy den
       if (unknown) {
         assert.equal(verdict.source, "evaluated");
         assert.ok(hasDiagnostic(verdict, "partial_decode"));
+        const presentation = describeCheck(verdict);
+        assert.equal(presentation.status, "partial_interpretation");
+        assert.equal(presentation.decision, "deny");
+        assert.equal(presentation.reviewEligible, false);
         assert.equal(setup.fetches.length, 0);
       } else {
         failClosed(verdict, "fact_fetch_failed");
       }
     }
   }
+});
+
+test("consumer distinguishes an unmatched policy from a matched allow without inventing a Core deny", options, async (t) => {
+  const setup = harness({ policy: signed([balanceEntry()]) });
+  const core = await open(t, setup);
+  const verdict = await core.check(request("approve", 7n));
+  assert.equal(verdict.source, "evaluated");
+  assert.ok(hasDiagnostic(verdict, "no_matching_policy"), JSON.stringify(verdict));
+  const before = structuredClone(verdict);
+  const presentation = describeCheck(verdict);
+  assert.equal(presentation.status, "policy_unmatched");
+  assert.equal(presentation.policyUnmatched, true);
+  assert.equal(presentation.reviewEligible, false);
+  assert.equal(presentation.signingAuthorized, false);
+  assert.equal(presentation.decision, verdict.decision);
+  assert.deepEqual(verdict, before);
+  assert.equal(setup.fetches.length, 0);
 });
 
 test("Fact timeout, abort and disposal ignore late responses without cancelling an independent check", options, async (t) => {

@@ -26,15 +26,13 @@ use super::lower_amm_venue;
 // contract — other actions return `Err` (e.g. unsupported sub-variants).
 #[allow(clippy::unnecessary_wraps)]
 pub(crate) fn lower(swap: &SwapAction, ctx: &LowerCtx<'_>) -> Result<LoweredAction, LowerError> {
-    // `route` is `LiveField<SwapRoute>`; the policy layer sees only the summed
-    // estimated-out across all paths (route shape is too complex for Cedar).
-    let route_estimated_out = swap
-        .live_inputs
-        .route
-        .value
-        .paths
-        .iter()
-        .fold(U256::ZERO, |acc, p| acc.saturating_add(p.estimated_out));
+    // Only sum an observed route. An absent route is not an observed empty
+    // route whose estimated output happens to be zero.
+    let route_estimated_out = swap.live_inputs.route.as_ref().map(|route| {
+        route.value.paths.iter().fold(U256::ZERO, |acc, path| {
+            acc.saturating_add(path.estimated_out)
+        })
+    });
 
     let mut m = Map::new();
     m.insert("meta".into(), ctx.meta());
@@ -56,26 +54,21 @@ pub(crate) fn lower(swap: &SwapAction, ctx: &LowerCtx<'_>) -> Result<LoweredActi
         "recipient".into(),
         Value::String(addr(&swap.params.recipient)),
     );
-    m.insert(
-        "slippageBp".into(),
-        Value::from(effective_slippage_bp(&swap.params)),
-    );
-    m.insert(
-        "routeEstimatedOut".into(),
-        Value::String(u256_hex(route_estimated_out)),
-    );
-    m.insert(
-        "expectedAmountOut".into(),
-        Value::String(u256_hex(swap.live_inputs.expected_amount_out.value)),
-    );
-    m.insert(
-        "priceImpactBp".into(),
-        Value::from(i64::from(swap.live_inputs.price_impact_bp.value)),
-    );
-    m.insert(
-        "gasEstimate".into(),
-        Value::String(u256_hex(swap.live_inputs.gas_estimate.value)),
-    );
+    if let Some(slippage) = effective_slippage_bp(&swap.params) {
+        m.insert("slippageBp".into(), Value::from(slippage));
+    }
+    if let Some(amount) = route_estimated_out {
+        m.insert("routeEstimatedOut".into(), Value::String(u256_hex(amount)));
+    }
+    if let Some(observed) = &swap.live_inputs.expected_amount_out {
+        m.insert("expectedAmountOut".into(), Value::String(u256_hex(observed.value)));
+    }
+    if let Some(observed) = &swap.live_inputs.price_impact_bp {
+        m.insert("priceImpactBp".into(), Value::from(i64::from(observed.value)));
+    }
+    if let Some(observed) = &swap.live_inputs.gas_estimate {
+        m.insert("gasEstimate".into(), Value::String(u256_hex(observed.value)));
+    }
     // `custom` is OMITTED here — it is filled later by enrichment.
 
     Ok(ctx.lowered(r#"Amm::Action::"Swap""#, Value::Object(m)))
@@ -142,14 +135,19 @@ fn lower_swap_direction(
 /// `minAmountOut == 0` accepts *any* output — a guaranteed-sandwichable order
 /// with effectively 100% tolerance. Surface that as the max (`10000` bp) so
 /// `swap-high-slippage` (AMM-010, `context.slippageBp > 100`) fires on it.
-/// Otherwise pass through whatever `slippage_bp` the decoder carried (`0`
-/// today); the `max` preserves a real `slippage_bp` if one is ever computed.
-fn effective_slippage_bp(params: &SwapParams) -> i64 {
+/// Otherwise preserve the supplied tolerance, including an explicit zero, or
+/// omit it when no tolerance was observed. A positive floor alone is not enough
+/// information to calculate quote-relative tolerance.
+fn effective_slippage_bp(params: &SwapParams) -> Option<i64> {
     let unbounded = matches!(
         &params.direction,
         SwapDirection::ExactInput { min_amount_out, .. } if *min_amount_out == U256::ZERO
     );
-    i64::from(params.slippage_bp).max(if unbounded { 10_000 } else { 0 })
+    if unbounded {
+        Some(params.slippage_bp.map(i64::from).unwrap_or(0).max(10_000))
+    } else {
+        params.slippage_bp.map(i64::from)
+    }
 }
 
 #[cfg(test)]
@@ -250,25 +248,25 @@ mod tests {
                     min_amount_out: U256::from(300_000_000_000_000_000u64),
                 },
                 recipient: user(),
-                slippage_bp,
+                slippage_bp: Some(slippage_bp),
             },
             live_inputs: SwapLiveInputs {
-                route: LiveField::new(route, pool_source.clone(), now())
-                    .with_ttl(Duration::from_secs(12)),
-                expected_amount_out: LiveField::new(
+                route: Some(LiveField::new(route, pool_source.clone(), now())
+                    .with_ttl(Duration::from_secs(12))),
+                expected_amount_out: Some(LiveField::new(
                     U256::from(305_000_000_000_000_000u64),
                     pool_source.clone(),
                     now(),
-                ),
-                price_impact_bp: LiveField::new(12u32, pool_source, now()),
-                gas_estimate: LiveField::new(
+                )),
+                price_impact_bp: Some(LiveField::new(12u32, pool_source, now())),
+                gas_estimate: Some(LiveField::new(
                     U256::from(180_000u64),
                     DataSource::OracleFeed {
                         provider: OracleProvider::Pyth,
                         feed_id: "gas/arbitrum".into(),
                     },
                     now(),
-                ),
+                )),
             },
         });
 
@@ -365,17 +363,17 @@ mod tests {
                     amount_out: U256::from(300_000_000_000_000_000u64),
                 },
                 recipient: user(),
-                slippage_bp: 75,
+                slippage_bp: Some(75),
             },
             live_inputs: SwapLiveInputs {
-                route: LiveField::new(route, src.clone(), now()),
-                expected_amount_out: LiveField::new(
+                route: Some(LiveField::new(route, src.clone(), now())),
+                expected_amount_out: Some(LiveField::new(
                     U256::from(300_000_000_000_000_000u64),
                     src.clone(),
                     now(),
-                ),
-                price_impact_bp: LiveField::new(18u32, src.clone(), now()),
-                gas_estimate: LiveField::new(U256::from(280_000u64), src, now()),
+                )),
+                price_impact_bp: Some(LiveField::new(18u32, src.clone(), now())),
+                gas_estimate: Some(LiveField::new(U256::from(280_000u64), src, now())),
             },
         });
 
@@ -413,6 +411,54 @@ mod tests {
         }))
         .unwrap();
         crate::schema::compose_per_policy(&manifest).unwrap()
+    }
+
+    #[test]
+    fn missing_swap_observations_are_omitted_but_real_zero_is_preserved() {
+        let (mut body, meta) = sample_swap_action(0);
+        let ActionBody::Amm(AmmAction::Swap(swap)) = &mut body else {
+            panic!("expected Swap");
+        };
+        swap.params.slippage_bp = None;
+        swap.live_inputs = SwapLiveInputs::default();
+        let lowered = lower_action(&body, &meta, &TxMeta { from: FROM, to: TO }).unwrap();
+        for field in ["slippageBp", "routeEstimatedOut", "expectedAmountOut", "priceImpactBp", "gasEstimate"] {
+            assert!(lowered.context.get(field).is_none(), "{field}: {}", lowered.context);
+        }
+        assert_eq!(lowered.context["recipient"], serde_json::json!(format!("{:#x}", user())));
+        assert!(lowered.context["direction"].get("minAmountOut").is_some());
+
+        let ActionBody::Amm(AmmAction::Swap(swap)) = &mut body else {
+            panic!("expected Swap");
+        };
+        swap.params.slippage_bp = Some(0);
+        let source = DataSource::UserSupplied;
+        swap.live_inputs.expected_amount_out = Some(LiveField::new(U256::ZERO, source.clone(), now()));
+        swap.live_inputs.price_impact_bp = Some(LiveField::new(0, source.clone(), now()));
+        swap.live_inputs.gas_estimate = Some(LiveField::new(U256::ZERO, source, now()));
+        let lowered = lower_action(&body, &meta, &TxMeta { from: FROM, to: TO }).unwrap();
+        assert_eq!(lowered.context["slippageBp"], serde_json::json!(0));
+        assert_eq!(lowered.context["expectedAmountOut"], serde_json::json!(super::u256_hex(U256::ZERO)));
+        assert_eq!(lowered.context["priceImpactBp"], serde_json::json!(0));
+        assert_eq!(lowered.context["gasEstimate"], serde_json::json!(super::u256_hex(U256::ZERO)));
+        assert!(lowered.context.get("routeEstimatedOut").is_none());
+    }
+
+    #[test]
+    fn explicit_zero_floor_is_unbounded_even_without_a_quote() {
+        let (mut body, meta) = sample_swap_action(0);
+        let ActionBody::Amm(AmmAction::Swap(swap)) = &mut body else {
+            panic!("expected Swap");
+        };
+        swap.params.slippage_bp = None;
+        swap.params.direction = SwapDirection::ExactInput {
+            amount_in: U256::from(1000), min_amount_out: U256::ZERO,
+        };
+        swap.live_inputs = SwapLiveInputs::default();
+        let lowered = lower_action(&body, &meta, &TxMeta { from: FROM, to: TO }).unwrap();
+        assert_eq!(lowered.context["slippageBp"], serde_json::json!(10000));
+        assert_eq!(lowered.context["direction"]["minAmountOut"], serde_json::json!(super::u256_hex(U256::ZERO)));
+        assert!(lowered.context.get("expectedAmountOut").is_none());
     }
 
     /// THE GATE: a wrong rename / missing required field / wrong type makes the
@@ -616,17 +662,17 @@ mod tests {
                     min_amount_out: U256::from(300_000_000_000_000_000u64),
                 },
                 recipient: user(),
-                slippage_bp: 50,
+                slippage_bp: Some(50),
             },
             live_inputs: SwapLiveInputs {
-                route: LiveField::new(route, src.clone(), now()),
-                expected_amount_out: LiveField::new(
+                route: Some(LiveField::new(route, src.clone(), now())),
+                expected_amount_out: Some(LiveField::new(
                     U256::from(300_000_000_000_000_000u64),
                     src.clone(),
                     now(),
-                ),
-                price_impact_bp: LiveField::new(12u32, src.clone(), now()),
-                gas_estimate: LiveField::new(U256::from(180_000u64), src, now()),
+                )),
+                price_impact_bp: Some(LiveField::new(12u32, src.clone(), now())),
+                gas_estimate: Some(LiveField::new(U256::from(180_000u64), src, now())),
             },
         });
 

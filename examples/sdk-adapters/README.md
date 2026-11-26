@@ -55,6 +55,58 @@ returned successfully; inspect `decision`, `source`, and `diagnostics` together.
 For the repository's verification command and tool setup, see
 [Standalone Node and browser consumers](../../packages/core/README.md#standalone-node-and-browser-consumers).
 
+## Interpretation and signing review
+
+Both consumers now use `describeCheck()` from `client.mjs`. Node keeps the original
+verdict on stdout and writes the interpretation summary to stderr. The browser
+shows the summary alongside the unchanged verdict. Neither consumer signs.
+
+An `allow` without a forbid reason is not evidence that a policy matched. The
+summary uses diagnostics, not an empty `reasons` array, to distinguish policy
+non-matches. `partial_decode` remains distinct from `unsupported_request` and
+`source: "fail_closed"`. An independent policy deny is retained in the original
+verdict and summary even when interpretation is partial. Enforcement is displayed,
+not overridden by the example.
+
+`reviewEligible` requires an evaluated allow without diagnostics. It is only an
+example host review gate, not a new Core blocking rule. Signing also requires the
+host to validate the exact request, active policy/trust state, enforcement and
+user authorization. `signingAuthorized` is always false in this evaluation-only
+example. A Fact-related timeout is reported as `fact_evaluation_failed`; this
+label does not assert that every timeout originated in a required RPC call.
+
+### F2 candidate / QA handoff — not acceptance evidence
+
+This candidate changes swap quote-relative slippage and swap live observations:
+
+| Input | Expected behavior | Regression | Actual result |
+| --- | --- | --- | --- |
+| Missing derived slippage | Absent, not zero | `swap_missing_slippage_is_not_an_explicit_zero` | Not run |
+| Explicit slippage zero | Preserve zero | Same test; lowering observation test | Not run |
+| Live source without value/time | No observed value or generated observation time | `swap_observations_require_values_and_original_times_for_each_field` | Not run |
+| Explicit live zero with original time, including epoch | Preserve zero and supplied time | Same test | Not run |
+| Positive output floor, no quote | Omit quote-relative slippage | `missing_swap_observations_are_omitted_but_real_zero_is_preserved` | Not run |
+| Explicit zero output floor, no quote | Keep `minAmountOut=0`; expose unbounded slippage | `explicit_zero_floor_is_unbounded_even_without_a_quote` | Not run |
+| Complete approve evaluation | Evaluated summary; no signing authorization | Packaged `check.test.mjs` | Not run |
+| Partial tree with independent deny | Partial summary retains deny | Packaged sibling-deny regression, both child orders | Not run |
+| No matching policy | Policy-unmatched summary; no new Core deny | Packaged unmatched-policy regression | Not run |
+| Missing required Fact | Failed Fact evaluation, not a successful interpretation | Packaged required-Fact regression | Not run |
+
+**F2 is not complete.** Remaining integration work includes non-slippage
+`$resolved`/`$derived` fallback identities, non-swap LiveField skeletons,
+transaction-meta gas observations, static route descriptions without simulation
+provenance, all Rust construction/consumption sites for the changed swap fields,
+and schema/evaluation handling of absent swap context attributes. In particular,
+this candidate must not be described as proving that every supported raw path
+avoids `INVALID_REQUEST` or preserves independent denies with missing swap data.
+Those require the native/session and packaged WASM regressions against the same
+candidate, including the real selected decoder fixtures. No generated decoder
+snapshot or metadata bytes are included.
+
+Regression execution, QA actual-result entries, and independent `dambi-review`
+approval are pending. No build, test, review, commit, push, or live operation is
+claimed by this handoff.
+
 ## Measuring a complete SDK check
 
 `check-timing.mjs` measures one `core.check()` call with `performance.now()`. It

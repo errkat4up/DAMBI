@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { CoreError } from "@dambi/core";
 import { AdapterError } from "@dambi/core/adapters";
-import { createAdapterCore } from "./client.mjs";
+import { createAdapterCore, describeCheck } from "./client.mjs";
 import { checkWithTiming } from "./check-timing.mjs";
 
 const controller = new AbortController();
@@ -24,6 +24,8 @@ try {
   const verdict = await checkWithTiming(core, request, { signal: controller.signal }, (measurement) => {
     console.error(JSON.stringify({ checkTiming: measurement }));
   });
+  // Preserve the existing stdout verdict contract for independent consumers.
+  console.error(JSON.stringify({ interpretation: describeCheck(verdict) }));
   console.log(JSON.stringify(verdict, null, 2));
   // A completed deny/warn is a verdict; a failed evaluation is a failed command.
   if (verdict.source === "fail_closed") process.exitCode = 1;

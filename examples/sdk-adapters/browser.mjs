@@ -1,7 +1,7 @@
 import { CoreError } from "@dambi/core";
 import { AdapterError } from "@dambi/core/adapters";
 import { decoderSnapshotInfo } from "@dambi/core/decoders";
-import { createAdapterCore } from "./client.mjs";
+import { createAdapterCore, describeCheck } from "./client.mjs";
 import { checkWithTiming } from "./check-timing.mjs";
 
 const settingsInput = document.querySelector("#settings");
@@ -89,7 +89,7 @@ checkButton.addEventListener("click", async () => {
         + `${measurement.withinBudget ? "within" : "over"} ${measurement.targetBudgetMs} ms comparison.${modes} `
         + "Latency only; excludes initialization, preparation and display. This does not establish analysis completeness or performance acceptance.";
     });
-    result.textContent = JSON.stringify(verdict, null, 2);
+    result.textContent = JSON.stringify({ interpretation: describeCheck(verdict), verdict }, null, 2);
   } catch (error) {
     const code = error instanceof CoreError || error instanceof AdapterError ? error.code
       : operation.controller.signal.aborted ? "ABORTED"
