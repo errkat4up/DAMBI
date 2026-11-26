@@ -43,6 +43,24 @@ async function receipt(hash) {
   }
   throw new Error("receipt timeout");
 }
+// Test-only progress for the isolated Anvil node checked below. Automining a
+// transaction does not necessarily advance finalized to its receipt block.
+// Keep the publisher's configured finality intact; mine bounded empty blocks
+// and inspect the real finalized tag rather than substituting latest.
+async function advanceFinalizedThrough(included) {
+  const target = BigInt(included.blockNumber);
+  for (let batch = 0; batch <= 8; batch++) {
+    const finalized = await rpc("eth_getBlockByNumber", ["finalized", false]);
+    assert.ok(finalized, "Anvil must expose finalized blocks");
+    if (BigInt(finalized.number) >= target) {
+      const canonical = await rpc("eth_getBlockByNumber", [included.blockNumber, false]);
+      assert.equal(canonical?.hash, included.blockHash, "receipt must remain canonical");
+      return;
+    }
+    if (batch < 8) await rpc("anvil_mine", ["0x20"]);
+  }
+  assert.fail("Anvil finalized did not reach the receipt after 256 empty blocks");
+}
 async function send(from, to, data, extra = {}) {
   const hash = await rpc("eth_sendTransaction", [{ from, ...(to ? { to } : {}), data, gas: "0x1c9c380", ...extra }]);
   return receipt(hash);
@@ -108,10 +126,28 @@ test("real registry and fixed publisher: CAS, receipts, retries, revocation, rot
   assert.equal((await send(owner, registry, badDigest)).status, "0x0");
   let firstHash;
   const published = await tool.publishOnchainPolicy(client, first, submit, {
-    pollMs: 20, onSubmitted(hash) { firstHash = hash; },
+    pollMs: 20,
+    async onSubmitted(hash) {
+      firstHash = hash;
+      const included = await receipt(hash);
+      assert.equal(included.status, "0x1");
+      const finalized = await rpc("eth_getBlockByNumber", ["finalized", false]);
+      assert.ok(finalized, "Anvil must expose finalized blocks");
+      if (BigInt(finalized.number) < BigInt(included.blockNumber)) {
+        // A successful receipt alone cannot satisfy the public finality rule.
+        // Resume the actual mined transaction without sending it again.
+        await assert.rejects(tool.publishOnchainPolicy(client, first, submit, {
+          transactionHash: hash, attempts: 1, pollMs: 0,
+        }), /confirmation pending/);
+        assert.equal(submissions, 1);
+      }
+      await advanceFinalizedThrough(included);
+    },
   });
   assert.equal(published.outcome, "confirmed");
   assert.equal(published.receipt.transactionHash, firstHash);
+  assert.ok(BigInt(published.blockNumber) >= BigInt(published.receipt.blockNumber));
+  assert.equal(client.config.finality, "finalized");
   const stored = await client.read(1);
   assert.equal(stored.payload, first.signed.payload);
   assert.equal(stored.signature, first.signed.signature);
@@ -182,8 +218,17 @@ test("real registry and fixed publisher: CAS, receipts, retries, revocation, rot
   const rotated = new tool.RegistryClient({ ...config, sender: next });
   const afterRevocation = await prepare(rotated);
   assert.equal(afterRevocation.expectedCurrent, 2);
-  const rotation = await tool.publishOnchainPolicy(rotated, afterRevocation, submit, { pollMs: 20 });
+  const rotation = await tool.publishOnchainPolicy(rotated, afterRevocation, submit, {
+    pollMs: 20,
+    async onSubmitted(hash) {
+      const included = await receipt(hash);
+      assert.equal(included.status, "0x1");
+      await advanceFinalizedThrough(included);
+    },
+  });
   assert.equal(rotation.outcome, "confirmed");
+  assert.ok(BigInt(rotation.blockNumber) >= BigInt(rotation.receipt.blockNumber));
+  assert.equal(rotated.config.finality, "finalized");
   assert.equal((await rotated.read()).head, 3);
   assert.equal((await rotated.read(2)).status, 3);
 

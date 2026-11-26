@@ -30,6 +30,8 @@ contract PolicyRegistryTest {
         signature = new bytes(64);
     }
 
+    // Use this helper only for calls without pending prank/expectRevert:
+    // sha256 invokes a precompile and can consume the next-call cheatcode.
     function publish(uint256 expected, uint256 sequence, bytes memory value) private {
         registry.publish(scope, expected, sequence, sha256(value), value, signature, "telemetry");
     }
@@ -42,6 +44,7 @@ contract PolicyRegistryTest {
     }
 
     function testDirectReadReplacementRetryAndPermanentRevocation() public {
+        bytes32 bodyDigest = sha256(body);
         (, PolicyRegistry.Status empty,,,,) = registry.read(scope, 0);
         require(empty == PolicyRegistry.Status.Missing, "initially missing");
         publish(0, 1, body);
@@ -49,6 +52,7 @@ contract PolicyRegistryTest {
         publish(0, 1, body); // identical retry, no new version
         require(registry.latest(scope) == 1, "retry must not advance");
         bytes memory changed = bytes("replacement");
+        bytes32 changedDigest = sha256(changed);
         publish(1, 2, changed);
         check(1, 2, PolicyRegistry.Status.Superseded, body);
         check(0, 2, PolicyRegistry.Status.Active, changed);
@@ -56,39 +60,43 @@ contract PolicyRegistryTest {
         registry.revoke(scope, 1);
         check(1, 2, PolicyRegistry.Status.Revoked, body);
         vm.expectRevert(PolicyRegistry.NotActive.selector);
-        publish(0, 1, body);
+        registry.publish(scope, 0, 1, bodyDigest, body, signature, "telemetry");
         registry.revoke(scope, 2);
         check(0, 2, PolicyRegistry.Status.Revoked, changed);
         vm.expectRevert(PolicyRegistry.NotActive.selector);
-        publish(1, 2, changed);
+        registry.publish(scope, 1, 2, changedDigest, changed, signature, "telemetry");
         publish(2, 3, body);
         check(0, 3, PolicyRegistry.Status.Active, body);
         check(2, 3, PolicyRegistry.Status.Revoked, changed);
     }
 
     function testCompetingPublishersCannotOverwriteSameSequence() public {
+        bytes32 bodyDigest = sha256(body);
+        bytes memory competing = bytes("competing payload");
+        bytes32 competingDigest = sha256(competing);
         publish(0, 1, body);
         vm.expectRevert(PolicyRegistry.Conflict.selector);
-        publish(0, 1, bytes("competing payload"));
+        registry.publish(scope, 0, 1, competingDigest, competing, signature, "telemetry");
         bytes memory otherSignature = new bytes(64);
         otherSignature[0] = 0x01;
         vm.expectRevert(PolicyRegistry.Conflict.selector);
-        registry.publish(scope, 0, 1, sha256(body), body, otherSignature, "telemetry");
+        registry.publish(scope, 0, 1, bodyDigest, body, otherSignature, "telemetry");
         vm.expectRevert(PolicyRegistry.Conflict.selector);
-        registry.publish(scope, 0, 1, sha256(body), body, signature, "different");
+        registry.publish(scope, 0, 1, bodyDigest, body, signature, "different");
         vm.expectRevert(PolicyRegistry.InvalidVersion.selector);
-        publish(0, 2, body);
+        registry.publish(scope, 0, 2, bodyDigest, body, signature, "telemetry");
         check(1, 1, PolicyRegistry.Status.Active, body);
     }
 
     function testAuthorityTransferRequiresAcceptanceAndCanBeCancelledOrReplaced() public {
+        bytes32 bodyDigest = sha256(body);
         vm.prank(OTHER);
         vm.expectRevert(PolicyRegistry.Unauthorized.selector);
         registry.proposePublisher(NEXT);
         registry.proposePublisher(NEXT);
         vm.prank(NEXT);
         vm.expectRevert(PolicyRegistry.Unauthorized.selector);
-        publish(0, 1, body);
+        registry.publish(scope, 0, 1, bodyDigest, body, signature, "telemetry");
         registry.cancelPublisherTransfer();
         vm.prank(NEXT);
         vm.expectRevert(PolicyRegistry.Unauthorized.selector);
@@ -102,19 +110,24 @@ contract PolicyRegistryTest {
         registry.acceptPublisher();
         require(registry.publisher() == OTHER && registry.pendingPublisher() == address(0), "two-step transfer");
         vm.expectRevert(PolicyRegistry.Unauthorized.selector);
-        publish(0, 1, body);
+        registry.publish(scope, 0, 1, bodyDigest, body, signature, "telemetry");
         vm.expectRevert(PolicyRegistry.Unauthorized.selector);
         registry.revoke(scope, 1);
         vm.expectRevert(PolicyRegistry.Unauthorized.selector);
         registry.cancelPublisherTransfer();
         vm.prank(OTHER);
-        registry.publish(scope, 0, 1, sha256(body), body, signature, "telemetry");
+        registry.publish(scope, 0, 1, bodyDigest, body, signature, "telemetry");
         vm.prank(OTHER);
         registry.revoke(scope, 1);
         check(1, 1, PolicyRegistry.Status.Revoked, body);
     }
 
     function testInvalidAuthorityDataAndVersionBoundaries() public {
+        // Prepare every precompile result before installing next-call checks.
+        bytes32 bodyDigest = sha256(body);
+        bytes memory shortSignature = new bytes(63);
+        bytes memory oversized = new bytes(32_769);
+        bytes32 oversizedDigest = sha256(oversized);
         vm.expectRevert(PolicyRegistry.InvalidAuthority.selector);
         new PolicyRegistry(address(0));
         vm.expectRevert(PolicyRegistry.InvalidAuthority.selector);
@@ -122,24 +135,24 @@ contract PolicyRegistryTest {
         vm.expectRevert(PolicyRegistry.InvalidAuthority.selector);
         registry.proposePublisher(address(this));
         vm.expectRevert(PolicyRegistry.InvalidVersion.selector);
-        publish(0, 0, body);
+        registry.publish(scope, 0, 0, bodyDigest, body, signature, "telemetry");
         vm.expectRevert(PolicyRegistry.InvalidVersion.selector);
-        publish(0, 2, body);
+        registry.publish(scope, 0, 2, bodyDigest, body, signature, "telemetry");
         vm.expectRevert(PolicyRegistry.InvalidData.selector);
         registry.publish(scope, 0, 1, bytes32(0), body, signature, "telemetry");
         vm.expectRevert(PolicyRegistry.InvalidData.selector);
-        registry.publish(scope, 0, 1, sha256(body), body, new bytes(63), "telemetry");
+        registry.publish(scope, 0, 1, bodyDigest, body, shortSignature, "telemetry");
         vm.expectRevert(PolicyRegistry.InvalidData.selector);
-        publish(0, 1, new bytes(32_769));
+        registry.publish(scope, 0, 1, oversizedDigest, oversized, signature, "telemetry");
         vm.expectRevert(PolicyRegistry.MissingVersion.selector);
         registry.revoke(scope, 1);
         BoundaryRegistry boundary = new BoundaryRegistry();
         uint256 maximum = boundary.MAX_SEQUENCE();
         boundary.seedHead(scope, maximum - 1);
-        boundary.publish(scope, maximum - 1, maximum, sha256(body), body, signature, "telemetry");
+        boundary.publish(scope, maximum - 1, maximum, bodyDigest, body, signature, "telemetry");
         require(boundary.latest(scope) == maximum, "maximum safe integer accepted");
         vm.expectRevert(PolicyRegistry.InvalidVersion.selector);
-        boundary.publish(scope, maximum, maximum + 1, sha256(body), body, signature, "telemetry");
+        boundary.publish(scope, maximum, maximum + 1, bodyDigest, body, signature, "telemetry");
     }
 
     function testScopeSeparation() public {
