@@ -666,6 +666,24 @@ pub fn build_action_body(
     // Permit2SignAllowance nonce). The catalog [`live_input_layout`] picks
     // the right shape per (domain, action).
     if let Some(live_template) = live_source {
+        // A swap source descriptor is a recipe, not an observation. Discard
+        // unobserved entries BEFORE substitution: dormant resolver/function
+        // references must not invalidate otherwise decodable signed intent.
+        // Explicit observations still undergo substitution and typed validation.
+        let live_template = if domain.as_deref() == Some("amm")
+            && action.as_deref() == Some("swap")
+        {
+            match live_template {
+                JsonValue::Object(map) => JsonValue::Object(
+                    map.into_iter()
+                        .map(|(field, payload)| (field, swap_live_observation(&payload)))
+                        .collect(),
+                ),
+                other => other,
+            }
+        } else {
+            live_template
+        };
         let live_substituted = substitute_placeholders(ctx, &live_template)?;
         if let Some(map) = live_substituted.as_object() {
             match layout {
@@ -2211,10 +2229,16 @@ mod tests {
         let args = json!({});
         let mut ctx = mk_ctx(&args);
         for root in ["resolved", "derived"] {
-            assert_eq!(resolve_placeholder(&ctx, &format!("${root}.slippage_bp")).unwrap(), JsonValue::Null);
+            assert_eq!(
+                resolve_placeholder(&ctx, &format!("${root}.slippage_bp")).unwrap(),
+                JsonValue::Null
+            );
         }
         ctx.derived.insert("slippage_bp".into(), json!(0));
-        assert_eq!(resolve_placeholder(&ctx, "$derived.slippage_bp").unwrap(), json!(0));
+        assert_eq!(
+            resolve_placeholder(&ctx, "$derived.slippage_bp").unwrap(),
+            json!(0)
+        );
     }
 
     #[test]
@@ -2226,13 +2250,25 @@ mod tests {
             ("route", json!({"paths":[]})),
         ] {
             let descriptor = json!({"source":{"kind":"user_supplied"},"ttl_s":12});
-            assert_eq!(swap_live_observation(&descriptor), JsonValue::Null, "{field}");
+            assert_eq!(
+                swap_live_observation(&descriptor),
+                JsonValue::Null,
+                "{field}"
+            );
             let mut value_without_time = descriptor.clone();
             value_without_time["value"] = zero.clone();
-            assert_eq!(swap_live_observation(&value_without_time), JsonValue::Null, "{field}");
+            assert_eq!(
+                swap_live_observation(&value_without_time),
+                JsonValue::Null,
+                "{field}"
+            );
             let mut time_without_value = descriptor.clone();
             time_without_value["synced_at"] = json!(123);
-            assert_eq!(swap_live_observation(&time_without_value), JsonValue::Null, "{field}");
+            assert_eq!(
+                swap_live_observation(&time_without_value),
+                JsonValue::Null,
+                "{field}"
+            );
             for time in [0, 123] {
                 let mut observed = value_without_time.clone();
                 observed["synced_at"] = json!(time);
@@ -2243,6 +2279,99 @@ mod tests {
                 assert_eq!(result["source"], descriptor["source"], "{field}");
             }
         }
+    }
+
+    #[test]
+    fn swap_dormant_sources_do_not_invalidate_signed_intent() {
+        let args = json!({});
+        let ctx = mk_ctx(&args);
+        let body = json!({
+            "domain": "amm",
+            "amm": {
+                "action": "swap",
+                "swap": {
+                    "venue": {
+                        "name": "uniswap_v3",
+                        "chain": "$chain",
+                        "pool": "$to",
+                        "fee_tier_bp": 500
+                    },
+                    "params": {
+                        "token_in": {
+                            "key": {
+                                "standard": "erc20",
+                                "chain": "$chain",
+                                "address": "$to"
+                            }
+                        },
+                        "direction": {
+                            "kind": "exact_input",
+                            "amount_in": "1",
+                            "min_amount_out": "0"
+                        },
+                        "recipient": "$tx.from",
+                        "slippage_bp": "$derived.slippage_bp"
+                    }
+                }
+            }
+        });
+        let baseline = build_action_body(&ctx, &body, None).unwrap();
+        for field in ["route", "expected_amount_out", "price_impact_bp", "gas_estimate"] {
+            for source in [
+                json!("$resolved.unobserved_test_source"),
+                json!({"$fn": "array_len", "$args": []}),
+            ] {
+                let live = json!({field: {"source": source, "ttl_s": 12}});
+                let action = build_action_body(&ctx, &body, Some(&live)).unwrap();
+                assert_eq!(action, baseline, "dormant {field}");
+
+                // Opcode bodies embed the same source descriptions inline.
+                let mut inline = body.clone();
+                inline["amm"]["swap"]["live_inputs"] = live;
+                assert_eq!(build_action_body(&ctx, &inline, None).unwrap(), baseline);
+            }
+        }
+        let ActionBody::Amm(AmmAction::Swap(swap)) = &baseline else {
+            panic!("expected Swap");
+        };
+        assert_eq!(swap.params.recipient, ctx.tx_from);
+        assert_eq!(swap.params.slippage_bp, None);
+        assert!(matches!(
+            swap.params.direction,
+            policy_transition::action::amm::SwapDirection::ExactInput {
+                min_amount_out, ..
+            } if min_amount_out == U256::ZERO
+        ));
+        assert_eq!(swap.live_inputs.route, None);
+        assert_eq!(swap.live_inputs.expected_amount_out, None);
+        assert_eq!(swap.live_inputs.price_impact_bp, None);
+        assert_eq!(swap.live_inputs.gas_estimate, None);
+
+        // A real zero with its original epoch timestamp survives both passes.
+        let observed = json!({
+            "expected_amount_out": {
+                "value": "0",
+                "synced_at": 0,
+                "source": {"kind": "user_supplied"},
+                "ttl_s": 12
+            }
+        });
+        let action = build_action_body(&ctx, &body, Some(&observed)).unwrap();
+        let ActionBody::Amm(AmmAction::Swap(swap)) = action else {
+            panic!("expected Swap");
+        };
+        let observation = swap.live_inputs.expected_amount_out.unwrap();
+        assert_eq!(observation.value, U256::ZERO);
+        assert_eq!(observation.synced_at, Time::from_unix(0));
+
+        // Do not suppress errors in an explicitly supplied observation.
+        let mut invalid = observed;
+        invalid["expected_amount_out"]["source"] =
+            json!("$resolved.unobserved_test_source");
+        assert!(matches!(
+            build_action_body(&ctx, &body, Some(&invalid)),
+            Err(V3BuildError::UnknownPlaceholder(_))
+        ));
     }
 
     // ── auxiliary tests (do not count toward the 11) ───────────────────────

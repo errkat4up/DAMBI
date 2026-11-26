@@ -29,9 +29,11 @@ pub(crate) fn lower(swap: &SwapAction, ctx: &LowerCtx<'_>) -> Result<LoweredActi
     // Only sum an observed route. An absent route is not an observed empty
     // route whose estimated output happens to be zero.
     let route_estimated_out = swap.live_inputs.route.as_ref().map(|route| {
-        route.value.paths.iter().fold(U256::ZERO, |acc, path| {
-            acc.saturating_add(path.estimated_out)
-        })
+        route
+            .value
+            .paths
+            .iter()
+            .fold(U256::ZERO, |acc, path| acc.saturating_add(path.estimated_out))
     });
 
     let mut m = Map::new();
@@ -61,7 +63,10 @@ pub(crate) fn lower(swap: &SwapAction, ctx: &LowerCtx<'_>) -> Result<LoweredActi
         m.insert("routeEstimatedOut".into(), Value::String(u256_hex(amount)));
     }
     if let Some(observed) = &swap.live_inputs.expected_amount_out {
-        m.insert("expectedAmountOut".into(), Value::String(u256_hex(observed.value)));
+        m.insert(
+            "expectedAmountOut".into(),
+            Value::String(u256_hex(observed.value)),
+        );
     }
     if let Some(observed) = &swap.live_inputs.price_impact_bp {
         m.insert("priceImpactBp".into(), Value::from(i64::from(observed.value)));
@@ -251,8 +256,10 @@ mod tests {
                 slippage_bp: Some(slippage_bp),
             },
             live_inputs: SwapLiveInputs {
-                route: Some(LiveField::new(route, pool_source.clone(), now())
-                    .with_ttl(Duration::from_secs(12))),
+                route: Some(
+                    LiveField::new(route, pool_source.clone(), now())
+                        .with_ttl(Duration::from_secs(12)),
+                ),
                 expected_amount_out: Some(LiveField::new(
                     U256::from(305_000_000_000_000_000u64),
                     pool_source.clone(),
@@ -422,10 +429,23 @@ mod tests {
         swap.params.slippage_bp = None;
         swap.live_inputs = SwapLiveInputs::default();
         let lowered = lower_action(&body, &meta, &TxMeta { from: FROM, to: TO }).unwrap();
-        for field in ["slippageBp", "routeEstimatedOut", "expectedAmountOut", "priceImpactBp", "gasEstimate"] {
-            assert!(lowered.context.get(field).is_none(), "{field}: {}", lowered.context);
+        for field in [
+            "slippageBp",
+            "routeEstimatedOut",
+            "expectedAmountOut",
+            "priceImpactBp",
+            "gasEstimate",
+        ] {
+            assert!(
+                lowered.context.get(field).is_none(),
+                "{field}: {}",
+                lowered.context
+            );
         }
-        assert_eq!(lowered.context["recipient"], serde_json::json!(format!("{:#x}", user())));
+        assert_eq!(
+            lowered.context["recipient"],
+            serde_json::json!(format!("{:#x}", user()))
+        );
         assert!(lowered.context["direction"].get("minAmountOut").is_some());
 
         let ActionBody::Amm(AmmAction::Swap(swap)) = &mut body else {
@@ -433,14 +453,21 @@ mod tests {
         };
         swap.params.slippage_bp = Some(0);
         let source = DataSource::UserSupplied;
-        swap.live_inputs.expected_amount_out = Some(LiveField::new(U256::ZERO, source.clone(), now()));
+        swap.live_inputs.expected_amount_out =
+            Some(LiveField::new(U256::ZERO, source.clone(), now()));
         swap.live_inputs.price_impact_bp = Some(LiveField::new(0, source.clone(), now()));
         swap.live_inputs.gas_estimate = Some(LiveField::new(U256::ZERO, source, now()));
         let lowered = lower_action(&body, &meta, &TxMeta { from: FROM, to: TO }).unwrap();
         assert_eq!(lowered.context["slippageBp"], serde_json::json!(0));
-        assert_eq!(lowered.context["expectedAmountOut"], serde_json::json!(super::u256_hex(U256::ZERO)));
+        assert_eq!(
+            lowered.context["expectedAmountOut"],
+            serde_json::json!(super::u256_hex(U256::ZERO))
+        );
         assert_eq!(lowered.context["priceImpactBp"], serde_json::json!(0));
-        assert_eq!(lowered.context["gasEstimate"], serde_json::json!(super::u256_hex(U256::ZERO)));
+        assert_eq!(
+            lowered.context["gasEstimate"],
+            serde_json::json!(super::u256_hex(U256::ZERO))
+        );
         assert!(lowered.context.get("routeEstimatedOut").is_none());
     }
 
@@ -452,12 +479,16 @@ mod tests {
         };
         swap.params.slippage_bp = None;
         swap.params.direction = SwapDirection::ExactInput {
-            amount_in: U256::from(1000), min_amount_out: U256::ZERO,
+            amount_in: U256::from(1000),
+            min_amount_out: U256::ZERO,
         };
         swap.live_inputs = SwapLiveInputs::default();
         let lowered = lower_action(&body, &meta, &TxMeta { from: FROM, to: TO }).unwrap();
         assert_eq!(lowered.context["slippageBp"], serde_json::json!(10000));
-        assert_eq!(lowered.context["direction"]["minAmountOut"], serde_json::json!(super::u256_hex(U256::ZERO)));
+        assert_eq!(
+            lowered.context["direction"]["minAmountOut"],
+            serde_json::json!(super::u256_hex(U256::ZERO))
+        );
         assert!(lowered.context.get("expectedAmountOut").is_none());
     }
 

@@ -84,6 +84,8 @@ This candidate changes swap quote-relative slippage and swap live observations:
 | Missing derived slippage | Absent, not zero | `swap_missing_slippage_is_not_an_explicit_zero` | Not run |
 | Explicit slippage zero | Preserve zero | Same test; lowering observation test | Not run |
 | Live source without value/time | No observed value or generated observation time | `swap_observations_require_values_and_original_times_for_each_field` | Not run |
+| Dormant swap source with unresolved placeholder or unevaluable function, external and inline layouts | Preserve signed intent and zero output floor; do not evaluate the source recipe | `swap_dormant_sources_do_not_invalidate_signed_intent` | Not run |
+| Explicit swap observation with unresolved source | Retain validation error; do not silently discard the observation | Same builder regression | Not run |
 | Explicit live zero with original time, including epoch | Preserve zero and supplied time | Same test | Not run |
 | Positive output floor, no quote | Omit quote-relative slippage | `missing_swap_observations_are_omitted_but_real_zero_is_preserved` | Not run |
 | Explicit zero output floor, no quote | Keep `minAmountOut=0`; expose unbounded slippage | `explicit_zero_floor_is_unbounded_even_without_a_quote` | Not run |
@@ -103,9 +105,45 @@ Those require the native/session and packaged WASM regressions against the same
 candidate, including the real selected decoder fixtures. No generated decoder
 snapshot or metadata bytes are included.
 
-Regression execution, QA actual-result entries, and independent `dambi-review`
-approval are pending. No build, test, review, commit, push, or live operation is
-claimed by this handoff.
+### Review blocker and required scope handoff
+
+The supplied review reports native/WASM compilation failures at parent
+`945e1dbd54cb5dea9826365f25167566ec666610` (CI `45836838677`):
+
+- `crates/asset-model/transition/src/effect/amm/swap.rs:36`: E0609,
+  direct `route.value` access after the route became optional.
+- The same file at line 86: E0277, `FixedBytes` versus `Address` comparison.
+
+That transition file is outside this card's allowed edit paths and its contents
+were not supplied. This revision therefore does **not** claim to repair either
+compilation failure. Restoring a mandatory route using a fabricated empty route
+or observation timestamp would violate F2 and is not an acceptable compatibility
+fix. A wrapper that merely makes unchecked `.value` access compile would also
+hide the missing-observation condition from the reducer.
+
+Required next scope: supply and authorize
+`crates/asset-model/transition/src/effect/amm/swap.rs` and its reducer regression
+callers. The reducer must explicitly handle an absent route without calculating
+successful swap effects from invented observations, preserve the observed-route
+behavior, and compare the actual address types at the reported comparison site.
+Tests must cover absent-route behavior and observed-route effects. Inspect the
+actual reducer error/result interface before choosing that implementation; no
+unseen error variant or caller contract is assumed here. Schema/session handling
+of absent attributes remains a separate integration gate, not a reason to fill
+missing attributes with zero.
+
+Within the supplied paths, this revision prevents dormant swap source recipes
+from being evaluated before observation detection. It adds a typed builder
+regression for external and inline source layouts, original epoch provenance,
+explicit zero, and validation of supplied observations. It also reformats the
+identified F2 mapper/lowering additions without removing assertions. This is an
+incremental candidate, not a buildable-completion or acceptance claim.
+
+Regression execution, the complete `cargo fmt --all --check`, native/WASM builds,
+QA actual-result entries, and independent `dambi-review` approval remain pending.
+The CI failures above are supplied review feedback, not locally reproduced
+results. No build, test, review, commit, push, or live operation is claimed by this
+handoff.
 
 ## Measuring a complete SDK check
 
