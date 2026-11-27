@@ -145,6 +145,43 @@ The CI failures above are supplied review feedback, not locally reproduced
 results. No build, test, review, commit, push, or live operation is claimed by this
 handoff.
 
+### Follow-up at `b1528c5d0fd4f5f5ae692b30dcc091e67ad68a11`
+
+Status: **incremental consumer correction; F2 implementation and CI repair remain
+blocked**, not an implementation-complete submission.
+
+The supplied feedback reports failure of CI run `45938135660`, but supplies no
+job log or compiler diagnostics for that run. Its failure cannot be attributed
+to a particular check from the URL alone. The earlier reducer failures documented
+above remain unresolved by this patch; no newer failure details are inferred.
+
+The consumer's factory JSDoc was separated from `createAdapterCore` by the added
+`describeCheck` function. This patch reattaches the settings/options/return
+contract to the factory and types the presentation helper directly from the
+public `DambiCore.check` return type. It does not change Core decisions or
+substitute a compatibility wrapper for absent swap observations.
+
+The packaged real-WASM regressions additionally check presentation of unsupported
+requests, malformed requests, and an independent policy deny alongside a sibling
+Fact-fetch failure in both child orders. Expected results are respectively
+`unsupported_request`, `evaluation_failed`, and `fact_evaluation_failed`; none is
+eligible for signing review, and the independent deny remains visible. Actual
+results: **not run**.
+
+To repair the known Rust integration blocker, supply and authorize
+`crates/asset-model/transition/src/effect/amm/swap.rs`, its error/result interface,
+and affected reducer construction/tests. Supply the failing job excerpts from
+run `45938135660` as well. The currently supplied action model makes `route` an
+`Option<LiveField<SwapRoute>>`; changing it back to a fabricated observed route
+would violate the acceptance criteria. Completing missing-attribute evaluation
+also requires the actual swap Cedar schema and evaluation/session consumers,
+with edit authorization for any required changes outside the current paths.
+
+No CI log inspection, build, test execution, independent approval, commit, push,
+or live operation has been performed. QA execution and `dambi-review` approval
+must cover the eventual same integrated candidate, not this blocked partial
+patch.
+
 ## Measuring a complete SDK check
 
 `check-timing.mjs` measures one `core.check()` call with `performance.now()`. It

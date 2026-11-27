@@ -12,19 +12,13 @@ import { createEvmFactProvider, createPolicyApiSource } from "@dambi/core/adapte
  */
 
 /**
- * Both hosts use the installed package's public exports and owned WASM.
- * URLs, trusted public keys and deployment limits belong to the caller.
- * @param {AdapterSettings} settings
- * @param {import("@dambi/core").CallOptions} [options]
- * @returns {Promise<import("@dambi/core").DambiCore>}
- */
-/**
  * Consumer presentation, not a replacement Core decision or enforcement rule.
  * Keep the original verdict alongside this summary: an independent deny must
  * remain visible even when another part of evaluation is incomplete.
  *
  * No automatic signing is authorized by this example. `reviewEligible` only
  * identifies results eligible for the host's separate signing review.
+ * @param {Awaited<ReturnType<import("@dambi/core").DambiCore["check"]>>} verdict
  */
 export function describeCheck(verdict) {
   const codes = new Set((verdict?.diagnostics ?? []).map(({ code }) => code));
@@ -54,6 +48,15 @@ export function describeCheck(verdict) {
   };
 }
 
+/**
+ * Both hosts use the installed package's public exports and owned WASM.
+ * URLs, trusted public keys and deployment limits belong to the caller.
+ * Keep these annotations attached to the factory, not the presentation helper:
+ * independent TypeScript consumers must retain its public argument contract.
+ * @param {AdapterSettings} settings
+ * @param {import("@dambi/core").CallOptions} [options]
+ * @returns {Promise<import("@dambi/core").DambiCore>}
+ */
 export async function createAdapterCore(settings, options) {
   const policy = createPolicyApiSource({
     baseUrl: settings.policy.baseUrl,

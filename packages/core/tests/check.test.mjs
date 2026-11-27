@@ -164,6 +164,12 @@ test("check evaluates no-Fact approve and distinguishes unsupported requests fro
     assert.equal(unsupported.decision, "warn");
     assert.equal(unsupported.source, "evaluated");
     assert.ok(hasDiagnostic(unsupported, "unsupported_request"));
+    const presentation = describeCheck(unsupported);
+    assert.equal(presentation.status, "unsupported_request");
+    assert.equal(presentation.decision, unsupported.decision);
+    assert.equal(presentation.enforcement, unsupported.enforcement);
+    assert.equal(presentation.reviewEligible, false);
+    assert.equal(presentation.signingAuthorized, false);
     assert.deepEqual(unsupported.metadata, { status: "unavailable", reason: "unsupported_request" });
     assert.ok(hasDiagnostic(unsupported, "audit_metadata_unavailable"));
     assert.deepEqual(emitted.at(-1), unsupported);
@@ -171,6 +177,8 @@ test("check evaluates no-Fact approve and distinguishes unsupported requests fro
   }
   const malformed = await core.check({ ...request("approve"), data: 123 });
   failClosed(malformed, "invalid_request");
+  assert.equal(describeCheck(malformed).status, "evaluation_failed");
+  assert.equal(describeCheck(malformed).reviewEligible, false);
   assert.deepEqual(malformed.metadata, { status: "unavailable", reason: "invalid_request" });
   assert.ok(hasDiagnostic(malformed, "audit_metadata_unavailable"));
   assert.deepEqual(emitted.at(-1), malformed);
@@ -274,6 +282,13 @@ test("partial Unknown and sibling Fact fetch failure preserve decoded policy den
         assert.equal(setup.fetches.length, 0);
       } else {
         failClosed(verdict, "fact_fetch_failed");
+        const presentation = describeCheck(verdict);
+        assert.equal(presentation.status, "fact_evaluation_failed");
+        assert.equal(presentation.decision, "deny");
+        assert.equal(presentation.enforcement, verdict.enforcement);
+        assert.equal(presentation.reviewEligible, false);
+        assert.equal(presentation.signingAuthorized, false);
+        assert.ok(hasReason(verdict, "check-static-deny"), JSON.stringify(verdict));
       }
     }
   }
