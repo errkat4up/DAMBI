@@ -2,13 +2,12 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { cp, lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createConsumerFixture } from "./consumer-fixture.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const toolsRequire = createRequire(new URL("./consumer-tools/package.json", import.meta.url));
@@ -17,12 +16,20 @@ let suppliedTarball;
 let nodeOnly = false;
 let browserOnly = false;
 let keep = false;
+let workspaceTypes = false;
+let compilerPath;
 for (let at = 0; at < args.length; at++) {
   if (args[at] === "--tarball" && args[at + 1] && !suppliedTarball) suppliedTarball = resolve(args[++at]);
   else if (args[at] === "--node-only" && !browserOnly) nodeOnly = true;
   else if (args[at] === "--browser-only" && !nodeOnly) browserOnly = true;
   else if (args[at] === "--keep") keep = true;
-  else throw new Error("Usage: node scripts/sdk/verify-consumers.mjs [--tarball package.tgz] [--node-only | --browser-only] [--keep]");
+  else if (args[at] === "--workspace-types" && !workspaceTypes) workspaceTypes = true;
+  else if (args[at] === "--tsc" && args[at + 1] && !compilerPath) compilerPath = resolve(args[++at]);
+  else throw new Error("Usage: node scripts/sdk/verify-consumers.mjs [--tarball package.tgz] [--node-only | --browser-only] [--keep], or --workspace-types [--tsc /absolute/path/to/tsc.js]");
+}
+if (workspaceTypes && (suppliedTarball || nodeOnly || browserOnly || keep)
+    || compilerPath && !workspaceTypes) {
+  throw new Error("--workspace-types [--tsc path] is a separate, explicit workspace preparation/type gate; do not combine it with tarball consumer options.");
 }
 
 function inside(parent, child) {
@@ -98,6 +105,33 @@ async function staticServer(directory, imports, connectOrigins) {
   };
 }
 
+// Explicit preparation mode: unlike tarball verification, this writes workspace
+// TypeScript/decoder build output. It never builds WASM, installs dependencies,
+// substitutes declarations or imports runtime fixtures before output exists.
+if (workspaceTypes) {
+  try {
+    const compiler = compilerPath ?? createRequire(new URL("../../packages/core/package.json", import.meta.url))
+      .resolve("typescript/lib/tsc.js");
+    const steps = [
+      ["source types", [compiler, "-p", "packages/core/tsconfig.json"]],
+      ["TypeScript output", [compiler, "-p", "packages/core/tsconfig.build.json"]],
+      ["selected decoder packaging", ["scripts/sdk/build-decoders.mjs"]],
+      ["standalone consumer types", [compiler, "--strict", "--noEmit", "--skipLibCheck",
+        "--target", "ES2022", "--module", "NodeNext", "--moduleResolution", "NodeNext",
+        "packages/core/tests/consumer-types.ts"]],
+    ];
+    for (const [name, arguments_] of steps) {
+      process.stdout.write(`[workspace-types] ${name}\n`);
+      const output = await run(process.execPath, arguments_, root);
+      if (output) process.stdout.write(output);
+    }
+    process.stdout.write("[workspace-types] passed; WASM, runtime tests and installed consumers were not checked.\n");
+  } catch (error) {
+    process.exitCode = 1;
+    process.stderr.write(`[workspace-types] FAILED: ${error.stack ?? error.message}\n`);
+  }
+} else {
+const { createConsumerFixture } = await import("./consumer-fixture.mjs");
 const temporary = await mkdtemp(join(tmpdir(), "dambi-consumer-"));
 let passedGroups = 0;
 const passed = (target) => (name) => {
@@ -161,11 +195,39 @@ try {
     // Reproduce the standalone QA compiler flags against installed exports.
     // Run before importing runtime cases so missing declarations are reported
     // as a type gate failure rather than obscured by a later module-load error.
-    await run(process.execPath, [tsc, "--strict", "--noEmit", "--skipLibCheck",
+    const contractArguments = [tsc, "--strict", "--noEmit", "--skipLibCheck",
       "--target", "ES2022", "--module", "NodeNext", "--moduleResolution", "NodeNext",
-      join(consumer, "core-consumer-types.ts")], consumer);
+      join(consumer, "core-consumer-types.ts")];
+    // Reproduce a package built with tsc but without decoder packaging. Only
+    // mutate this disposable installation, never the supplied tarball/workspace.
+    // The actual compiler must reject the missing public subpath; restoring the
+    // real files must then pass the unchanged full contract below.
+    const hidden = [];
+    try {
+      for (const condition of ["types", "import"]) {
+        const exported = packageInfo.exports["./decoders"]?.[condition];
+        assert.ok(typeof exported === "string" && exported.startsWith("./"),
+          `Decoder ${condition} export must be explicit`);
+        const path = resolve(installedPath, exported);
+        assert.ok(inside(installedPath, path));
+        assert.equal((await lstat(path)).isFile(), true);
+        assert.equal(await realpath(path), path, "Decoder exports must not escape through symlinks");
+        const backup = `${path}.consumer-missing-decoder`;
+        await rename(path, backup);
+        hidden.push([path, backup]);
+      }
+      await assert.rejects(run(process.execPath, contractArguments, consumer), (error) => {
+        assert.match(error.message, /\bTS2307\b/);
+        assert.ok(error.message.includes("@dambi/core/decoders"),
+          "Missing decoder packaging must fail at the real public subpath");
+        return true;
+      });
+    } finally {
+      for (const [path, backup] of hidden.reverse()) await rename(backup, path);
+    }
+    await run(process.execPath, contractArguments, consumer);
     await run(process.execPath, [tsc, "-p", join(consumer, "tsconfig.json")], consumer);
-    passed("types")("standalone full contract and example declarations resolve from the installed tarball, including decoders and onchain adapters");
+    passed("types")("missing decoder packaging rejects; restored full contract and example declarations resolve from the installed tarball, including onchain adapters");
     const cases = await import(pathToFileURL(join(consumer, "consumer-cases.mjs")).href);
 
     const nodeFixture = await createConsumerFixture();
@@ -267,4 +329,5 @@ try {
 } finally {
   if (keep) process.stdout.write(`[consumer] retained ${temporary}\n`);
   else await rm(temporary, { recursive: true, force: true });
+}
 }

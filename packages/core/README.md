@@ -239,14 +239,25 @@ Reproduction commands for the new tests, after obtaining matching built Core
 WASM assets (the commands below have not been run as part of this change):
 
 ```sh
-node node_modules/typescript/bin/tsc -p packages/core/tsconfig.build.json &&
-node scripts/sdk/build-decoders.mjs &&
-node node_modules/typescript/bin/tsc --strict --noEmit --skipLibCheck \
-  --target ES2022 --module NodeNext --moduleResolution NodeNext \
-  packages/core/tests/consumer-types.ts &&
+node scripts/sdk/verify-consumers.mjs --workspace-types &&
 node --test packages/core/tests/adapters/onchain-policy.test.mjs \
   packages/core/tests/adapters/onchain-policy-core.test.mjs
 ```
+
+`--workspace-types` is an explicit preparation/type-check mode. It runs the
+source TypeScript check, TypeScript output, the existing decoder packaging
+script, and the standalone strict NodeNext consumer check **in that order**,
+stopping on the first failure. It does not import runtime fixtures, build WASM,
+install dependencies, run adapter tests or verify a tarball. It writes workspace
+build output; ordinary tarball consumer modes still never build implicitly.
+To use the compiler location from the supplied QA environment:
+
+```sh
+node scripts/sdk/verify-consumers.mjs --workspace-types --tsc /toolchain/bin/tsc
+```
+
+The `--tsc` argument identifies an existing JavaScript compiler entry point run
+with Node. Without it, the mode resolves Core's installed TypeScript dependency.
 
 `tsc -p packages/core/tsconfig.build.json` alone is not the package build:
 `@dambi/core/decoders` resolves to `dist/decoders.js` and
@@ -919,6 +930,14 @@ failure. The standalone tarball gate also copies the full
 `packages/core/tests/consumer-types.ts` contract into the external consumer and
 compiles it with strict NodeNext resolution, in addition to checking the example.
 Neither check substitutes workspace source types for installed declarations.
+The installed Node/type gate also temporarily removes both decoder exports from
+its disposable installation and requires the real compiler to report TS2307 for
+`@dambi/core/decoders`. It restores the original files in `finally`, then requires
+the unchanged full contract and example to compile. This regression distinguishes
+missing decoder packaging from a successful TypeScript-only build; it never
+modifies the candidate tarball or workspace output. Run it with
+`node scripts/sdk/verify-consumers.mjs --node-only` after preparing the package
+and installing the documented consumer tooling.
 The runtime checks load actual packaged WASM and compare plan/evaluate output
 against the Native session runner. They fail if artifacts are absent and never
 build them implicitly. No legacy extension WASM package is loaded.

@@ -2,6 +2,16 @@
 
 ## F5 — 동일 인정 블록 온체인 어댑터 진행 기록
 
+### QA 재후속 — 실행 가능한 타입 검사 선행 단계
+
+- 작업: `t_18cd83b0` / 담당 D / branch 정보 미제공 / 제공 parent·검토 SHA: `a89832ca00958fd1a5ff3ecdbb78369ca3673ac7` / 상태: 수정안 작성·검증 대기.
+- 전달받은 QA: 프로젝트 타입 검사·TypeScript 출력은 각각 종료 0, 독립 소비자 검사는 종료 2이며 decoder subpath TS2307이 다시 보고됐다. 앞선 문서 수정만으로 QA 실행 순서가 바뀌지는 않았다.
+- 변경 범위: `verify-consumers.mjs --workspace-types [--tsc 경로]`에 소스 검사 → TS 출력 → 기존 decoder packaging → 원래 strict NodeNext 소비자 검사를 직렬 연결했다. 첫 실패에서 중단하며 runtime fixture는 이 모드에서 import하지 않는다. 기존 tarball 검사에는 자동 빌드를 추가하지 않았다.
+- 회귀: 저장소 밖의 실제 설치 패키지에서 decoder JS·선언을 일시 이동해 실제 compiler의 해당 subpath TS2307을 요구하고, 원본 복구 후 기존 전체 계약·예제 검사를 그대로 실행한다. assertion·decoder import를 삭제하지 않으며 ambient 선언·source alias·생성 snapshot 제출로 우회하지 않는다.
+- 재현: QA compiler를 사용하는 명령은 `node scripts/sdk/verify-consumers.mjs --workspace-types --tsc /toolchain/bin/tsc`. 설치 패키지 회귀는 기존 도구와 완성된 패키지를 준비한 뒤 `node scripts/sdk/verify-consumers.mjs --node-only`로 실행한다. 이들은 실행 예정 명령이며 결과 로그가 아니다.
+- 제한: 기존 두 `tsc -p` 뒤에 decoder 생성 없이 독립 `tsc`만 실행하는 명령열은 여전히 불완전하다. package export·생성기·tsconfig는 이번 허용 수정 경로가 아니며, compiler 자체가 별도 생성기를 실행한다고 가정하지 않는다. QA는 위 명시적 gate 또는 동일한 생성 선행 순서를 사용해야 한다.
+- 검증: 이번 응답에서 빌드·시험·QA·독립 리뷰·커밋·푸시·체인 연결을 수행하지 않았다. 통과·실패 건수 없음. F1/F4 최종 계약 연결, 긍정 수명주기·미완료 plan 무효화, 실제 로컬 체인 소비자 deny 및 F5 전체 수용은 아래 기록대로 대기다.
+
 ### QA 후속 — decoder 선언 생성 선행 단계
 
 - 작업: `t_18cd83b0` / 담당 D / branch 정보 미제공 / 제공 parent·검토 SHA: `45596b966ace5f5b21c1cbe041459aef973f4e78` / 상태: 수정안 작성·재검증 대기.
