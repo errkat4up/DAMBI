@@ -57,17 +57,20 @@ describe("Scam confirmation card", () => {
     expect(card.textContent).toContain("기준 블록·시간이 없습니다");
   });
 
-  it("preserves the SDK insufficient bundle reason through session storage and rendering", () => {
-    // Expired bundles can produce bundle_invalid; the UI must not claim that
-    // this common SDK validation reason proves expiry, or invent checked scope.
+  it.each([
+    ["bundle_unavailable", "사용할 수 있는 검사 규칙 번들이 없습니다. 번들을 받지 못했거나 유효기간이 지났을 수 있습니다."],
+    ["bundle_invalid", "검사 규칙 번들의 유효성을 확인하지 못했습니다. 유효기간 경과 등 여러 원인이 있을 수 있습니다."],
+  ] as const)("preserves SDK reason %s and its copy through session storage and rendering", (reason, copy) => {
+    // Either reason can involve expiry; neither proves it. Preserve the SDK
+    // code, describe possible causes, and do not invent checked scope.
     const display: ScamDisplay = { version: 1, kind: "report", holding: "unknown",
-      report: { ...report("insufficient"), reasons: ["bundle_invalid"] } };
+      report: { ...report("insufficient"), reasons: [reason] } };
     const stored = JSON.parse(JSON.stringify({ requestId: "expired-bundle", expiresAtMs: NOW + 60_000, display }));
     const restored = readStoredScamDisplay(stored, "expired-bundle", NOW);
     expect(restored).toEqual(display);
     const card = renderScamCard(restored);
     expect(card.querySelector(".scam-status")?.textContent).toBe("검사 불충분");
-    expect(card.textContent).toContain("검사 규칙 번들 검증 실패 (bundle_invalid)");
+    expect(card.textContent).toContain(`${copy} (${reason})`);
     expect(card.textContent).not.toContain("만료");
     expect(card.querySelector(".scam-scope")?.textContent).toBe(SCAM_SCOPE_NOTICE);
     expect(card.textContent).toContain("보고된 검사 대상·규칙·기준 블록·시간이 없습니다.");
