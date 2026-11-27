@@ -55,6 +55,55 @@ test("optional key_id is telemetry and never selects the reference trust key", (
   }
 });
 
+test("Registry identity structure stays closed and nonzero with the supported schema keywords", () => {
+  const reference = {
+    chainId: 91342,
+    registryAddress: "0x1111111111111111111111111111111111111111",
+  };
+  const errorsFor = (registry_ref, expires_at = null) => {
+    const payload = { ...JSON.parse(example.payload), registry_ref, expires_at };
+    // Structure only: changing B intentionally does not re-sign the envelope.
+    return structureErrors({ ...example, payload: JSON.stringify(payload) });
+  };
+  for (const referenceValue of [
+    null, "", "legacy-reference", reference,
+    { ...reference, registryAddress: `0x${"0".repeat(39)}1` },
+    { ...reference, registryAddress: `0x1${"0".repeat(39)}` },
+    { ...reference, chainId: Number.MAX_SAFE_INTEGER },
+  ]) {
+    assert.deepEqual(errorsFor(referenceValue), [], JSON.stringify(referenceValue));
+  }
+  for (const referenceValue of [
+    false, 91342, [], {},
+    { chainId: 91342 },
+    { registryAddress: reference.registryAddress },
+    { ...reference, extra: true },
+    { ...reference, chainId: 0 },
+    { ...reference, chainId: -1 },
+    { ...reference, chainId: 1.5 },
+    { ...reference, chainId: "91342" },
+    { ...reference, chainId: Number.MAX_SAFE_INTEGER + 1 },
+    { ...reference, registryAddress: `0x${"0".repeat(40)}` },
+    { ...reference, registryAddress: `0x${"A".repeat(40)}` },
+    { ...reference, registryAddress: `0x${"1".repeat(39)}` },
+    { ...reference, registryAddress: `${reference.registryAddress}1` },
+    { ...reference, registryAddress: `${reference.registryAddress}\n` },
+    { ...reference, registryAddress: null },
+  ]) {
+    assert.notEqual(errorsFor(referenceValue).length, 0, JSON.stringify(referenceValue));
+  }
+  // Explicit Registry expiry is a Core semantic requirement. HTTP null and
+  // structurally valid timestamps must still reach that authoritative boundary.
+  for (const registry_ref of [null, reference]) {
+    for (const expiry of [null, 0, Number.MAX_SAFE_INTEGER]) {
+      assert.deepEqual(errorsFor(registry_ref, expiry), []);
+    }
+    for (const expiry of [-1, 1.5, "1800000000", Number.MAX_SAFE_INTEGER + 1]) {
+      assert.notEqual(errorsFor(registry_ref, expiry).length, 0);
+    }
+  }
+});
+
 const cases = contractCases();
 test("fixture identifiers are unique and required validation layers are present", () => {
   assert.equal(new Set(cases.map(item => item.id)).size, cases.length);

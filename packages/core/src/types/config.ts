@@ -6,9 +6,25 @@ export interface VerificationKey {
   readonly publicKeySpkiBase64: string;
 }
 
+export interface RegistryTrust {
+  /** Policy Registry chain, NOT the transaction/Fact target chain. */
+  readonly chainId: number;
+  /** Canonical lowercase nonzero EVM address. */
+  readonly registryAddress: `0x${string}`;
+  readonly finality: "safe" | "finalized";
+  /** Explicit deployment choice reflecting finality lag. Exclusive deadline is
+   * blockTimestamp * 1000 + maxStateAgeMs; re-reading a block cannot extend it.
+   * Revocation visibility is bounded by finality and the host refresh schedule.
+   */
+  readonly maxStateAgeMs: number;
+}
+
 export interface CoreTrust {
   readonly env: "staging" | "production";
-  readonly profile: "default";
+  /** HTTP requires default; Registry mode accepts a nonempty signed profile. */
+  readonly profile: string;
+  /** Omit for HTTP's 72-hour age and pinned-plan compatibility behavior. */
+  readonly registry?: RegistryTrust;
   /** At least one policy-role key required; decoder-role keys cannot verify policies. */
   readonly keys: readonly VerificationKey[];
 }
@@ -36,7 +52,9 @@ export interface DecoderSnapshot {
  * must be explicit. Millisecond durations use the injected clock.
  */
 export interface CoreLimits {
-  /** Default 259200 (72 hours), including when expires_at is null. Duration in seconds. */
+  /** HTTP default 259200 (72 hours), including when expires_at is null.
+   * Registry mode instead requires signed explicit expiry AND a live block lease.
+   */
   readonly maxBundleAgeSec?: number;
   /** Tolerance for future policy issuance and future Fact observation, in ms. */
   readonly allowedClockSkewMs: number;

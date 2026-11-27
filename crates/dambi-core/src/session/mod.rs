@@ -110,15 +110,29 @@ impl CoreSession {
         clock(now_ms)?;
         let config = Config::parse(config_json)?;
         let policy = Policy::parse(policy_json, config.limits.max_policy_bytes)?;
-        let store = SnapshotStore::new(
-            config.store_config()?,
-            DecoderInput::Pinned {
-                artifact: config.decoder_snapshot.artifact.as_bytes(),
-                expected_digest: &config.decoder_snapshot.expected_digest,
-            },
-            policy.input(),
-            now_ms,
-        )?;
+        let decoder = DecoderInput::Pinned {
+            artifact: config.decoder_snapshot.artifact.as_bytes(),
+            expected_digest: &config.decoder_snapshot.expected_digest,
+        };
+        let store = match (&config.trust.registry, policy.observation()?) {
+            (Some(registry), Some(observation)) => SnapshotStore::new_with_registry(
+                config.store_config()?,
+                decoder,
+                policy.input(),
+                registry.clone(),
+                observation,
+                now_ms,
+            )?,
+            (None, None) => {
+                SnapshotStore::new(config.store_config()?, decoder, policy.input(), now_ms)?
+            }
+            _ => {
+                return Err(SessionError::new(
+                    "POLICY_SCOPE_MISMATCH",
+                    "Registry mode requires an initial RPC observation; cached body alone is insufficient",
+                ))
+            }
+        };
         let owner = NEXT_SESSION
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
                 value.checked_add(1)
@@ -614,9 +628,22 @@ impl CoreSession {
             .ok_or_else(|| SessionError::new("ABORTED", "refresh no longer pending"))?;
         let result = (|| {
             let policy = Policy::parse(policy_json, self.limits.max_policy_bytes)?;
-            let prepared = self
-                .store
-                .prepare_refresh(&ticket, policy.input(), now_ms)?;
+            let prepared = match policy.observation()? {
+                Some(observation) if observation.status == "revoked" => {
+                    self.store
+                        .commit_registry_revocation(&ticket, observation, now_ms)?;
+                    return Ok(());
+                }
+                Some(observation) => self.store.prepare_registry_refresh(
+                    &ticket,
+                    policy.input(),
+                    observation,
+                    now_ms,
+                )?,
+                None => self
+                    .store
+                    .prepare_refresh(&ticket, policy.input(), now_ms)?,
+            };
             self.store.commit_refresh(prepared, now_ms)?;
             Ok(())
         })();

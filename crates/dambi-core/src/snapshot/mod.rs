@@ -9,6 +9,49 @@ use decoder::prepare_decoder;
 pub use decoder::{DecoderTrust, VerifiedDecoderSnapshot};
 pub use store::{PreparedRefresh, RefreshTicket, Snapshot, SnapshotStore, SnapshotStoreConfig};
 
+/// Local RPC trust policy, independent of P-256 signing trust. No latest fallback.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RegistryConfig {
+    pub chain_id: u64,
+    pub registry_address: String,
+    pub finality: String,
+    /// Exclusive lease measured from block timestamp, NOT from fetch completion.
+    pub max_state_age_ms: u64,
+}
+
+impl RegistryConfig {
+    pub fn reference(&self) -> crate::bundle::RegistryRef {
+        crate::bundle::RegistryRef {
+            chain_id: self.chain_id,
+            registry_address: self.registry_address.clone(),
+        }
+    }
+}
+
+/// A configured host's RPC observation, not a cryptographic state proof.
+/// All Registry reads must be bound to this exact safe/finalized block. A source
+/// must query on initialization, even when it caches the signed body. A network
+/// failure is unavailable, never a revoked observation. SHA-256 binds exact B.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RegistryObservation {
+    pub status: String,
+    pub chain_id: u64,
+    pub registry_address: String,
+    pub env: String,
+    pub profile: String,
+    pub version: u64,
+    pub payload_digest: String,
+    pub finality: String,
+    pub block_number: u64,
+    pub block_hash: String,
+    /// Unix seconds from the block header.
+    pub block_timestamp: u64,
+    /// Unix milliseconds at completion of the RPC observation; telemetry, not a lease.
+    pub observed_at_ms: u64,
+}
+
 /// PolicySource input; the exact B bytes are authenticated by the receiving Store.
 #[derive(Debug, Clone, Copy)]
 pub struct SignedPolicyInput<'a> {

@@ -5,6 +5,26 @@ use policy_engine::policy_rpc::ManifestV2;
 
 use super::{policy_content, SignatureVerifiedPolicyBundle};
 
+/// Signed Registry identity. The transaction target chain is independent.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RegistryRef {
+    pub chain_id: u64,
+    pub registry_address: String,
+}
+
+impl RegistryRef {
+    pub fn is_valid(&self) -> bool {
+        (1..=MAX_SAFE_INTEGER).contains(&self.chain_id)
+            && self.registry_address.len() == 42
+            && self.registry_address.starts_with("0x")
+            && self.registry_address[2..]
+                .bytes()
+                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+            && self.registry_address[2..].bytes().any(|b| b != b'0')
+    }
+}
+
 pub const DEFAULT_MAX_BUNDLE_AGE_SEC: u64 = 259_200;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
@@ -142,7 +162,11 @@ impl ValidatedPolicyBundle {
         let Some(previous) = previous else {
             return Ok(PolicyUpdate::Replace);
         };
-        if self.env() != previous.env() || self.profile() != previous.profile() {
+        if self.env() != previous.env()
+            || self.profile() != previous.profile()
+            || self.verified.parsed().payload()["registry_ref"]
+                != previous.verified.parsed().payload()["registry_ref"]
+        {
             return Err(PolicySemanticError::new(
                 PolicySemanticErrorKind::PolicyScopeMismatch,
                 "$",
@@ -173,10 +197,26 @@ pub fn validate_policy_bundle(
     config: &PolicyValidationConfig,
     now_ms: u64,
 ) -> Result<ValidatedPolicyBundle, PolicySemanticError> {
+    validate_policy_bundle_with_registry(verified, config, None, now_ms)
+}
+
+/// Registry mode must be selected by local configuration, never by signed input.
+/// It uses signed explicit expiry; the independently checked block lease belongs
+/// to the snapshot store. HTTP retains its original maximum-age semantics.
+pub fn validate_policy_bundle_with_registry(
+    verified: SignatureVerifiedPolicyBundle,
+    config: &PolicyValidationConfig,
+    registry: Option<&RegistryRef>,
+    now_ms: u64,
+) -> Result<ValidatedPolicyBundle, PolicySemanticError> {
     let max_age = config
         .max_bundle_age_sec
         .unwrap_or(DEFAULT_MAX_BUNDLE_AGE_SEC);
-    if !matches!(config.env.as_str(), "staging" | "production") || config.profile != "default" {
+    if !matches!(config.env.as_str(), "staging" | "production")
+        || config.profile.is_empty()
+        || (registry.is_none() && config.profile != "default")
+        || registry.is_some_and(|reference| !reference.is_valid())
+    {
         return Err(PolicySemanticError::new(
             PolicySemanticErrorKind::InvalidConfig,
             "config/trust",
@@ -202,11 +242,27 @@ pub fn validate_policy_bundle(
             "policy env/profile does not match local trust",
         ));
     }
-    if !payload["registry_ref"].is_null() {
+    if let Some(expected) = registry {
+        let actual = serde_json::from_value::<RegistryRef>(payload["registry_ref"].clone()).ok();
+        if actual.as_ref() != Some(expected) {
+            return Err(PolicySemanticError::new(
+                PolicySemanticErrorKind::PolicyScopeMismatch,
+                "$/registry_ref",
+                "signed Registry identity does not match local trust",
+            ));
+        }
+        if payload["expires_at"].is_null() {
+            return Err(PolicySemanticError::new(
+                PolicySemanticErrorKind::InvalidPolicyBundle,
+                "$/expires_at",
+                "Registry policies require signed explicit expiration",
+            ));
+        }
+    } else if !payload["registry_ref"].is_null() {
         return Err(PolicySemanticError::new(
             PolicySemanticErrorKind::UnsupportedRegistryRef,
             "$/registry_ref",
-            "v0.1 supports only a null registry_ref",
+            "HTTP mode supports only a null registry_ref",
         ));
     }
 
@@ -224,7 +280,11 @@ pub fn validate_policy_bundle(
         ));
     }
     let age_deadline = issued_at + max_age;
-    let valid_until_ms = expires_at.map_or(age_deadline, |expiry| expiry.min(age_deadline)) * 1000;
+    let valid_until_ms = if registry.is_some() {
+        expires_at.expect("Registry expiry checked above") * 1000
+    } else {
+        expires_at.map_or(age_deadline, |expiry| expiry.min(age_deadline)) * 1000
+    };
     let issued_at_ms = issued_at * 1000;
     check_time(
         issued_at_ms,
