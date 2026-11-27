@@ -654,6 +654,46 @@ fn registry_refresh(core: &mut CoreSession, value: &Value, now: u64) -> Result<(
 }
 
 #[test]
+fn registry_initial_revocation_checks_scope_before_rejecting_without_a_body() {
+    let cfg = registry_config().to_string();
+    let initial = registry_wire(42, 100, NOW / 1000, NOW);
+    CoreSession::new(&cfg, &initial.to_string(), NOW).unwrap();
+
+    let mut revoked = initial.clone();
+    revoked["registryState"]["status"] = json!("revoked");
+    revoked["payload"] = json!("");
+    revoked["signature"] = json!("");
+    error_code(
+        CoreSession::new(&cfg, &revoked.to_string(), NOW),
+        "POLICY_EXPIRED",
+    );
+
+    // Only the observation's chain differs: foreign revocation must not be
+    // mistaken for an acknowledged revocation in the locally configured scope.
+    let mut foreign = revoked.clone();
+    foreign["registryState"]["chainId"] = json!(1);
+    error_code(
+        CoreSession::new(&cfg, &foreign.to_string(), NOW),
+        "POLICY_SCOPE_MISMATCH",
+    );
+
+    // Empty bodies are not accepted for active observations, and active policy
+    // bytes still require their original P-256 signature.
+    let mut empty_active = revoked;
+    empty_active["registryState"]["status"] = json!("active");
+    error_code(
+        CoreSession::new(&cfg, &empty_active.to_string(), NOW),
+        "INVALID_POLICY_BUNDLE",
+    );
+    let mut tampered = initial.clone();
+    tampered["payload"] = json!(format!("{} ", initial["payload"].as_str().unwrap()));
+    error_code(
+        CoreSession::new(&cfg, &tampered.to_string(), NOW),
+        "INVALID_SIGNATURE",
+    );
+}
+
+#[test]
 fn registry_state_enforces_block_lease_revocation_replacement_and_restart() {
     let cfg = registry_config().to_string();
     let initial = registry_wire(42, 100, NOW / 1000, NOW);

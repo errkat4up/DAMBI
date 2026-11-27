@@ -155,9 +155,23 @@ test("Registry initial loading and rejection categories agree in Native and WASM
   const cachedOnly = { payload: policy.payload, signature: policy.signature };
   const unavailable = { payload: "", signature: "", registryState: { status: "unavailable" } };
   const expired = registryPolicy(42, 100, NOW / 1000 - 2);
+  // Fresh initial revocation needs no signed body. Scope validation must still
+  // precede revocation, in both the real WASM constructor and Native session.
+  const revoked = { payload: "", signature: "", registryState: {
+    ...policy.registryState, status: "revoked",
+  } };
+  const foreignRevoked = { ...revoked, registryState: {
+    ...revoked.registryState, chainId: 1,
+  } };
+  const emptyActive = { ...revoked, registryState: {
+    ...revoked.registryState, status: "active",
+  } };
   for (const [input, expected] of [
     [cachedOnly, "POLICY_SCOPE_MISMATCH"], [unavailable, "POLICY_FETCH_FAILED"],
     [expired, "POLICY_EXPIRED"],
+    [revoked, "POLICY_EXPIRED"],
+    [foreignRevoked, "POLICY_SCOPE_MISMATCH"],
+    [emptyActive, "INVALID_POLICY_BUNDLE"],
     [{ ...policy, payload: `${policy.payload} ` }, "INVALID_SIGNATURE"],
     [{ ...policy, registryState: { ...policy.registryState, chainId: 1 } }, "POLICY_SCOPE_MISMATCH"],
     [{ ...policy, registryState: { ...policy.registryState, finality: "latest" } }, "POLICY_SCOPE_MISMATCH"],

@@ -157,6 +157,12 @@ impl SnapshotStore {
                 RegistryGate::new(registry, &config.policy, observation, now_ms)
             })
             .transpose()?;
+        if let Some(gate) = &gate {
+            // Local Registry configuration and observation validation must precede
+            // this check. A confirmed initial revocation needs no signed body;
+            // report it before attempting to parse an empty payload/signature.
+            gate.ensure_usable(gate.last.version, now_ms)?;
+        }
         let reference = gate.as_ref().map(|gate| gate.config.reference());
         check_byte_limit(config.max_policy_bytes, "maxPolicyBytes")?;
         check_byte_limit(config.max_decoder_bytes, "maxDecoderBytes")?;
