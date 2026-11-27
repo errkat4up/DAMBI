@@ -37,6 +37,8 @@ struct Pool {
     sync_logs: Vec<Value>,
     start_reserves: String,
     delay: Duration,
+    /// When set, every `eth_getLogs` fails with this provider message.
+    logs_fail: Option<String>,
 }
 
 impl Pool {
@@ -53,6 +55,7 @@ impl Pool {
             sync_logs: fx["logs"].as_array().unwrap().clone(),
             start_reserves: fx["startReserves"].as_str().unwrap().to_owned(),
             delay: Duration::ZERO,
+            logs_fail: None,
         }
     }
 }
@@ -60,6 +63,8 @@ impl Pool {
 struct FakeChain {
     pool: Mutex<Pool>,
     calls: Mutex<Vec<String>>,
+    /// `eth_getLogs` calls against the factory, i.e. creation lookups.
+    factory_logs: Mutex<Vec<Value>>,
 }
 
 impl FakeChain {
@@ -67,6 +72,7 @@ impl FakeChain {
         Arc::new(Self {
             pool: Mutex::new(pool),
             calls: Mutex::new(Vec::new()),
+            factory_logs: Mutex::new(Vec::new()),
         })
     }
     fn count(&self, method: &str) -> usize {
@@ -96,7 +102,11 @@ impl ChainRpc for FakeChain {
             ),
             "eth_getTransactionByHash" => Ok(json!({ "hash": TX_HASH, "from": DEPLOYER })),
             "eth_getLogs" => {
+                if let Some(message) = &p.logs_fail {
+                    return Err(RpcFailure::Transport(message.clone()));
+                }
                 if params[0]["address"] == FACTORY {
+                    self.factory_logs.lock().unwrap().push(params.clone());
                     return Ok(if p.created_recently {
                         json!([{ "transactionHash": TX_HASH, "data": format!("0x{}{}", word(&p.pool), word("1")) }])
                     } else {
@@ -174,10 +184,19 @@ impl ChainRpc for FakeChain {
 }
 
 async fn serve(rpc: Option<Arc<FakeChain>>, config: ScamConfig) -> String {
-    let service = Arc::new(ScamService::new(
-        rpc.map(|chain| chain as Arc<dyn ChainRpc>),
-        config,
-    ));
+    serve_split(rpc, None, config).await
+}
+
+/// The main endpoint for everything, and optionally another for the 30-day log query.
+async fn serve_split(
+    rpc: Option<Arc<FakeChain>>,
+    logs_rpc: Option<Arc<FakeChain>>,
+    config: ScamConfig,
+) -> String {
+    let service = Arc::new(
+        ScamService::new(rpc.map(|chain| chain as Arc<dyn ChainRpc>), config)
+            .with_logs_rpc(logs_rpc.map(|chain| chain as Arc<dyn ChainRpc>)),
+    );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -499,4 +518,109 @@ async fn nothing_but_a_token_and_rule_values_is_accepted() {
         assert_eq!(status, 422, "{body}");
     }
     assert_eq!(chain.total(), 0);
+}
+
+/// Count of `eth_getLogs` calls that asked the factory (the 30-day `PairCreated` query).
+fn creation_queries(chain: &FakeChain) -> usize {
+    chain.factory_logs.lock().unwrap().len()
+}
+
+#[tokio::test]
+async fn the_creation_query_goes_to_the_log_endpoint_and_everything_else_to_the_main_one() {
+    let main = FakeChain::new(Pool::from_fixture());
+    let logs = FakeChain::new(Pool::from_fixture());
+    let url = serve_split(
+        Some(main.clone()),
+        Some(logs.clone()),
+        ScamConfig::default(),
+    )
+    .await;
+    let (_, body, _) = post(
+        &url,
+        json!({ "chainId": 1, "token": token(), "rules": [rule("r", "step", 5)] }),
+    )
+    .await;
+    assert_eq!(body["backdoor"]["result"], "flagged");
+    assert_eq!(body["window"]["result"], "fired");
+    // The log endpoint answered the PairCreated query and nothing else.
+    assert_eq!(logs.total(), 1);
+    assert_eq!(creation_queries(&logs), 1);
+    // The main endpoint did the rest, including the window's Sync logs, but not PairCreated.
+    assert_eq!(creation_queries(&main), 0);
+    assert!(main.count("eth_getLogs") >= 1);
+    assert_eq!(main.count("eth_getTransactionByHash"), 1);
+}
+
+#[tokio::test]
+async fn a_pools_creator_is_looked_up_once_and_the_rest_is_read_fresh() {
+    let main = FakeChain::new(Pool::from_fixture());
+    let logs = FakeChain::new(Pool::from_fixture());
+    // No result cache: every request looks again, as after the 12 s cache expires.
+    let config = ScamConfig {
+        cache_ttl: Duration::ZERO,
+        per_client_burst: 100,
+        ..ScamConfig::default()
+    };
+    let url = serve_split(Some(main.clone()), Some(logs.clone()), config).await;
+    let ask = || post(&url, json!({ "chainId": 1, "token": token() }));
+    assert_eq!(ask().await.1["backdoor"]["result"], "flagged");
+    let simulations_after_first = main.count("eth_call");
+
+    // The token changes so the deployer is refused too: the creator is remembered,
+    // the simulated calls are read again and see the change.
+    main.pool.lock().unwrap().deployer_call = Err(RpcFailure::Revert);
+    assert_eq!(
+        ask().await.1["backdoor"],
+        json!({ "result": "clear", "reason": "clear" })
+    );
+    assert_eq!(logs.total(), 1, "the creator was not looked up again");
+    assert_eq!(main.count("eth_getTransactionByHash"), 1);
+    assert!(main.count("eth_call") > simulations_after_first);
+}
+
+#[tokio::test]
+async fn a_failed_creator_lookup_is_retried_and_never_shown_as_a_warning() {
+    let main = FakeChain::new(Pool::from_fixture());
+    let logs = FakeChain::new(Pool::from_fixture());
+    logs.pool.lock().unwrap().logs_fail =
+        Some("This request exceeds the allowed block range for your current plan".to_owned());
+    let config = ScamConfig {
+        cache_ttl: Duration::ZERO,
+        per_client_burst: 100,
+        ..ScamConfig::default()
+    };
+    let url = serve_split(Some(main.clone()), Some(logs.clone()), config).await;
+    let ask = || post(&url, json!({ "chainId": 1, "token": token() }));
+    assert_eq!(
+        ask().await.1["backdoor"],
+        json!({ "result": "undetermined", "reason": "logs_unavailable" })
+    );
+    logs.pool.lock().unwrap().logs_fail = None;
+    assert_eq!(ask().await.1["backdoor"]["result"], "flagged");
+    // Asked twice: the failure was not remembered.
+    assert_eq!(logs.count("eth_getLogs"), 2);
+}
+
+#[tokio::test]
+async fn not_finding_a_creation_is_never_remembered() {
+    // The log endpoint has not seen the pool's creation yet (it is behind, or the
+    // pool is older than 30 days): this time it is undetermined...
+    let main = FakeChain::new(Pool::from_fixture());
+    let logs = FakeChain::new(Pool::from_fixture());
+    logs.pool.lock().unwrap().created_recently = false;
+    let config = ScamConfig {
+        cache_ttl: Duration::ZERO,
+        per_client_burst: 100,
+        ..ScamConfig::default()
+    };
+    let url = serve_split(Some(main.clone()), Some(logs.clone()), config).await;
+    let ask = || post(&url, json!({ "chainId": 1, "token": token() }));
+    assert_eq!(
+        ask().await.1["backdoor"],
+        json!({ "result": "undetermined", "reason": "no_creation_evidence" })
+    );
+    // ...and the next request asks again, so once the creation shows up the pool is checked.
+    logs.pool.lock().unwrap().created_recently = true;
+    assert_eq!(ask().await.1["backdoor"]["result"], "flagged");
+    assert_eq!(creation_queries(&logs), 2);
 }
