@@ -61,7 +61,7 @@ function server(respond: (request: PoolCheckRequest) => PoolCheck = () => answer
 const swap = (token: string) => ({ meta: {}, body: { domain: "amm", action: "swap",
   venue: { name: "uniswap_v2", chain: "eip155:1", pool: A(0), factory: A(0) },
   params: { token_out: { key: { standard: "erc20", chain: "eip155:1", address: token } } } } });
-const message = (chainId = 1): Message => ({ requestId: "request-id-with-fingerprint", data: { type: RequestType.TRANSACTION, chainId, hostname: "dapp.example",
+const message = (chainId = 1, bypassed = false): Message => ({ requestId: "request-id-with-fingerprint", data: { type: RequestType.TRANSACTION, chainId, bypassed, hostname: "dapp.example",
   transaction: { from: USER, to: A(0x7a), data: "0x7ff36ab5", value: "0xde0b6b3a7640000" } } } as Message);
 const report = (status: string): ScamDisplay => ({ version: 1, kind: "report", holding: "unknown",
   report: { status, reasons: [], targets: [], scopeNotice: "patterns_only_no_sellability_guarantee" } } as ScamDisplay);
@@ -292,8 +292,7 @@ describe("SDK display lifecycle boundaries", () => {
   it("does no checks or display work for observation-only requests", async () => {
     const c = chain(), srv = server();
     const s = setup({ rpc: c.rpc, checkPool: srv.checkPool, sdk: report("insufficient") });
-    const observed = message();
-    observed.data.bypassed = true;
+    const observed = message(1, true);
     expect(await run(observed, [swap(TOKEN)], s.deps)).toEqual({});
     expect(c.calls).toEqual([]);
     expect(srv.requests).toEqual([]);

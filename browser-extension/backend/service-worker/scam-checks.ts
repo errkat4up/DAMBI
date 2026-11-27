@@ -284,7 +284,7 @@ export function beginScamChecks(message: Message, deps: ScamChecksDeps = default
   async function run(actions: readonly unknown[]): Promise<void> {
     const data = message.data;
     // Observation is never a pre-sign interaction, even if actions are offered.
-    if (data.bypassed || data.type !== RequestType.TRANSACTION) return finish({});
+    if (data.type !== RequestType.TRANSACTION || data.bypassed) return finish({});
     const chainId = Number(data.chainId);
     const user = data.transaction.from;
     if (!Number.isSafeInteger(chainId) || chainId <= 0 || !isAddress(user)) return finish({});
