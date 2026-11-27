@@ -117,7 +117,7 @@ test("real registry and fixed publisher: CAS, receipts, retries, revocation, rot
   };
   const first = await prepare();
   assert.equal(first.expectedCurrent, 0);
-  assert.equal(JSON.parse(first.signed.payload).registry_ref, tool.registryReference(config));
+  assert.deepEqual(JSON.parse(first.signed.payload).registry_ref, tool.registryReference(config));
   const scope = tool.scopeId(config);
   const encodedScope = await rpc("eth_call", [{ to: registry, data: calldata("scopeId(string,string)", "staging", "default") }, "latest"]);
   assert.equal(encodedScope.toLowerCase(), scope);
@@ -408,7 +408,7 @@ test("real registry and fixed publisher: CAS, receipts, retries, revocation, rot
   const maximumIntent = await prepare(boundaryClient);
   assert.equal(maximumIntent.expectedCurrent, maximum - 1);
   assert.equal(JSON.parse(maximumIntent.signed.payload).sequence, maximum);
-  assert.equal(JSON.parse(maximumIntent.signed.payload).registry_ref, tool.registryReference(boundaryConfig));
+  assert.deepEqual(JSON.parse(maximumIntent.signed.payload).registry_ref, tool.registryReference(boundaryConfig));
   const maximumPublication = await tool.publishOnchainPolicy(boundaryClient, maximumIntent, submit, {
     pollMs: 20,
     async onSubmitted(hash) {

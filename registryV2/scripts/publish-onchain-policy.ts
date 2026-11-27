@@ -4,12 +4,9 @@
  * it on retries; never prepare a new sequence merely because submission timed out.
  *
  * Registry ABI: PolicyRegistry.sol. Scope = SHA256(abi.encode(chainId, registry,
- * env, profile)). Signed registry_ref = dambi:policy-registry:<decimal chainId>:
- * <lowercase address> (without the line break); env/profile remain signed fields.
- * This is a publisher/adapter handoff, not an SDK enablement switch: the supplied
- * Core baseline intentionally rejects non-null registry_ref. F1/F5 must consume
- * this binding and the distinct active/superseded/revoked/unavailable states.
- * HTTP publication and its 72-hour consumer default are unchanged.
+ * env, profile)). The signed registry_ref binds the numeric chainId and the
+ * lowercase registryAddress as defined in contracts/core-v1/policy-wire.schema.json.
+ * The signed payload also carries env and profile.
  *
  * Requires the pinned Foundry installation used by contracts/policy-registry.
  * cast is used ONLY for local ABI encoding/decoding, never RPC or signing.
@@ -43,7 +40,7 @@ import canonicalize from "canonicalize";
 import { p256 } from "@noble/curves/nist.js";
 import {
   loadPolicies, signPayload, MAX_SEQUENCE,
-  type BundlePayload, type PublishOptions, type SignedPolicyBundle,
+  type BundlePayload, type PublishOptions, type RegistryReference, type SignedPolicyBundle,
 } from "./publish-policy-bundle.js";
 
 export interface RegistryConfig {
@@ -133,8 +130,8 @@ function address(value: string): string {
   if (!ADDRESS.test(value) || value.toLowerCase() === ZERO) throw new Error("invalid address");
   return value.toLowerCase();
 }
-export function registryReference(config: RegistryConfig): string {
-  return `dambi:policy-registry:${config.network === "local" ? 31337 : 91342}:${address(config.registry)}`;
+export function registryReference(config: RegistryConfig): RegistryReference {
+  return { chainId: config.network === "local" ? 31337 : 91342, registryAddress: address(config.registry) };
 }
 export function scopeId(config: RegistryConfig): string {
   return sha256(bytes(abi("abi-encode", "scope(uint256,address,string,string)", [
@@ -229,7 +226,7 @@ export function validateIntent(client: RegistryClient, intent: Intent, now = Mat
   }
   const sequence = safeSequence(payload.sequence);
   if (sequence === 0 || safeSequence(intent.expectedCurrent) !== sequence - 1) throw new Error("sequence mismatch");
-  if (payload.registry_ref !== registryReference(client.config) || payload.env !== client.config.env
+  if (canonicalize(payload.registry_ref) !== canonicalize(registryReference(client.config)) || payload.env !== client.config.env
       || payload.profile !== client.config.profile) throw new Error("signed scope mismatch");
   if (!Number.isSafeInteger(payload.issued_at) || payload.issued_at < 0 || payload.issued_at > now
       || !Number.isSafeInteger(payload.expires_at) || payload.expires_at === null

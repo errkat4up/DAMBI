@@ -41,6 +41,7 @@ async function intent(p = payload()): Promise<Intent> {
 test("existing signer binds original bytes, scope and safe sequence; HTTP null is preserved", async () => {
   const client = new RegistryClient(config);
   const good = await intent();
+  assert.deepEqual(JSON.parse(good.signed.payload).registry_ref, { chainId: 31337, registryAddress: config.registry });
   assert.equal(validateIntent(client, good).sequence, 1);
   assert.throws(() => validateIntent(client, { ...good, signed: { ...good.signed, payload: good.signed.payload + "\n" } }), /canonical/);
   const scopeChanges: Array<[string, Partial<BundlePayload>]> = [
@@ -48,6 +49,7 @@ test("existing signer binds original bytes, scope and safe sequence; HTTP null i
     ["profile", { profile: "other" }],
     ["registry address", { registry_ref: registryReference({ ...config, registry: "0x" + "33".repeat(20) }) }],
     ["registry chain ID", { registry_ref: registryReference({ ...config, network: "giwa" }) }],
+    ["legacy string reference", { registry_ref: `dambi:policy-registry:31337:${config.registry}` }],
     ["HTTP null reference", { registry_ref: null }],
   ];
   for (const [name, change] of scopeChanges) {

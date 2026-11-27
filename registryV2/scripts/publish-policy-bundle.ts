@@ -63,6 +63,11 @@ export interface PolicyEntry {
   manifest: Record<string, unknown>;
 }
 
+export interface RegistryReference {
+  chainId: number;
+  registryAddress: string;
+}
+
 export interface BundlePayload {
   policies: PolicyEntry[];
   sequence: number;
@@ -70,7 +75,7 @@ export interface BundlePayload {
   expires_at: number | null;
   env: Env;
   profile: string;
-  registry_ref: string | null;
+  registry_ref: RegistryReference | string | null;
 }
 
 export interface SignedPolicyBundle {
