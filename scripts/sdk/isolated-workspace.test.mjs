@@ -38,6 +38,25 @@ test("isolated Cargo workspace supplies every inherited member dependency with t
   assert.ok(dependencies > 0, "check must inspect inherited dependencies");
 });
 
+test("isolated sources retain the GIWA Native runner and public adapter timing helper", async () => {
+  const root = new URL("../../", import.meta.url);
+  const manifest = JSON.parse(await readFile(new URL("./sdk-source-files.json", import.meta.url), "utf8"));
+  const copies = new Map(manifest.copies.map(({ from, to }) => [to ?? from, from]));
+  // These are executable dependencies, not generated output. The GIWA test
+  // invokes fixture_runner, while the public adapter example uses its sibling
+  // timing helper. A full checkout must not mask either missing isolated input.
+  for (const path of [
+    "fixtures/sdk/giwa-sf0/product-decoder.test.mjs",
+    "fixtures/sdk/helpers/native-backend.mjs",
+    "crates/dambi-core/examples/fixture_runner.rs",
+    "examples/sdk-adapters/client.mjs",
+    "examples/sdk-adapters/check-timing.mjs",
+  ]) {
+    assert.equal(copies.get(path), path, `${path} must retain its repository-relative location`);
+    assert.ok((await readFile(new URL(path, root), "utf8")).length > 0, `${path} must be a nonempty source input`);
+  }
+});
+
 async function fixture(t) {
   const base = await mkdtemp(join(tmpdir(), "sdk-isolation-test-"));
   t.after(() => rm(base, { recursive: true, force: true }));

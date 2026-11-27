@@ -6,6 +6,26 @@
 
 거래의 수령인, ETH 수량과 최소 출력은 서명할 원문에서 가져온다. 풀과 factory는 기존 확인 기록에 고정했다. `declared_route`에는 경로의 식별 정보만 넣고, 관측되지 않은 슬리피지, 준비금, 수수료 및 출력 추정값은 비워 둔다. LP, 역방향, 멀티홉 및 다른 토큰은 이 제품 선언의 지원 범위 밖이다. 선택 목록은 [고정 입력](resolved-decoders/selection.json)에 있으며 기존 799개와 선택한 6개 원본으로 805개 스냅샷을 재생성한다.
 
+### S1 재개 기록 — t_439775dd
+
+- 담당 branch: 제공되지 않음 / 구현 상태: 수정안 작성·검증 대기.
+- 기준: `1fda889e252b4cc26ad5ecdeb3912fb250f7326e`. 변경 범위는 Rust 설치 회귀의 포맷, 격리 소스의 Native fixture runner·공개 예제 timing helper, 제품 원문 수량·수령인 변형 및 chain/router/selector 미매칭 회귀다. 기존 제품 양성·미관측 assertion은 유지한다.
+- 실행 결과: 이번 응답에서 빌드·시험·CI 조회·커밋·푸시를 수행하지 않았다. 전달받은 CI 실패 보고는 있으나 job/step 로그는 제공되지 않아 이 수정으로 해당 실행의 모든 실패가 해결됐다고 판정하지 않는다.
+- 다음 작업: 실패 job/step 로그와 수정 범위를 대조하고 아래 회귀, 기존 격리 생성, 동일 tarball의 Node/Chromium 소비를 검증한 뒤 QA·독립 리뷰한다. 제품 805개 = 기준선 799개 + 선택 6개 및 재생성 바이트·metadata 일치 검사는 그대로 유지한다. 생성 snapshot·metadata·실행 증거는 수작업으로 작성하지 않는다.
+
+재현 명령(실행 결과가 아님):
+
+```sh
+cargo fmt --all -- --check
+node --test scripts/sdk/isolated-workspace.test.mjs
+cargo test --locked -p dambi-core --test decoder_snapshot
+cargo build --locked -p dambi-core --example fixture_runner
+DAMBI_FIXTURE_BACKEND=native node --test fixtures/sdk/giwa-sf0/product-decoder.test.mjs
+npm run sdk:verify:isolated
+```
+
+제품 tarball 소비는 빌드한 동일 후보를 `node scripts/sdk/verify-consumers.mjs --tarball <candidate.tgz>`에 전달한다. 이 경로는 설치된 제품 Decoder/WASM으로 저장된 실제 raw 요청의 두 `scamCalls`와 대상, 미지원 launchpad 요청을 검사한다. 새 수량·수령인 변형은 합성·미서명 회귀이지 추가 체인 관측이나 router 구현 동등성의 증거가 아니다. LP 및 새 프로토콜 지원은 추가하지 않는다.
+
 ## Scam Filter — SF0 연결 정보 확인
 
 2026-10-19, [계획서 SF0-1](../../docs/scam-filter/mvp-design-plan.md#sf0-1--연결-대상측정-근거-확인) 범위에서 전달받은 연결 정보와 대표 거래를 공개 RPC에 읽기 전용으로 대조했다. **수동 RPC 확인 6개 항목 일치·0개 불일치:** 체인 ID, pair의 factory, factory의 getPair, token0·token1 구성, 대표 거래의 블록·성공 상태, pair의 Sync→Swap 순서. 자동화 시험 통과 수나 전체 DEX 검증을 뜻하지 않는다.
