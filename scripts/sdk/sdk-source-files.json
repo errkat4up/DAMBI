@@ -1,5 +1,5 @@
 {
-  "scope": "Native/WASM Core plus selected decoder generation: 799 committed baseline + UR/Aave originals, three regression pools and raw policy parity; full-corpus regeneration and final release consumers remain outside this gate.",
+  "scope": "Native/WASM Core plus selected decoder generation: 799 committed baseline + UR/Aave/GIWA originals, three regression pools and raw policy parity; full-corpus regeneration and final release consumers remain outside this gate.",
   "copies": [
     { "from": "scripts/sdk/isolated/Cargo.toml", "to": "Cargo.toml" },
     { "from": "scripts/sdk/isolated/package.json", "to": "package.json" },
@@ -26,6 +26,8 @@
     { "from": "policy-bundles/day1-safety" },
     { "from": "fixtures/sdk/resolved-decoders" },
     { "from": "fixtures/sdk/giwa-sf0/rpc-evidence.json" },
+    { "from": "fixtures/sdk/helpers/native-backend.mjs" },
+    { "from": "fixtures/sdk/giwa-sf0/product-decoder.test.mjs" },
     { "from": "fixtures/sdk/giwa-sf0/decoders/swap-exact-eth-for-tokens.json" },
     { "from": "fixtures/sdk/pool-materialization/selection.json" },
     { "from": "fixtures/sdk/pool-materialization/templates" },

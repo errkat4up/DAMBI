@@ -1,6 +1,9 @@
 // Copied beside the public example into the isolated consumer before execution.
 // This module runs unchanged under Node and Chromium; no workspace imports.
 import { createAdapterCore } from "./client.mjs";
+import { createCore } from "@dambi/core";
+import { createPolicyApiSource } from "@dambi/core/adapters";
+import { decoderSnapshot } from "@dambi/core/decoders";
 
 const OWNER = "0x000000000000000000000000000000000000aaaa";
 const TOKEN = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
@@ -21,7 +24,7 @@ const failClosed = (verdict, code) => {
   check(verdict.diagnostics.some((item) => item.code === code), `Missing failure diagnostic ${code}`);
 };
 
-export async function runConsumerCases({ settings, control, browser = false, passed }) {
+export async function runConsumerCases({ settings, giwa, control, browser = false, passed }) {
   await control("reset", { policy: "day1" });
   let core = await createAdapterCore(settings);
   try {
@@ -37,6 +40,26 @@ export async function runConsumerCases({ settings, control, browser = false, pas
     if (browser) check(seen.preflights.some((item) => item.kind === "policy" && item.headers.includes("if-none-match")),
       "Cross-origin conditional request must pass an If-None-Match preflight");
     await passed("signed Day-1 HTTP policy + packaged decoder/WASM; no-Fact approve and exposed ETag 304");
+  } finally { core.dispose(); }
+
+  const policy = createPolicyApiSource(settings.policy);
+  core = await createCore({ decoderSnapshot, trust: settings.trust, limits: settings.limits,
+    enforcement: settings.enforcement, scam: giwa.config, ports: {
+      policy: { fetch: (options) => policy.fetch(options), fetchScam: async () => giwa.bundle },
+      fact: { async fetch() { throw new Error("Planning a GIWA swap must not fetch Facts"); } },
+    } });
+  try {
+    const plan = await core.plan(giwa.request);
+    equal(plan.scamCalls.map((call) => call.method), ["scam.pool_history", "scam.token_profile"], "GIWA swap calls");
+    for (const call of plan.scamCalls) {
+      for (const [field, value] of Object.entries(giwa.subject)) {
+        equal(call.params.subject[field], value, `GIWA ${call.method} subject.${field}`);
+      }
+    }
+    let unrelatedCode;
+    try { await core.plan(giwa.unrelated); } catch (error) { unrelatedCode = error.code; }
+    equal(unrelatedCode, "UNSUPPORTED_REQUEST", "Recorded launchpad request must stay outside product coverage");
+    await passed("packaged GIWA decoder plans both scam calls for the recorded pool and excludes the launchpad request");
   } finally { core.dispose(); }
 
   await control("reset", { policy: "optional" });

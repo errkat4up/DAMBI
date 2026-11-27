@@ -12,9 +12,9 @@ const digest = (text) => `0x${createHash("sha256").update(text, "utf8").digest("
 const read = (path) => JSON.parse(readFileSync(path, "utf8"));
 
 /**
- * Rebuild the selected UR/Aave additions from their pinned originals while
+ * Rebuild the selected UR, Aave and GIWA additions from their pinned originals while
  * preserving the remaining committed baseline. This is deliberately not a
- * claim that all 804 Registry bundles were rebuilt from their original inputs.
+ * claim that all 805 Registry bundles were rebuilt from their original inputs.
  * Also generate the separate pool regression snapshot consumed by raw tests.
  */
 export async function verifyDecoderGeneration({ installProduct = false, log = console.log } = {}) {
@@ -26,14 +26,16 @@ export async function verifyDecoderGeneration({ installProduct = false, log = co
   assert.equal(metadata.bytes, Buffer.byteLength(artifact), "committed product size");
   assert.equal(container.schema_version, 1);
   assert.equal(metadata.bundle_count, container.bundles.length);
-  assert.equal(container.bundles.length, 804, "review the baseline when product selection changes");
+  assert.equal(container.bundles.length, 805, "review the baseline when product selection changes");
 
   const inputs = join(root, "fixtures/sdk/resolved-decoders");
   const selection = read(join(inputs, "selection.json"));
   assert.equal(selection.schema_version, 1);
-  assert.equal(selection.manifests.length, 5);
+  assert.equal(selection.manifests.length, 6);
+  assert.ok(selection.manifests.includes("manifests/giwa/v2-router/swap-exact-eth-for-tokens@1.0.0.json"),
+    "the GIWA addition must be rebuilt from its selected product source");
   const selectedIds = new Set(selection.manifests.map((path) => read(join(inputs, path)).id));
-  assert.equal(selectedIds.size, 5, "selected manifest IDs must be unique");
+  assert.equal(selectedIds.size, 6, "selected manifest IDs must be unique");
   for (const id of selectedIds) {
     assert.equal(container.bundles.filter((bundle) => bundle.id === id).length, 1, `missing or duplicate selected product bundle: ${id}`);
   }
@@ -62,7 +64,7 @@ export async function verifyDecoderGeneration({ installProduct = false, log = co
         copyFileSync(join(staged, name), join(product, name));
       }
     }
-    log("[decoder-generation] 799 committed baseline + 5 pinned originals = identical 804-bundle product; Core install passed");
+    log("[decoder-generation] 799 committed baseline + 6 pinned originals = identical 805-bundle product; Core install passed");
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }

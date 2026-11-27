@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { generateKeyPairSync, sign } from "node:crypto";
 import { once } from "node:events";
 import { cp, lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -28,6 +29,51 @@ for (let at = 0; at < args.length; at++) {
 function inside(parent, child) {
   const path = relative(parent, child);
   return path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
+}
+
+// The consumer receives recorded inputs and a signed advisory configuration.
+// Its decoder, WASM and planner all come from the installed tarball.
+async function giwaPlanningFixture() {
+  const evidence = JSON.parse(await readFile(join(root, "fixtures/sdk/giwa-sf0/rpc-evidence.json"), "utf8"));
+  const requestFor = (hash) => {
+    const tx = evidence.queries.find(({ request }) =>
+      request.method === "eth_getTransactionByHash" && request.params[0] === hash)?.response.result;
+    assert.equal(tx?.hash, hash);
+    return { kind: "transaction", chainId: `eip155:${BigInt(tx.chainId)}`, from: tx.from,
+      to: tx.to, value: BigInt(tx.value).toString(), data: tx.input };
+  };
+  const swap = evidence.observations.swap;
+  const chainId = Number(evidence.chainId);
+  const [quoteToken, token] = swap.path;
+  const candidate = { rules: [{ id: "r1", enabled: true, kind: "change_count", metric: "price_quote_per_token",
+    lookbackSec: 3600, direction: "either", changeMode: "cumulative", thresholdBps: 500, count: 3 }],
+    bucketMs: 1000, gridOriginMs: 0, warmupSec: 86_400, maxDataAgeSec: 30 };
+  const presetId = "giwa-consumer";
+  const now = Date.now();
+  const payload = JSON.stringify({ kind: "scam_bundle", schema: "0.1", sequence: "1",
+    issuedAtMs: now - 1000, expiresAtMs: now + 7_200_000, env: "staging", profile: "default",
+    compatibility: { engineRange: "*", builderRange: "dambi-v2/2", contractVersion: "0.1",
+      algorithm: { id: "dambi.scam.window-rules", version: "0.2.0", contractVersion: 2 } },
+    support: [{ chainId, venue: "uniswap_v2", factories: [swap.factory], quoteTokens: [quoteToken],
+      exemptTokens: [quoteToken], allowedBucketMs: [1000], confirmDepth: 2 }],
+    presets: [{ id: presetId, purpose: "demo",
+      selection: { ageThresholdSec: 3600, unknownAge: "new_provisional_insufficient" },
+      newMarket: { ...candidate, id: "new" }, established: { ...candidate, id: "established" } }],
+    templates: {}, model: null });
+  const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const signature = sign("sha256", Buffer.from(payload), { key: privateKey, dsaEncoding: "ieee-p1363" }).toString("base64");
+  const publicKeySpkiBase64 = publicKey.export({ format: "der", type: "spki" }).toString("base64");
+  return {
+    request: requestFor("0x212c9856eee05e3dc92710267106842dcd44eb624668998b9079272136185cb9"),
+    unrelated: requestFor("0x55f28ca8295e4526361edfc735b3eedb69052051591c52d98fac06b278ef3578"),
+    subject: { chainId, venue: "uniswap_v2", factory: swap.factory, pool: swap.pool, token, quoteToken },
+    bundle: { payload, signature },
+    config: { settings: { enabled: true, presetId, overrides: [], additionalRules: [], locale: "ko" },
+      trust: { env: "staging", profile: "default", keys: [{ role: "scam", keyId: "consumer", publicKeySpkiBase64 }] },
+      limits: { scamTimeoutMs: 2500, scamEvalReserveMs: 200, maxBundleBytes: 100_000,
+        maxResultBytes: 1_000_000, maxCalls: 4, maxTargets: 1, maxRules: 4, maxLogs: 1000,
+        maxPoints: 20_000, maxAlgorithmWorkUnits: 100_000_000 } },
+  };
 }
 
 async function run(command, arguments_, cwd) {
@@ -143,6 +189,7 @@ try {
   const packageInfo = JSON.parse(await readFile(join(installedPath, "package.json"), "utf8"));
   assert.equal(packageInfo.name, "@dambi/core");
   const imports = {};
+  const giwa = await giwaPlanningFixture();
   for (const name of ["@dambi/core", "@dambi/core/adapters", "@dambi/core/decoders"]) {
     const subpath = name === "@dambi/core" ? "." : `.${name.slice("@dambi/core".length)}`;
     const exported = packageInfo.exports[subpath]?.import;
@@ -158,7 +205,7 @@ try {
 
     const nodeFixture = await createConsumerFixture();
     try {
-      await cases.runConsumerCases({ settings: nodeFixture.settings, control: nodeFixture.control, passed: passed("Node") });
+      await cases.runConsumerCases({ settings: nodeFixture.settings, giwa, control: nodeFixture.control, passed: passed("Node") });
       await nodeFixture.control("reset", { policy: "day1" });
       const settingsPath = join(temporary, "node-settings.json");
       const requestPath = join(temporary, "node-request.json");
@@ -202,14 +249,14 @@ try {
       await page.exposeFunction("consumerPassed", passed("Chromium"));
       await page.goto(`${assets.origin}/__consumer.html`);
       await page.waitForFunction(() => window.consumerReady !== undefined);
-      await page.evaluate(async (settings) => {
+      await page.evaluate(async ({ settings, giwa }) => {
         const { runConsumerCases } = await window.consumerReady;
         await runConsumerCases({
-          settings, browser: true,
+          settings, giwa, browser: true,
           control: (action, value) => window.consumerControl(action, value),
           passed: (name) => window.consumerPassed(name),
         });
-      }, fixture.settings);
+      }, { settings: fixture.settings, giwa });
       assert.deepEqual(await page.evaluate(() => window.consumerCspViolations), [],
         "CORS cases must not fail because of the local network CSP");
       const approveRequest = await page.evaluate(async () => (await window.consumerReady).consumerRequests.approve);
