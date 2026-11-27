@@ -47,6 +47,27 @@ fn retained_registry_snapshot_renews_only_on_new_blocks_and_rechecks_at_commit()
     )
     .unwrap();
     let pinned = store.current(NOW).unwrap();
+    // Relabelling the same header hash with a higher height and timestamp is
+    // still a replay, not a fresh finalized block. Rejection must preserve the
+    // original exclusive lease even when the signed body is authentic.
+    let mut relabelled = observation.clone();
+    relabelled.block_number += 1;
+    relabelled.block_timestamp += 1;
+    relabelled.observed_at_ms += 1000;
+    let replay_ticket = store.begin_refresh().unwrap();
+    expect_code(
+        store.prepare_registry_refresh(
+            &replay_ticket,
+            policy.input(),
+            relabelled,
+            NOW + 1000,
+        ),
+        "POLICY_SEQUENCE_REJECTED",
+    );
+    store.cancel_refresh(&replay_ticket).unwrap();
+    assert!(Arc::ptr_eq(&pinned, &store.current(NOW + 1999).unwrap()));
+    expect_code(store.current(NOW + 2000), "POLICY_EXPIRED");
+
     let ticket = store.begin_refresh().unwrap();
     let prepared = store
         .prepare_registry_refresh(&ticket, policy.input(), observation.clone(), NOW)

@@ -664,6 +664,15 @@ fn registry_state_enforces_block_lease_revocation_replacement_and_restart() {
     assert_eq!(reference["decision"], "allow");
     assert_eq!(reference["metadata"]["policyVersion"], "42");
 
+    let mut relabelled = initial.clone();
+    relabelled["registryState"]["blockNumber"] = json!(101);
+    relabelled["registryState"]["blockTimestamp"] = json!(NOW / 1000 + 1);
+    relabelled["registryState"]["observedAtMs"] = json!(NOW + 1000);
+    error_code(
+        registry_refresh(&mut core, &relabelled, NOW + 1000),
+        "POLICY_SEQUENCE_REJECTED",
+    );
+
     let mut repeat = initial.clone();
     repeat["registryState"]["observedAtMs"] = json!(NOW + 1999);
     registry_refresh(&mut core, &repeat, NOW + 1999).unwrap();

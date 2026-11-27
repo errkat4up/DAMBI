@@ -257,6 +257,15 @@ test("Registry WASM refresh enforces fixed block lease, races, revocation and re
     setup.setPolicy({ ...initial, registryState: { ...initial.registryState, ...change } });
     await assert.rejects(core.refreshPolicies(), code(expected));
   }
+  // Match the Native session regression: an authentic body cannot renew its
+  // lease by presenting the same block hash with a newer height and timestamp.
+  setup.setNow(NOW + 1000);
+  setup.setPolicy({ ...initial, registryState: {
+    ...initial.registryState, blockNumber: 101,
+    blockTimestamp: NOW / 1000 + 1, observedAtMs: NOW + 1000,
+  } });
+  await assert.rejects(core.refreshPolicies(), code("POLICY_SEQUENCE_REJECTED"));
+
   setup.setNow(NOW + 1999);
   setup.setPolicy({ ...initial, registryState: { ...initial.registryState, observedAtMs: NOW + 1999 } });
   await core.refreshPolicies();

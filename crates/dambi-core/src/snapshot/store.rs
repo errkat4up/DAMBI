@@ -573,6 +573,15 @@ impl RegistryGate {
         {
             return Err(rejected_state("Registry observation moved backwards"));
         }
+        // A block hash identifies one header, including its height and time.
+        // Relabelling the last acknowledged hash as a higher block must not
+        // turn a repeated RPC response into a new lease. Same-height changes
+        // (including timestamp changes) are checked by the exact comparison below.
+        if next.block_hash == old.block_hash && next.block_number != old.block_number {
+            return Err(rejected_state(
+                "Registry block hash was reused at a different height",
+            ));
+        }
         if next.block_number == old.block_number {
             let mut repeated = next.clone();
             repeated.observed_at_ms = old.observed_at_ms;
