@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Manual isolated acceptance entry point:
@@ -86,7 +87,9 @@ test("real registry and fixed publisher: CAS, receipts, retries, revocation, rot
   t.after(async () => {
     for (const who of [owner, next, outsider]) await rpc("anvil_stopImpersonatingAccount", [who]);
   });
-  const artifact = JSON.parse(await readFile(new URL("../out/PolicyRegistry.sol/PolicyRegistry.json", import.meta.url), "utf8"));
+  const foundryRoot = fileURLToPath(new URL("..", import.meta.url));
+  const artifactPath = resolve(foundryRoot, process.env.FOUNDRY_OUT || "out", "PolicyRegistry.sol", "PolicyRegistry.json");
+  const artifact = JSON.parse(await readFile(artifactPath, "utf8"));
   const constructor = execFileSync("cast", ["abi-encode", "constructor(address)", owner], { encoding: "utf8" }).trim();
   const deployment = await send(owner, undefined, artifact.bytecode.object + constructor.slice(2));
   assert.equal(deployment.status, "0x1");
@@ -178,10 +181,13 @@ test("real registry and fixed publisher: CAS, receipts, retries, revocation, rot
   // execution must nevertheless allow exactly one conditional state change.
   await Promise.all([secondData, thirdData].map((d) => rpc("eth_call", [{ from: owner, to: registry, data: d }, "latest"])));
   const nonce = BigInt(await rpc("eth_getTransactionCount", [owner, "pending"]));
-  const contenders = await Promise.all([
-    send(owner, registry, secondData, { nonce: "0x" + nonce.toString(16) }),
-    send(owner, registry, thirdData, { nonce: "0x" + (nonce + 1n).toString(16) }),
-  ]);
+  // Both candidates already simulated against the same head. Await the first
+  // receipt before submitting the next nonce so automining order is explicit;
+  // the losing candidate must still fail the contract's conditional update.
+  const contenders = [
+    await send(owner, registry, secondData, { nonce: "0x" + nonce.toString(16) }),
+    await send(owner, registry, thirdData, { nonce: "0x" + (nonce + 1n).toString(16) }),
+  ];
   assert.deepEqual(contenders.map((r) => r.status), ["0x1", "0x0"]);
   assert.equal((await client.read(1)).status, 2);
   assert.equal((await client.read(2)).payload, second.signed.payload);
