@@ -307,33 +307,6 @@ test("real registry and fixed publisher: CAS, receipts, retries, revocation, rot
   }
   assert.equal(retrySends, 2, "successful duplicate execution must not send again");
 
-  // A real queued transaction (nonce gap) has no receipt. Explicit retry must
-  // retain its hash without creating another transaction. Drop only this test's
-  // queued transaction afterwards; leave the isolated node's mining untouched.
-  const pendingIntent = await prepare(retryClient);
-  const pendingPath = resolve(retryDirectory, "pending.json");
-  await writeFile(pendingPath, JSON.stringify(pendingIntent));
-  const pendingNonce = BigInt(await rpc("eth_getTransactionCount", [owner, "pending"])) + 1n;
-  const pendingHash = await rpc("eth_sendTransaction", [{
-    from: owner, to: registry, data: tool.publicationData(retryClient, pendingIntent),
-    gas: "0x1c9c380", nonce: "0x" + pendingNonce.toString(16),
-  }]);
-  try {
-    assert.equal(await rpc("eth_getTransactionReceipt", [pendingHash]), null);
-    assert.ok(await rpc("eth_getTransactionByHash", [pendingHash]));
-    // Legacy CLI sidecar must remain readable without discarding its hash.
-    await writeFile(pendingPath + ".txhash", pendingHash + "\n");
-    for (const retryFailed of [false, true]) {
-      await assert.rejects(tool.publishStoredIntent(retryClient, pendingPath, async () => {
-        assert.fail("pending transaction must never be resubmitted");
-      }, { retryFailed, attempts: 1, pollMs: 0 }), /confirmation pending/);
-    }
-    assert.equal(await readFile(pendingPath + ".txhash", "utf8"), pendingHash + "\n");
-    assert.equal(retrySends, 2);
-  } finally {
-    await rpc("anvil_dropTransaction", [pendingHash]);
-  }
-
   // Two genuinely different signed candidates prepared from the same head.
   const second = await prepare();
   const third = await prepare();
@@ -485,6 +458,44 @@ test("real registry and fixed publisher: CAS, receipts, retries, revocation, rot
     assert.deepEqual(await boundaryClient.read(), maximumRecord, `${name}: active state unchanged`);
     assert.deepEqual(await boundaryClient.read(maximum), maximumRecord, `${name}: immutable bytes unchanged`);
     assert.equal(await rawRecord(boundaryAddress, boundaryScope, sequence), before, `${name}: selected record unchanged`);
+  }
+
+  // Keep the nonce-gap regression AFTER every other contract submission.
+  // anvil_dropTransaction may return null while the transaction stays queued;
+  // subsequent acceptance cases must never depend on that cleanup succeeding.
+  // Use the current publisher and a separate scope, leaving mining untouched.
+  const pendingClient = new tool.RegistryClient({ ...config, sender: next, profile: "last-pending" });
+  const pendingIntent = await prepare(pendingClient);
+  const pendingPath = resolve(retryDirectory, "pending.json");
+  await writeFile(pendingPath, JSON.stringify(pendingIntent));
+  const pendingNonce = BigInt(await rpc("eth_getTransactionCount", [next, "pending"])) + 1n;
+  const pendingHash = await rpc("eth_sendTransaction", [{
+    from: next, to: registry, data: tool.publicationData(pendingClient, pendingIntent),
+    gas: "0x1c9c380", nonce: "0x" + pendingNonce.toString(16),
+  }]);
+  let pendingResubmissions = 0;
+  try {
+    assert.equal(await rpc("eth_getTransactionReceipt", [pendingHash]), null);
+    const queued = await rpc("eth_getTransactionByHash", [pendingHash]);
+    assert.ok(queued);
+    assert.equal(queued.blockNumber, null);
+    assert.equal(queued.from.toLowerCase(), next.toLowerCase());
+    assert.equal(BigInt(queued.nonce), pendingNonce);
+    // Legacy CLI sidecar must remain readable without discarding its hash.
+    await writeFile(pendingPath + ".txhash", pendingHash + "\n");
+    for (const retryFailed of [false, true]) {
+      await assert.rejects(tool.publishStoredIntent(pendingClient, pendingPath, async () => {
+        pendingResubmissions++;
+        assert.fail("pending transaction must never be resubmitted");
+      }, { retryFailed, attempts: 1, pollMs: 0 }), /confirmation pending/);
+      assert.equal(pendingResubmissions, 0);
+      assert.equal(await readFile(pendingPath + ".txhash", "utf8"), pendingHash + "\n");
+    }
+    assert.equal(await readFile(pendingPath + ".txhash", "utf8"), pendingHash + "\n");
+    assert.equal(retrySends, 2);
+  } finally {
+    // Target only this test's hash; no later send relies on its removal.
+    await rpc("anvil_dropTransaction", [pendingHash]);
   }
 
   const measurements = {
