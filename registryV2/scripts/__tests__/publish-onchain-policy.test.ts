@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { p256 } from "@noble/curves/nist.js";
 import {
   RegistryClient, registryReference, safeSequence, validateIntent, publishOnchainPolicy, sha256,
-  prepareOnchainPolicy, type RegistryConfig, type Intent,
+  prepareOnchainPolicy, publishStoredIntent, publicationData, abi,
+  type RegistryConfig, type Intent, type Transaction,
 } from "../publish-onchain-policy.js";
 import { signPayload, type BundlePayload } from "../publish-policy-bundle.js";
 
@@ -141,4 +145,209 @@ test("unavailable RPC remains a failure, never revoked or successful", async () 
   await assert.rejects(publishOnchainPolicy(client, await intent(), async () => {
     assert.fail("must not submit when chain is unavailable");
   }), /offline/);
+});
+
+// These tests execute the production RPC, ABI, signature, receipt, finality and
+// CLI journal paths. Only the remote node is scripted; real EVM out-of-gas
+// behavior is covered separately in PolicyRegistry.anvil.test.mjs.
+async function retryFixture() {
+  const original = await intent();
+  const data = publicationData(new RegistryClient(config), original);
+  const failedHash = "0x" + "aa".repeat(32);
+  const successHash = "0x" + "bb".repeat(32);
+  const blockHash = "0x" + "cc".repeat(32);
+  const otherHash = "0x" + "dd".repeat(32);
+  const calls: string[] = [];
+  const state = {
+    mode: "normal", active: false, status: 1, head: 1,
+    submissions: 0, simulations: 0, finalityReads: 0,
+  };
+  const encodeRecord = () => abi("abi-encode", "record(uint256,uint8,bytes32,bytes,bytes,string)", state.active ? [
+    String(state.head), String(state.status), sha256(Buffer.from(original.signed.payload)),
+    "0x" + Buffer.from(original.signed.payload).toString("hex"),
+    "0x" + Buffer.from(original.signed.signature, "base64").toString("hex"), original.signed.key_id,
+  ] : ["0", "0", "0x" + "00".repeat(32), "0x", "0x", ""]);
+  const ownerCall = abi("calldata", "publisher()", []);
+  const transport: typeof fetch = async (_url, init) => {
+    const request = JSON.parse(String(init?.body));
+    const [first] = request.params;
+    calls.push(request.method);
+    let result: unknown;
+    switch (request.method) {
+      case "eth_chainId": result = state.mode === "rpc-chain" ? "0x1" : "0x7a69"; break;
+      case "eth_getCode": result = "0x6000"; break;
+      case "eth_call":
+        if (first.data === ownerCall) {
+          result = abi("abi-encode", "owner(address)", [config.sender]);
+        } else if (first.data === data) {
+          state.simulations++;
+          result = "0x";
+        } else {
+          result = encodeRecord();
+        }
+        break;
+      case "eth_estimateGas": result = "0x100000"; break;
+      case "eth_getTransactionReceipt":
+        if (state.mode === "offline") throw new Error("receipt lookup offline");
+        if (state.mode === "pending") { result = null; break; }
+        result = {
+          transactionHash: state.mode === "receipt-hash" ? otherHash : first,
+          blockHash, blockNumber: "0x10", gasUsed: "0x10000", to: config.registry,
+          status: state.mode === "status" ? "0x2" : first === failedHash ? "0x0" : "0x1",
+        };
+        break;
+      case "eth_getTransactionByHash":
+        result = state.mode === "missing-transaction" ? null : {
+          hash: first, from: state.mode === "sender" ? config.registry : config.sender,
+          to: state.mode === "registry" ? config.sender : config.registry,
+          input: state.mode === "calldata" ? data + "00" : data,
+          value: state.mode === "value" ? "0x1" : "0x0",
+          chainId: state.mode === "transaction-chain" ? "0x1" : "0x7a69",
+          blockNumber: "0x10", blockHash: state.mode === "transaction-block" ? otherHash : blockHash,
+        };
+        break;
+      case "eth_getBlockByNumber":
+        if (first === "finalized" || first === "safe") {
+          assert.equal(first, config.finality);
+          state.finalityReads++;
+          result = state.mode === "no-finality" ? null : {
+            number: state.mode === "unfinalized" ? "0xf" : "0x10", hash: blockHash,
+          };
+        } else {
+          result = { number: first, hash: state.mode === "reorg" ? otherHash : blockHash };
+        }
+        break;
+      default: assert.fail(`unexpected RPC ${request.method}`);
+    }
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }));
+  };
+  const client = new RegistryClient(config, transport);
+  const submit = async (tx: Transaction) => {
+    assert.equal(tx.data, data);
+    assert.equal(tx.chainId, 31337);
+    assert.equal(tx.from, config.sender);
+    assert.equal(tx.to, config.registry);
+    assert.ok(state.simulations > state.submissions, "each send must be freshly simulated");
+    state.submissions++;
+    if (state.submissions === 1) return failedHash;
+    state.active = true;
+    return successHash;
+  };
+  return { original, client, submit, state, calls, failedHash, successHash };
+}
+
+test("CLI journal: failed receipt, explicit retry, successful resume and duplicate preserve original intent and hash history", async (t) => {
+  const f = await retryFixture();
+  const directory = mkdtempSync(join(tmpdir(), "dambi-retry-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const path = join(directory, "intent.json");
+  const originalBytes = JSON.stringify(f.original, null, 2) + "\n";
+  writeFileSync(path, originalBytes);
+  const options = { attempts: 1, pollMs: 0 };
+  await assert.rejects(publishStoredIntent(f.client, path, f.submit, options), /receipt/);
+  assert.deepEqual(JSON.parse(readFileSync(path + ".txhash", "utf8")), {
+    hashes: [f.failedHash], submitting: false,
+  });
+  await assert.rejects(publishStoredIntent(f.client, path, f.submit, options), /receipt/);
+  assert.equal(f.state.submissions, 1, "ordinary publish must not retry failures");
+  // Exercise migration of the sidecar produced by the previous CLI version.
+  writeFileSync(path + ".txhash", f.failedHash + "\n");
+  const result = await publishStoredIntent(f.client, path, f.submit, { ...options, retryFailed: true });
+  assert.equal(result.outcome, "confirmed");
+  assert.equal(result.receipt?.transactionHash, f.successHash);
+  assert.ok(f.state.finalityReads >= 2, "both failed and successful receipts require finality");
+  assert.deepEqual(JSON.parse(readFileSync(path + ".txhash", "utf8")), {
+    hashes: [f.failedHash, f.successHash], submitting: false,
+  });
+  assert.equal(readFileSync(path, "utf8"), originalBytes);
+  for (const retryFailed of [false, true]) {
+    assert.equal((await publishStoredIntent(f.client, path, f.submit, { ...options, retryFailed })).outcome, "confirmed");
+  }
+  assert.equal((await publishOnchainPolicy(f.client, f.original, f.submit, options)).outcome, "reconciled");
+  assert.equal(f.state.submissions, 2);
+  assert.equal(f.state.simulations, 2);
+});
+
+test("explicit failed retry never sends for pending, unavailable, mismatched or noncanonical evidence", async (t) => {
+  for (const mode of [
+    "pending", "offline", "receipt-hash", "status", "missing-transaction", "sender", "registry",
+    "calldata", "value", "transaction-chain", "transaction-block", "rpc-chain", "no-finality", "unfinalized", "reorg",
+  ]) {
+    await t.test(mode, async () => {
+      const f = await retryFixture();
+      const directory = mkdtempSync(join(tmpdir(), "dambi-retry-denied-"));
+      try {
+        const path = join(directory, "intent.json");
+        writeFileSync(path, JSON.stringify(f.original));
+        writeFileSync(path + ".txhash", f.failedHash + "\n");
+        f.state.mode = mode;
+        await assert.rejects(publishStoredIntent(f.client, path, async () => {
+          assert.fail("uncertain or mismatched evidence must not authorize a send");
+        }, { retryFailed: true, attempts: 1, pollMs: 0 }));
+        assert.equal(f.state.simulations, 0);
+        assert.equal(readFileSync(path + ".txhash", "utf8"), f.failedHash + "\n");
+      } finally { rmSync(directory, { recursive: true, force: true }); }
+    });
+  }
+});
+
+test("failed retry reconciles identical active bytes but rejects revoked, superseded and conflicting records", async () => {
+  for (const status of [1, 2, 3]) {
+    const f = await retryFixture();
+    f.state.active = true;
+    f.state.status = status;
+    const operation = publishOnchainPolicy(f.client, f.original, async () => {
+      assert.fail("existing versions must not be resubmitted");
+    }, { transactionHash: f.failedHash, retryFailed: true, attempts: 1, pollMs: 0 });
+    if (status === 1) assert.equal((await operation).outcome, "reconciled");
+    else await assert.rejects(operation, /SUPERSEDED|REVOKED/);
+    assert.equal(f.state.simulations, 0);
+  }
+  const f = await retryFixture();
+  f.state.active = true;
+  f.state.head = 2;
+  await assert.rejects(publishOnchainPolicy(f.client, f.original, f.submit, {
+    transactionHash: f.failedHash, retryFailed: true, attempts: 1, pollMs: 0,
+  }), /SUPERSEDED/);
+  const changed = await intent({ ...payload(), expires_at: now + 3601 });
+  f.state.head = 1;
+  await assert.rejects(publishOnchainPolicy(f.client, changed, f.submit, {
+    transactionHash: f.failedHash, retryFailed: true, attempts: 1, pollMs: 0,
+  }), /conflict/);
+  assert.equal(f.state.submissions, 0);
+});
+
+test("ambiguous wallet outcome is durably blocked, and a retry authorizes at most one new send", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "dambi-retry-unknown-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const f = await retryFixture();
+  const path = join(directory, "intent.json");
+  writeFileSync(path, JSON.stringify(f.original));
+  writeFileSync(path + ".txhash", f.failedHash + "\n");
+  let sends = 0;
+  const options = { retryFailed: true, attempts: 1, pollMs: 0 };
+  await assert.rejects(publishStoredIntent(f.client, path, async () => {
+    sends++;
+    // The marker must already be durable when the wallet is called.
+    assert.deepEqual(JSON.parse(readFileSync(path + ".txhash", "utf8")), {
+      hashes: [f.failedHash], submitting: true,
+    });
+    throw new Error("wallet disconnected after possible acceptance");
+  }, options), /wallet disconnected/);
+  await assert.rejects(publishStoredIntent(f.client, path, async () => {
+    sends++; return f.successHash;
+  }, options), /outcome unknown/);
+  assert.equal(sends, 1);
+
+  const second = join(directory, "second.json");
+  writeFileSync(second, JSON.stringify(f.original));
+  writeFileSync(second + ".txhash", f.failedHash + "\n");
+  // A second failed transaction requires a separate explicit invocation, not
+  // an unbounded failure/resubmit loop inside this one.
+  await assert.rejects(publishStoredIntent(f.client, second, async () => {
+    sends++;
+    return f.failedHash;
+  }, options), /reused a previous hash/);
+  assert.equal(sends, 2);
+  assert.equal(JSON.parse(readFileSync(second + ".txhash", "utf8")).submitting, true);
 });

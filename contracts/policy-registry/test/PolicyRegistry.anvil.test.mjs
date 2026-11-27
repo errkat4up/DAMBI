@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -193,6 +194,120 @@ test("real registry and fixed publisher: CAS, receipts, retries, revocation, rot
   // Contract-level retry also preserves the original immutable record.
   assert.equal((await send(owner, registry, data)).status, "0x1");
   assert.equal((await client.read()).head, 1);
+
+  // Exercise the CLI's actual persistence path with an independent scope:
+  // genuine out-of-gas receipt -> explicit retry -> successful duplicate resume.
+  // No intent regeneration, automining changes or chain reset is involved.
+  const retryDirectory = await mkdtemp(resolve(tmpdir(), "dambi-anvil-retry-"));
+  t.after(() => rm(retryDirectory, { recursive: true, force: true }));
+  const retryConfig = { ...config, profile: "failed-retry" };
+  const retryClient = new tool.RegistryClient(retryConfig);
+  const retryIntent = await prepare(retryClient);
+  const retryPath = resolve(retryDirectory, "intent.json");
+  const retryBytes = JSON.stringify(retryIntent, null, 2) + "\n";
+  await writeFile(retryPath, retryBytes);
+  let retrySends = 0;
+  let failedGas;
+  let failedReceipt;
+  let replacementReceipt;
+  const retrySubmit = async ({ chainId, ...tx }) => {
+    assert.equal(chainId, 31337);
+    assert.equal(tx.data, tool.publicationData(retryClient, retryIntent));
+    retrySends++;
+    if (retrySends === 1) {
+      // Enough for intrinsic calldata gas, deliberately not enough to store a
+      // policy. This is an actual EVM failure, not a rejected RPC submission.
+      const intrinsic = [...Buffer.from(tx.data.slice(2), "hex")]
+        .reduce((gas, byte) => gas + (byte === 0 ? 4n : 16n), 21_000n);
+      failedGas = intrinsic + 1_000n;
+      tx.gas = "0x" + failedGas.toString(16);
+    }
+    return rpc("eth_sendTransaction", [tx]);
+  };
+  const retryOptions = {
+    attempts: 1, pollMs: 0,
+    async onSubmitted(hash) {
+      const included = await receipt(hash);
+      if (retrySends === 1) {
+        failedReceipt = included;
+        assert.equal(included.status, "0x0");
+        assert.equal(BigInt(included.gasUsed), failedGas, "transaction must exhaust its gas");
+      } else {
+        replacementReceipt = included;
+        assert.equal(included.status, "0x1");
+      }
+      await advanceFinalizedThrough(included);
+    },
+  };
+  await assert.rejects(tool.publishStoredIntent(retryClient, retryPath, retrySubmit, retryOptions), /receipt/);
+  assert.equal(retrySends, 1);
+  assert.equal((await retryClient.read()).status, 0);
+  const failedJournal = await readFile(retryPath + ".txhash", "utf8");
+  assert.deepEqual(JSON.parse(failedJournal), { hashes: [failedReceipt.transactionHash], submitting: false });
+  await assert.rejects(tool.publishStoredIntent(retryClient, retryPath, retrySubmit, retryOptions), /receipt/);
+  assert.equal(retrySends, 1, "ordinary publish cannot authorize a failed-transaction retry");
+
+  // Inject only a receipt lookup outage over the real local chain. No amount
+  // of explicit retry permission may turn an unavailable result into a send.
+  const unavailable = new tool.RegistryClient(retryConfig, async (url, init) => {
+    if (JSON.parse(String(init.body)).method === "eth_getTransactionReceipt") throw new Error("isolated receipt outage");
+    return fetch(url, init);
+  });
+  await assert.rejects(tool.publishStoredIntent(unavailable, retryPath, retrySubmit, {
+    ...retryOptions, retryFailed: true,
+  }), /receipt outage/);
+  assert.equal(retrySends, 1);
+  assert.equal(await readFile(retryPath + ".txhash", "utf8"), failedJournal);
+
+  const recovered = await tool.publishStoredIntent(retryClient, retryPath, retrySubmit, {
+    ...retryOptions, retryFailed: true,
+  });
+  assert.equal(recovered.outcome, "confirmed");
+  assert.equal(recovered.receipt.transactionHash, replacementReceipt.transactionHash);
+  assert.notEqual(replacementReceipt.transactionHash, failedReceipt.transactionHash);
+  assert.equal(recovered.receipt.status, "0x1");
+  assert.equal(await readFile(retryPath, "utf8"), retryBytes, "original signed intent must remain byte-identical");
+  assert.deepEqual(JSON.parse(await readFile(retryPath + ".txhash", "utf8")), {
+    hashes: [failedReceipt.transactionHash, replacementReceipt.transactionHash], submitting: false,
+  });
+  const retryRecord = await retryClient.read();
+  assert.equal(retryRecord.head, 1);
+  assert.equal(retryRecord.status, 1);
+  assert.equal(retryRecord.payload, retryIntent.signed.payload);
+  assert.equal(retryRecord.signature, retryIntent.signed.signature);
+  for (const retryFailed of [false, true]) {
+    assert.equal((await tool.publishStoredIntent(retryClient, retryPath, retrySubmit, {
+      ...retryOptions, retryFailed,
+    })).outcome, "confirmed");
+  }
+  assert.equal(retrySends, 2, "successful duplicate execution must not send again");
+
+  // A real queued transaction (nonce gap) has no receipt. Explicit retry must
+  // retain its hash without creating another transaction. Drop only this test's
+  // queued transaction afterwards; leave the isolated node's mining untouched.
+  const pendingIntent = await prepare(retryClient);
+  const pendingPath = resolve(retryDirectory, "pending.json");
+  await writeFile(pendingPath, JSON.stringify(pendingIntent));
+  const pendingNonce = BigInt(await rpc("eth_getTransactionCount", [owner, "pending"])) + 1n;
+  const pendingHash = await rpc("eth_sendTransaction", [{
+    from: owner, to: registry, data: tool.publicationData(retryClient, pendingIntent),
+    gas: "0x1c9c380", nonce: "0x" + pendingNonce.toString(16),
+  }]);
+  try {
+    assert.equal(await rpc("eth_getTransactionReceipt", [pendingHash]), null);
+    assert.ok(await rpc("eth_getTransactionByHash", [pendingHash]));
+    // Legacy CLI sidecar must remain readable without discarding its hash.
+    await writeFile(pendingPath + ".txhash", pendingHash + "\n");
+    for (const retryFailed of [false, true]) {
+      await assert.rejects(tool.publishStoredIntent(retryClient, pendingPath, async () => {
+        assert.fail("pending transaction must never be resubmitted");
+      }, { retryFailed, attempts: 1, pollMs: 0 }), /confirmation pending/);
+    }
+    assert.equal(await readFile(pendingPath + ".txhash", "utf8"), pendingHash + "\n");
+    assert.equal(retrySends, 2);
+  } finally {
+    await rpc("anvil_dropTransaction", [pendingHash]);
+  }
 
   // Two genuinely different signed candidates prepared from the same head.
   const second = await prepare();

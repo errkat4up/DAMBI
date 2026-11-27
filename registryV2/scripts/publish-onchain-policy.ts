@@ -17,18 +17,27 @@
  * CLI (via the repository's TS runner):
  *   publish-onchain-policy.ts prepare config.json intent.json <expiresUnixSec>
  *   publish-onchain-policy.ts publish config.json intent.json wallet-module.mjs
+ *   publish-onchain-policy.ts retry-failed config.json intent.json wallet-module.mjs
  * The wallet module exports submit(tx): Promise<transactionHash>. It is a trusted
  * operator-supplied source interface, not a key selected by a policy response.
- * A hash sidecar is written before waiting for a receipt. Unknown submission
- * outcomes are surfaced; rerun the SAME intent to reconcile or retry safely.
+ * The atomic hash journal retains every submitted hash, including failed ones.
+ * retry-failed permits one new submission only after verifying a matching,
+ * canonical failed receipt at the configured finality. publish never retries a
+ * failed transaction automatically. Neither command resends pending/unknown
+ * transactions. A durable submitting marker blocks automatic recovery when the
+ * wallet outcome or hash persistence is uncertain; do not delete that marker
+ * merely to retry. The original intent is never rewritten or re-signed.
  *
  * Implementation candidate only: execution, QA, independent review, GIWA gas and
  * finality support/delay acceptance remain pending. No measured results included.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
+import {
+  readFileSync, writeFileSync, existsSync, openSync, closeSync,
+  fsyncSync, renameSync, unlinkSync,
+} from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import canonicalize from "canonicalize";
 import { p256 } from "@noble/curves/nist.js";
@@ -280,12 +289,16 @@ function assertActive(record: RecordValue, sequence: number, intent: Intent): vo
   if (record.status !== 1 || record.head !== sequence || !matches(record, intent)) throw new Error("publication conflict");
 }
 
-export async function publishOnchainPolicy(client: RegistryClient, intent: Intent, submit: Submit, options: {
+export interface OnchainPublishOptions {
   transactionHash?: string;
+  /** Explicit permission to retry this resumed hash, never a newly submitted hash. */
+  retryFailed?: boolean;
   onSubmitted?: (hash: string) => Promise<void> | void;
   attempts?: number;
   pollMs?: number;
-} = {}): Promise<{ outcome: "confirmed" | "reconciled"; receipt?: Receipt; blockNumber: string; blockHash: string }> {
+}
+
+export async function publishOnchainPolicy(client: RegistryClient, intent: Intent, submit: Submit, options: OnchainPublishOptions = {}): Promise<{ outcome: "confirmed" | "reconciled"; receipt?: Receipt; blockNumber: string; blockHash: string }> {
   await client.guard();
   const payload = validateIntent(client, intent);
   const sequence = payload.sequence;
@@ -317,17 +330,26 @@ export async function publishOnchainPolicy(client: RegistryClient, intent: Inten
     if (hash && !receipt) {
       const found = await client.rpc<Receipt | null>("eth_getTransactionReceipt", [hash]);
       if (found) {
-        if (found.transactionHash.toLowerCase() !== hash.toLowerCase() || found.status !== "0x1"
+        const retryableFailure = found.status === "0x0" && options.retryFailed === true
+          && hash === options.transactionHash;
+        if (found.transactionHash?.toLowerCase() !== hash.toLowerCase()
+            || (found.status !== "0x1" && !retryableFailure)
             || found.to?.toLowerCase() !== client.config.registry || !HASH.test(found.blockHash)) {
           throw new Error("transaction receipt failed/mismatched");
         }
         quantity(found.blockNumber);
         quantity(found.gasUsed);
-        const transaction = await client.rpc<{ from: string; to: string; input: string; chainId: string } | null>(
-          "eth_getTransactionByHash", [hash],
-        );
-        if (!transaction || transaction.from.toLowerCase() !== client.config.sender
-            || transaction.to.toLowerCase() !== client.config.registry || transaction.input.toLowerCase() !== data.toLowerCase()
+        const transaction = await client.rpc<{
+          hash: string; from: string; to: string; input: string; chainId: string;
+          value: string; blockHash: string; blockNumber: string;
+        } | null>("eth_getTransactionByHash", [hash]);
+        if (!transaction || transaction.hash?.toLowerCase() !== hash.toLowerCase()
+            || transaction.from?.toLowerCase() !== client.config.sender
+            || transaction.to?.toLowerCase() !== client.config.registry
+            || transaction.input?.toLowerCase() !== data.toLowerCase()
+            || transaction.blockHash?.toLowerCase() !== found.blockHash.toLowerCase()
+            || quantity(transaction.blockNumber) !== quantity(found.blockNumber)
+            || quantity(transaction.value) !== 0n
             || quantity(transaction.chainId) !== BigInt(client.chainId)) throw new Error("receipt transaction mismatch");
         receipt = found;
       }
@@ -343,6 +365,21 @@ export async function publishOnchainPolicy(client: RegistryClient, intent: Inten
         if (!inclusion || inclusion.hash.toLowerCase() !== receipt.blockHash.toLowerCase()) throw new Error("receipt reorged");
       }
       const confirmed = await client.read(sequence, block.number);
+      if (receipt?.status === "0x0") {
+        // A failed receipt is not publication success. Verify the CAS state at
+        // finality before considering a new attempt, even if another transaction
+        // has meanwhile installed these exact bytes.
+        if (confirmed.status !== 0) assertActive(confirmed, sequence, intent);
+        else if (confirmed.head !== intent.expectedCurrent) throw new Error("publication conflict");
+        const again = await client.rpc<{ hash: string } | null>("eth_getBlockByNumber", [block.number, false]);
+        if (!again || again.hash !== block.hash) throw new Error("confirmation block changed");
+        // Re-enter the normal path: recheck current authority/state, reconcile
+        // an identical active record, or simulate/estimate and submit once.
+        // No policy bytes change and no new failure is retried automatically.
+        return publishOnchainPolicy(client, intent, submit, {
+          ...options, transactionHash: undefined, retryFailed: false,
+        });
+      }
       if (confirmed.status !== 0) {
         assertActive(confirmed, sequence, intent);
         // Protect the number-pinned read against a reorg during the RPC sequence.
@@ -356,10 +393,83 @@ export async function publishOnchainPolicy(client: RegistryClient, intent: Inten
   throw new Error("confirmation pending: retain transaction hash and reuse the same intent");
 }
 
+interface HashJournal { hashes: string[]; submitting: boolean }
+
+function readHashJournal(path: string): HashJournal {
+  if (!existsSync(path)) return { hashes: [], submitting: false };
+  const raw = readFileSync(path, "utf8").trim();
+  // Backward-compatible resume of the original one-hash CLI sidecar.
+  if (HASH.test(raw)) return { hashes: [raw], submitting: false };
+  const value = JSON.parse(raw) as HashJournal;
+  if (!value || Object.keys(value).sort().join(",") !== "hashes,submitting"
+      || !Array.isArray(value.hashes) || typeof value.submitting !== "boolean"
+      || value.hashes.some((hash) => typeof hash !== "string" || !HASH.test(hash))
+      || new Set(value.hashes.map((hash) => hash.toLowerCase())).size !== value.hashes.length
+      || (value.hashes.length === 0 && !value.submitting)) throw new Error("invalid transaction journal");
+  return value;
+}
+
+function writeHashJournal(path: string, journal: HashJournal): void {
+  // Same-directory rename exposes either the complete old journal or the
+  // complete new one, never a truncated hash/history. Flush before returning.
+  const temporary = path + "." + randomUUID() + ".tmp";
+  try {
+    const fd = openSync(temporary, "wx", 0o600);
+    try {
+      writeFileSync(fd, JSON.stringify(journal) + "\n");
+      fsyncSync(fd);
+    } finally { closeSync(fd); }
+    renameSync(temporary, path);
+    const directory = openSync(dirname(path), "r");
+    try { fsyncSync(directory); } finally { closeSync(directory); }
+  } finally {
+    if (existsSync(temporary)) unlinkSync(temporary);
+  }
+}
+
+/** Shared CLI persistence path, also exercised with isolated test wallets.
+ * A stale lock after process death fails closed; it is not automatically stolen.
+ * A submitting marker survives wallet errors and crashes, including the window
+ * between network acceptance and learning/persisting the returned hash.
+ */
+export async function publishStoredIntent(
+  client: RegistryClient, intentPath: string, submit: Submit,
+  options: Omit<OnchainPublishOptions, "transactionHash"> = {},
+): ReturnType<typeof publishOnchainPolicy> {
+  const hashPath = resolve(intentPath) + ".txhash";
+  const lockPath = hashPath + ".lock";
+  const lock = openSync(lockPath, "wx", 0o600);
+  try {
+    const intent = JSON.parse(readFileSync(intentPath, "utf8")) as Intent;
+    const journal = readHashJournal(hashPath);
+    if (journal.submitting) throw new Error("submission outcome unknown: transaction journal requires reconciliation; no resend");
+    return await publishOnchainPolicy(client, intent, async (tx) => {
+      journal.submitting = true;
+      writeHashJournal(hashPath, journal);
+      return submit(tx);
+    }, {
+      ...options,
+      transactionHash: journal.hashes.at(-1),
+      async onSubmitted(hash) {
+        if (journal.hashes.some((old) => old.toLowerCase() === hash.toLowerCase())) {
+          throw new Error("submission outcome unknown: wallet reused a previous hash");
+        }
+        journal.hashes.push(hash);
+        journal.submitting = false;
+        writeHashJournal(hashPath, journal);
+        await options.onSubmitted?.(hash);
+      },
+    });
+  } finally {
+    closeSync(lock);
+    unlinkSync(lockPath);
+  }
+}
+
 async function main(argv: string[]): Promise<void> {
   const [command, configPath, intentPath, extra] = argv;
-  if (argv.length !== 4 || !["prepare", "publish"].includes(command ?? "")) {
-    throw new Error("usage: prepare config intent expiresUnixSec | publish config intent walletModule");
+  if (argv.length !== 4 || !["prepare", "publish", "retry-failed"].includes(command ?? "")) {
+    throw new Error("usage: prepare config intent expiresUnixSec | publish config intent walletModule | retry-failed config intent walletModule");
   }
   const client = new RegistryClient(JSON.parse(readFileSync(configPath!, "utf8")) as RegistryConfig);
   await client.guard();
@@ -374,14 +484,11 @@ async function main(argv: string[]): Promise<void> {
   }
   const intent = JSON.parse(readFileSync(intentPath!, "utf8")) as Intent;
   validateIntent(client, intent);
-  const hashPath = intentPath + ".txhash";
-  const transactionHash = existsSync(hashPath) ? readFileSync(hashPath, "utf8").trim() : undefined;
   // Load the trusted signing integration only after checking the actual chain.
   const wallet = await import(pathToFileURL(resolve(extra!)).href) as { submit: Submit };
   if (typeof wallet.submit !== "function") throw new Error("wallet module must export submit");
-  const result = await publishOnchainPolicy(client, intent, wallet.submit, {
-    transactionHash,
-    onSubmitted(hash) { writeFileSync(hashPath, hash + "\n", { flag: "wx", mode: 0o600 }); },
+  const result = await publishStoredIntent(client, intentPath!, wallet.submit, {
+    retryFailed: command === "retry-failed",
   });
   console.log(JSON.stringify(result));
 }
