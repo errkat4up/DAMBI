@@ -172,7 +172,7 @@ describe("gate passed: the server is asked", () => {
     expect(sent).not.toContain("dapp.example");
   });
 
-  it("shows only warnings: clear, undetermined, skipped and a failed server open nothing", async () => {
+  it("keeps clear, undetermined, skipped and failed server checks silent", async () => {
     const quiet: PoolCheck[] = [
       answer({ backdoor: clear }),
       answer({ backdoor: { result: "undetermined", reason: "control_also_succeeds" } }),
@@ -184,13 +184,69 @@ describe("gate passed: the server is asked", () => {
       const s = setup({ checkPool: server(() => check).checkPool, sdk: "off" });
       expect(await run(message(), [swap(TOKEN)], s.deps), JSON.stringify(check)).toEqual({});
     }
-    const others: ScamDisplay[] = [report("quiet"), report("insufficient"), report("not_applicable"), report("disabled"),
-      { version: 1, kind: "unavailable", reason: "timeout", holding: "unknown" }];
+  });
+
+  it("keeps quiet, disabled, unconfigured, unsupported and aborted SDK outcomes silent", async () => {
+    const others: ScamDisplay[] = [report("quiet"), report("not_applicable"), report("disabled"), report("not_configured"),
+      { version: 1, kind: "unavailable", reason: "unsupported_request", holding: "unknown" },
+      { version: 1, kind: "unavailable", reason: "initializing", holding: "unknown" },
+      { version: 1, kind: "unavailable", reason: "aborted", holding: "unknown" }];
     for (const sdk of others) {
       const s = setup({ checkPool: server(() => answer({ backdoor: clear })).checkPool, sdk });
       expect(await run(message(), [swap(TOKEN)], s.deps), JSON.stringify(sdk)).toEqual({});
       expect(s.sdkStarts).toHaveLength(1);
     }
+  });
+
+  it("forwards insufficient SDK reports unchanged to the pre-sign display path", async () => {
+    // The SDK uses bundle_invalid for expiry as well as other validation
+    // failures. This boundary must preserve that reason, not diagnose expiry.
+    const sdk: ScamDisplay = { version: 1, kind: "report", holding: "unknown", report: {
+      status: "insufficient", reasons: ["bundle_invalid"], targets: [],
+      scopeNotice: "patterns_only_no_sellability_guarantee",
+    } };
+    for (const backdoor of [false, true]) {
+      const srv = server(() => answer({ backdoor: clear }));
+      const s = setup({ sdk, backdoor, checkPool: srv.checkPool,
+        window: { enabled: true, presetId: "window-sensitive" } });
+      const result = await run(message(), [swap(TOKEN)], s.deps);
+      expect(result).toEqual({ scam: sdk });
+      expect(result.scam).toBe(sdk);
+      expect(s.sdkStarts).toHaveLength(1);
+      expect(s.timings[0].sdk).toEqual({ ms: expect.any(Number), outcome: "insufficient" });
+      expect(srv.requests).toEqual(backdoor ? [{ token: TOKEN, backdoor: true, rules: [] }] : []);
+      expect(s.windowStatuses).toEqual([]);
+    }
+  });
+
+  it.each(["timeout", "initialization_failed", "invalid_configuration", "invalid_request", "host_error", "report_missing"] as const)(
+    "forwards explicit SDK failure %s rather than retaining it only in diagnostics",
+    async (reason) => {
+      const sdk: ScamDisplay = { version: 1, kind: "unavailable", reason, holding: "unknown" };
+      const s = setup({ sdk, backdoor: false });
+      const result = await run(message(), [swap(TOKEN)], s.deps);
+      expect(result).toEqual({ scam: sdk });
+      expect(result.scam).toBe(sdk);
+      expect(s.timings[0].sdk).toEqual({ ms: expect.any(Number), outcome: `unavailable:${reason}` });
+    },
+  );
+
+  it("retains the optional backdoor warning alongside an insufficient SDK report", async () => {
+    const sdk = report("insufficient");
+    const srv = server();
+    const s = setup({ sdk, checkPool: srv.checkPool });
+    expect(await run(message(), [swap(TOKEN)], s.deps)).toEqual({
+      scam: sdk,
+      backdoor: { version: 1, kind: "pool_backdoor", chainId: 1, token: TOKEN, pool: PAIR, deployer: DEPLOYER },
+    });
+    expect(srv.requests).toEqual([{ token: TOKEN, backdoor: true, rules: [] }]);
+  });
+
+  it("does not synthesize a failure display when configuration disappears before the SDK check", async () => {
+    const s = setup({ sdk: report("insufficient"), backdoor: false });
+    s.deps.beginSdk = () => ({ promise: Promise.resolve(undefined), cancel: vi.fn() });
+    expect(await run(message(), [swap(TOKEN)], s.deps)).toEqual({});
+    expect(s.timings[0].sdk?.outcome).toBe("not_configured");
   });
 
   it("a server that throws is a failed check, not a failed request", async () => {
@@ -227,6 +283,56 @@ describe("gate passed: the server is asked", () => {
     expect(c.calls).toEqual([]);
     expect(srv.requests).toEqual([]);
     expect(s.timings[0]).toMatchObject({ chainId: 91342, gate: { lookup: "none", eligible: [TOKEN] } });
+  });
+});
+
+describe("SDK display lifecycle boundaries", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("does no checks or display work for observation-only requests", async () => {
+    const c = chain(), srv = server();
+    const s = setup({ rpc: c.rpc, checkPool: srv.checkPool, sdk: report("insufficient") });
+    const observed = message();
+    observed.data.bypassed = true;
+    expect(await run(observed, [swap(TOKEN)], s.deps)).toEqual({});
+    expect(c.calls).toEqual([]);
+    expect(srv.requests).toEqual([]);
+    expect(s.sdkStarts).toEqual([]);
+    expect(s.timings).toEqual([]);
+  });
+
+  it.each(["insufficient", "timeout"] as const)("discards a late %s after cancellation", async (outcome) => {
+    vi.useFakeTimers();
+    const sdk: ScamDisplay = outcome === "insufficient" ? report("insufficient")
+      : { version: 1, kind: "unavailable", reason: "timeout", holding: "unknown" };
+    const s = setup({ sdk, sdkDelayMs: 100, backdoor: false });
+    const handle = beginScamChecks(message(), s.deps);
+    handle.offer([swap(TOKEN)]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.sdkStarts).toHaveLength(1);
+    handle.cancel();
+    expect(await handle.promise).toEqual({});
+    expect(s.cancelSdk).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(await handle.promise).toEqual({});
+    expect(s.timings).toEqual([]);
+  });
+
+  it("does not promote a session-replacement abort into a confirmation", async () => {
+    const s = setup({ backdoor: false, sdk: {
+      version: 1, kind: "unavailable", reason: "aborted", holding: "unknown",
+    } });
+    expect(await run(message(), [swap(TOKEN)], s.deps)).toEqual({});
+    expect(s.timings[0].sdk?.outcome).toBe("unavailable:aborted");
+  });
+
+  it("keeps insufficient reports behind the existing target and holding gates", async () => {
+    const c = chain({ held: { [TOKEN]: 1n } }), srv = server();
+    const s = setup({ rpc: c.rpc, checkPool: srv.checkPool, sdk: report("insufficient") });
+    expect(await run(message(), [], s.deps)).toEqual({});
+    expect(await run(message(), [swap(TOKEN)], s.deps)).toEqual({});
+    expect(s.sdkStarts).toEqual([]);
+    expect(srv.requests).toEqual([]);
   });
 });
 

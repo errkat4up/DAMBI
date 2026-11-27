@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ScamReport, TargetReport } from "@dambi/core";
-import { SCAM_SCOPE_NOTICE } from "@lib/scam-display";
+import { SCAM_SCOPE_NOTICE, type ScamDisplay } from "@lib/scam-display";
 import {
   readStoredScamDisplay,
   renderScamCard,
@@ -55,6 +55,62 @@ describe("Scam confirmation card", () => {
     expect(card.textContent).toContain(SCAM_SCOPE_NOTICE);
     expect(card.textContent).toContain("보유 여부: 미확인");
     expect(card.textContent).toContain("기준 블록·시간이 없습니다");
+  });
+
+  it("preserves the SDK insufficient bundle reason through session storage and rendering", () => {
+    // Expired bundles can produce bundle_invalid; the UI must not claim that
+    // this common SDK validation reason proves expiry, or invent checked scope.
+    const display: ScamDisplay = { version: 1, kind: "report", holding: "unknown",
+      report: { ...report("insufficient"), reasons: ["bundle_invalid"] } };
+    const stored = JSON.parse(JSON.stringify({ requestId: "expired-bundle", expiresAtMs: NOW + 60_000, display }));
+    const restored = readStoredScamDisplay(stored, "expired-bundle", NOW);
+    expect(restored).toEqual(display);
+    const card = renderScamCard(restored);
+    expect(card.querySelector(".scam-status")?.textContent).toBe("검사 불충분");
+    expect(card.textContent).toContain("검사 규칙 번들 검증 실패 (bundle_invalid)");
+    expect(card.textContent).not.toContain("만료");
+    expect(card.querySelector(".scam-scope")?.textContent).toBe(SCAM_SCOPE_NOTICE);
+    expect(card.textContent).toContain("보고된 검사 대상·규칙·기준 블록·시간이 없습니다.");
+    expect(card.querySelectorAll(".scam-target")).toHaveLength(0);
+    expect(card.textContent).not.toContain("활성화된 검사 항목에서 경고 조건이 발견되지 않았습니다.");
+  });
+
+  it.each([
+    ["timeout", "검사 시간 초과"],
+    ["initialization_failed", "검사 초기화 실패"],
+    ["host_error", "확장 프로그램에서 검사 정보를 읽지 못했습니다"],
+  ] as const)("displays %s with its original reason and scope, not as a quiet SDK verdict", (reason, copy) => {
+    const display: ScamDisplay = { version: 1, kind: "unavailable", reason, holding: "unknown" };
+    const restored = readStoredScamDisplay({ requestId: "failed-check", expiresAtMs: NOW + 60_000, display }, "failed-check", NOW);
+    expect(restored).toEqual(display);
+    const card = renderScamCard(restored);
+    expect(card.querySelector(".scam-status")?.textContent).toBe("검사 정보 확인 불가");
+    expect(card.textContent).toContain(`${copy} (${reason})`);
+    expect(card.textContent).toContain("SDK의 검사 판정이 아닙니다");
+    expect(card.textContent).toContain("기준 블록·시간: 정보 없음");
+    expect(card.querySelector(".scam-scope")?.textContent).toBe(SCAM_SCOPE_NOTICE);
+    expect(card.textContent).not.toContain("설정한 패턴 미감지");
+  });
+
+  it("retains reported coverage and reasons for an insufficient target", () => {
+    const sample = target();
+    const display: ScamDisplay = { version: 1, kind: "report", holding: "unknown", report: {
+      ...report("insufficient"), reasons: ["data_missing"], targets: [{
+        ...sample, status: "insufficient", reasons: ["data_missing"],
+        rules: [{ ...sample.rules[0]!, state: "incomplete" }],
+      }],
+    } };
+    const restored = readStoredScamDisplay({ requestId: "partial", expiresAtMs: NOW + 60_000, display }, "partial", NOW);
+    expect(restored).toEqual(display);
+    const card = renderScamCard(restored);
+    expect(card.querySelector(".scam-status")?.textContent).toBe("검사 불충분");
+    expect(card.textContent).toContain("자료 누락 (data_missing)");
+    expect(card.textContent).toContain("검사 불완전");
+    expect(card.textContent).toContain("누락 구간 1개 · 조회 불가 필드 1개");
+    expect(card.textContent).toContain(new Date(NOW - 60_000).toISOString());
+    expect(card.textContent).toContain(new Date(NOW).toISOString());
+    expect(card.textContent).toContain("기준 블록: 123");
+    expect(card.textContent).toContain(SCAM_SCOPE_NOTICE);
   });
 
   it("discloses stub mode, actual observations, coverage gaps, initial state and reference", () => {

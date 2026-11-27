@@ -19,10 +19,11 @@
  * passes, each check gets its own deadline counted from the moment the gate
  * finished — the gate's time is not taken out of either check's budget.
  *
- * A confirmation window is only ever opened for a warning: a flagged pool, a
- * window rule that fired, or an SDK report whose status is `warn`. Every other
- * outcome — including a server that is down, slow or rate-limiting — stays
- * silent.
+ * The existing pre-sign confirmation path receives flagged pools, fired window
+ * rules, SDK warnings, and configured SDK checks that are insufficient or failed.
+ * SDK reasons and scope are passed through unchanged, not converted to policy
+ * denial. Quiet, disabled, unconfigured, unsupported and cancelled SDK outcomes
+ * stay silent. Server failures retain their existing silent routing.
  *
  * What goes where: the server is sent the token address and the rule values.
  * The holding lookup (`balanceOf(user)`, under the gate's own 1 s limit) carries
@@ -60,7 +61,7 @@ import { readWindowSettings, recordWindowStatus } from "./window-settings";
 export const GATE_TIMEOUT_MS = 1_000;
 
 export interface ScamCheckResults {
-  /** SDK scam report — present only when its status is `warn`. */
+  /** SDK warning, insufficient report, or explicit check failure for pre-sign display. */
   readonly scam?: ScamDisplay;
   /** Present only for a flagged pool. */
   readonly backdoor?: BackdoorDisplay;
@@ -201,9 +202,28 @@ export async function notHeldTokens(
   return { eligible: tokens.filter((token) => { const b = balances.get(token); return !(typeof b === "bigint" && b > 0n); }), lookup };
 }
 
-/** Only a warning is ever shown. */
-function warning(display: ScamDisplay | undefined): ScamDisplay | undefined {
-  return display?.kind === "report" && display.report.status === "warn" ? display : undefined;
+/** Select displayable SDK outcomes, without reinterpreting the SDK's verdict.
+ * In particular, bundle_invalid is not proof of expiry. Cancellation (including
+ * session replacement) is not a failed check to publish to a new confirmation.
+ */
+function sdkConfirmation(display: ScamDisplay | undefined): ScamDisplay | undefined {
+  if (!display) return undefined;
+  if (display.kind === "report") {
+    return display.report.status === "warn" || display.report.status === "insufficient" ? display : undefined;
+  }
+  // Explicit failures only: do not turn preparation, unsupported requests, or
+  // future host states into a prompt by default.
+  switch (display.reason) {
+    case "timeout":
+    case "initialization_failed":
+    case "invalid_configuration":
+    case "invalid_request":
+    case "host_error":
+    case "report_missing":
+      return display;
+    default:
+      return undefined;
+  }
 }
 function sdkOutcome(display: ScamDisplay | undefined): string {
   if (!display) return "not_configured";
@@ -263,7 +283,8 @@ export function beginScamChecks(message: Message, deps: ScamChecksDeps = default
 
   async function run(actions: readonly unknown[]): Promise<void> {
     const data = message.data;
-    if (data.type !== RequestType.TRANSACTION) return finish({});
+    // Observation is never a pre-sign interaction, even if actions are offered.
+    if (data.bypassed || data.type !== RequestType.TRANSACTION) return finish({});
     const chainId = Number(data.chainId);
     const user = data.transaction.from;
     if (!Number.isSafeInteger(chainId) || chainId <= 0 || !isAddress(user)) return finish({});
@@ -354,7 +375,7 @@ export function beginScamChecks(message: Message, deps: ScamChecksDeps = default
         }
       }
     }
-    const scam = warning(sdk?.display);
+    const scam = sdkConfirmation(sdk?.display);
     finish({
       ...(scam ? { scam } : {}),
       ...(backdoor ? { backdoor } : {}),
@@ -367,7 +388,8 @@ export function beginScamChecks(message: Message, deps: ScamChecksDeps = default
     offer(actions) {
       if (started || settled) return;
       started = true;
-      // A failed gate or check never blocks or warns.
+      // Unexpected gate failures keep the existing routing. Explicit SDK
+      // failures are values handled above, not policy denials.
       void run(actions).catch(() => finish({}));
     },
     close() { if (!started) finish({}); },
