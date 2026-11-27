@@ -58,6 +58,14 @@ export interface DambiCore {
    * Facts or expired trust returns deny + fail_closed. Retry with a new plan.
    */
   evaluate(plan: CorePlan, facts: FactBatch, scamFacts?: ScamFactBatch): Verdict;
+  /**
+   * Releases an unevaluated plan immediately without evaluating or emitting hooks.
+   * Requires the original instance-owned object; reuse throws PLAN_CONSUMED.
+   * No clock, trust check or I/O is needed. A still-retained expired plan may be
+   * discarded; a plan already evicted by Native reports PLAN_EXPIRED/INVALID_PLAN.
+   * Does not cancel host-owned provider work; cancel that work separately.
+   */
+  discard(plan: CorePlan): void;
   /** Validates atomically; new settings affect only subsequently issued plans. */
   setScamSettings(settings: ScamSettings): void;
   /** Validates fully before atomic replacement; failure preserves current state. */

@@ -133,6 +133,62 @@ test("analysis probe keeps failed RPC and target mismatches out of success stati
   assert.equal(wrong.raw.calls.length, 0, "A mismatched planned target is rejected before RPC");
 });
 
+test("probe discards its real preparation plan before provider work, including failure and target rejection", async () => {
+  for (const mode of ["success", "cancelled", "mismatch"]) {
+    const f = localRun({ SCAM_HISTORY_CACHE: "1", SCAM_PREPARE_TIMEOUT_MS: "60000",
+      SCAM_REPEATS: "1", ...(mode === "mismatch" ? { SCAM_POOL: `0x${"55".repeat(20)}` } : {}) });
+    let discarded = 0, prepared = 0, evaluated = 0, published = 0;
+    const result = await runAnalysisProbe(f.config, { now: () => NOW,
+      async createCore(config) {
+        const core = await createCore({ ...config, limits: { ...config.limits, maxPendingPlans: 1 },
+          hooks: { onVerdict() { published++; } } });
+        return {
+          plan: (...args) => core.plan(...args),
+          discard(plan) {
+            core.discard(plan);
+            discarded++;
+            assert.throws(() => core.evaluate(plan, { planId: plan.planId, results: {} }),
+              (error) => error.code === "PLAN_CONSUMED");
+          },
+          evaluate(...args) { evaluated++; return core.evaluate(...args); },
+          check: (...args) => core.check(...args),
+          dispose: () => core.dispose(),
+        };
+      },
+      createProvider(options) {
+        const provider = createScamFactProvider({ ...options, rpc: { ...options.rpc,
+          fetch: f.raw.rpc.fetch, clock: f.raw.rpc.clock } });
+        return {
+          fetch: (...args) => provider.fetch(...args),
+          async prepare(...args) {
+            prepared++;
+            assert.equal(discarded, 1);
+            assert.equal(published, 0, "preparation cannot publish a synthetic verdict");
+            if (mode === "cancelled") {
+              const controller = new AbortController();
+              controller.abort();
+              return provider.prepare(args[0], { ...args[1], signal: controller.signal });
+            }
+            return provider.prepare(...args);
+          },
+        };
+      },
+    });
+    assert.equal(discarded, 1);
+    assert.equal(evaluated, 0);
+    assert.equal(prepared, mode === "mismatch" ? 0 : 1);
+    if (mode === "success") {
+      assert.equal(result.summary.success, 1, "fresh check fits the immediately returned single slot");
+      assert.equal(published, 1);
+    } else {
+      assert.equal(result.checkSkipped, "preparation_failed");
+      assert.equal(result.summary.attempts, 0);
+      assert.equal(published, 0);
+      assert.equal(f.raw.calls.length, 0);
+    }
+  }
+});
+
 test("analysis probe measures preparation separately and reuses raw history without skipping real checks", async () => {
   const f = localRun({ SCAM_HISTORY_CACHE: "1", SCAM_PREPARE_TIMEOUT_MS: "60000" });
   const result = await f.run();

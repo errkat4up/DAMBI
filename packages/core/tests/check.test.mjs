@@ -349,6 +349,38 @@ test("Fact timeout, abort and disposal ignore late responses without cancelling 
   assert.equal(hasDiagnostic(expired, "audit_metadata_unavailable"), false);
 });
 
+test("check failure cleanup still evaluates once and returns its only slot without public discard", options, async (t) => {
+  const emitted = [];
+  const setup = harness({ policy: signed([balanceEntry(true)]),
+    limits: { maxPendingPlans: 1, factTimeoutMs: 20 },
+    hooks: { onVerdict: (verdict) => { emitted.push(verdict); } } });
+  const core = await open(t, setup);
+  // Manual cleanup must not replace check's metadata-preserving failed evaluation.
+  core.discard = () => { assert.fail("check must not call public discard"); };
+  for (const mode of ["fact_fetch_failed", "timeout", "aborted", "invalid_fact"]) {
+    const controller = new AbortController();
+    const started = deferred();
+    setup.setFacts(() => {
+      started.resolve();
+      if (mode === "fact_fetch_failed") throw new Error("offline failure");
+      if (mode === "invalid_fact") return Promise.resolve({ planId: "bad", results: { invalid: 1n } });
+      return new Promise(() => {});
+    });
+    const pending = core.check(request(), { signal: controller.signal });
+    await started.promise;
+    if (mode === "aborted") controller.abort();
+    const verdict = await pending;
+    failClosed(verdict, mode);
+    assert.equal(verdict.metadata.status, "available");
+    assert.equal(verdict.metadata.policyVersion, "42");
+    assert.deepEqual(emitted.at(-1), verdict);
+    // Same frozen clock, no TTL advance: a subsequent plan proves Native cleanup.
+    const next = await core.plan(request("approve", 7n));
+    assert.equal(core.evaluate(next, { planId: next.planId, results: {} }).source, "evaluated");
+  }
+  assert.equal(emitted.length, 8, "exactly one notification per failed check and direct evaluation");
+});
+
 test("cache preserves original provenance and separates fresh entries by chain and resolved parameters", options, async (t) => {
   const setup = harness({ policy: signed([balanceEntry(true)]), limits: { maxFactAgeMs: 100 } });
   const core = await open(t, setup);

@@ -773,6 +773,90 @@ test("selected pools distinguish unknown context and route misses from malformed
   }
 });
 
+test("discard releases a slot immediately without I/O, clock reads or hooks", async (t) => {
+  const setup = harness();
+  setup.config.limits.maxPendingPlans = 1;
+  const events = [];
+  let clockFails = false;
+  setup.config.clock = { now() { if (clockFails) throw new Error("clock unavailable"); return NOW; } };
+  setup.config.hooks = {
+    onPending: () => { events.push("pending"); },
+    onVerdict: () => { events.push("verdict"); },
+    onAwaitingUser: () => { events.push("awaiting"); },
+    onDiagnostic: () => { events.push("diagnostic"); },
+  };
+  const core = await createCore(setup.config);
+  const other = await createCore(harness().config);
+  t.after(() => { core.dispose(); other.dispose(); });
+  const plan = await core.plan(request(BigInt(MAX_U256)));
+  await assert.rejects(core.plan(request()), code("LIMIT_EXCEEDED"));
+  for (const forged of [null, plan.planId, { ...plan }, new Proxy(plan, {})]) {
+    assert.throws(() => core.discard(forged), code("INVALID_PLAN"));
+  }
+  assert.throws(() => other.discard(plan), code("INVALID_PLAN"));
+  await assert.rejects(core.plan(request()), code("LIMIT_EXCEEDED"));
+  clockFails = true;
+  assert.equal(core.discard(plan), undefined);
+  assert.throws(() => core.discard(plan), code("PLAN_CONSUMED"));
+  assert.throws(() => core.evaluate(plan, emptyFacts(plan)), code("PLAN_CONSUMED"));
+  clockFails = false;
+  const next = await core.plan(request());
+  assert.notEqual(next.planId, plan.planId);
+  assert.deepEqual(events, []);
+  core.discard(next);
+  const disposed = await core.plan(request());
+  core.dispose();
+  assert.throws(() => core.discard(disposed), code("DISPOSED"));
+  assert.deepEqual(events, []);
+});
+
+test("discard releases a retained TTL-expired handle and clock reentry cannot evaluate a discarded plan", async (t) => {
+  const setup = harness();
+  setup.config.limits.maxPendingPlans = 1;
+  const core = await createCore(setup.config);
+  t.after(() => core.dispose());
+  const expired = await core.plan(request());
+  setup.setNow(expired.expiresAt);
+  assert.throws(() => core.evaluate(expired, emptyFacts(expired)), code("PLAN_EXPIRED"));
+  core.discard(expired);
+  const next = await core.plan(request());
+  core.discard(next);
+
+  let reenter;
+  const reentrantSetup = harness();
+  reentrantSetup.config.clock = { now() { const callback = reenter; reenter = undefined; callback?.(); return NOW; } };
+  const reentrant = await createCore(reentrantSetup.config);
+  t.after(() => reentrant.dispose());
+  const plan = await reentrant.plan(request());
+  reenter = () => reentrant.discard(plan);
+  assert.throws(() => reentrant.evaluate(plan, emptyFacts(plan)), code("PLAN_CONSUMED"));
+});
+
+test("WASM discard enforces native ownership and consumption without the TS handle guard", async () => {
+  const { loadWasm } = await import("../dist/runtime/wasm-loader.js");
+  const { WasmCore } = await loadWasm();
+  const config = localConfig();
+  config.limits.maxPendingPlans = 1;
+  const first = new WasmCore(JSON.stringify(config), JSON.stringify(initialPolicy), NOW);
+  const other = new WasmCore(JSON.stringify(config), JSON.stringify(initialPolicy), NOW);
+  const result = (raw) => JSON.parse(raw);
+  try {
+    const planned = result(first.plan(JSON.stringify(request()), NOW));
+    assert.equal(planned.ok, true);
+    const plan = planned.data;
+    assert.equal(result(first.plan(JSON.stringify(request()), NOW)).error.code, "LIMIT_EXCEEDED");
+    assert.equal(result(other.discard(plan.planId)).error.code, "INVALID_PLAN");
+    assert.deepEqual(result(first.discard(plan.planId)), { ok: true, data: null });
+    assert.equal(result(first.discard(plan.planId)).error.code, "PLAN_CONSUMED");
+    assert.equal(result(first.evaluate(plan.planId, JSON.stringify(emptyFacts(plan)), NOW)).error.code, "PLAN_CONSUMED");
+    assert.equal(result(first.plan(JSON.stringify(request()), NOW)).ok, true);
+    first.dispose();
+    assert.equal(result(first.discard(plan.planId)).error.code, "DISPOSED");
+  } finally {
+    first.free(); other.dispose(); other.free();
+  }
+});
+
 test("handles bind immutable requests to one instance and are consumed once", async (t) => {
   const setup = harness();
   const core = await createCore(setup.config);

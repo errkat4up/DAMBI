@@ -5,7 +5,7 @@ responses; Core decodes requests, plans Fact calls and returns allow/warn/deny.
 
 ## Status: 0.1.0
 
-First runtime release. `createCore`, `check`, `plan`, `evaluate`,
+First runtime release. `createCore`, `check`, `plan`, `evaluate`, `discard`,
 `refreshPolicies`, `refreshScam` and `dispose` run on this package's Rust/WASM runtime.
 `check()` coordinates planning, Fact fetching, bounded in-memory cache and
 evaluation. A Registry decoder snapshot ships as `@dambi/core/decoders`, and
@@ -678,12 +678,22 @@ need verification for its chosen origin.
 ## Public contract and migration
 
 - Use `await createCore(config, options?)`. The instance exposes `plan`, `evaluate`,
-  `check`, `refreshPolicies` and idempotent `dispose`.
+  `discard`, `check`, `refreshPolicies`, `refreshScam` and idempotent `dispose`.
 - `CoreConfig.ports` contains `policy` and `fact` only. `clock` moves to config.
   `DecoderSource` is removed; use a fixed `decoderSnapshot` plus local `trust`.
 - `plan(request)` issues a read-only `CorePlan`. `evaluate(plan, batch)` consumes it
   once, even if Fact validation fails. Copied/serialized or foreign handles are
   invalid. Core retains authoritative inputs; TypeScript branding is not security.
+- `discard(plan): void` releases an abandoned manual/preparation plan immediately,
+  without Facts, evaluation, cache insertion, I/O or hooks. Use the original object
+  on its issuing instance. A discarded or evaluated handle reports `PLAN_CONSUMED`;
+  foreign/copied handles report `INVALID_PLAN`, and disposed instances report
+  `DISPOSED`. Cleanup needs no clock or usable policy: a retained TTL-expired plan
+  can be discarded, but a Native-evicted plan reports `PLAN_EXPIRED` (or
+  `INVALID_PLAN` after bounded tombstone eviction). It is not an idempotent API.
+  Cancel host-owned provider work separately with its AbortSignal. `check()` keeps
+  its existing failed-evaluation path, pinned metadata and verdict notifications;
+  it does not substitute discard for a failed check.
 - `PolicySet` and `FactMap` are removed. `FactBatch` carries `planId` and results
   keyed by exact, plan-issued `callId` values. IDs are unique across all children
   of a multicall; do not construct them from manifest/spec names.

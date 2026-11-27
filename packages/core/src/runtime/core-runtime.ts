@@ -340,14 +340,31 @@ class CoreRuntime implements DambiCore {
     return handle;
   }
 
-  evaluate(plan: CorePlan, facts: FactBatch, scamFacts?: ScamFactBatch): Verdict {
+  #ownedHandle(plan: CorePlan): HandleState {
     this.#live();
     const handle = typeof plan === "object" && plan !== null ? this.#handles.get(plan) : undefined;
     if (!handle) throw new CoreError("INVALID_PLAN", "This instance did not issue that plan object.");
     if (handle.status === "consumed") throw new CoreError("PLAN_CONSUMED", "The plan has already been consumed.");
+    return handle;
+  }
+
+  discard(plan: CorePlan): void {
+    const handle = this.#ownedHandle(plan);
+    // A WASM clock callback cannot acquire a second mutable session borrow.
+    // Leave the handle intact so cleanup can be retried after evaluation returns.
+    if (this.#evaluationDepth !== 0) {
+      throw new CoreError("ENGINE_ERROR", "Cannot discard during native evaluation.");
+    }
+    invoke<unknown>(() => this.#native.discard(handle.planId));
+    handle.status = "consumed";
+  }
+
+  evaluate(plan: CorePlan, facts: FactBatch, scamFacts?: ScamFactBatch): Verdict {
+    const handle = this.#ownedHandle(plan);
     if (handle.status === "expired") throw new CoreError("PLAN_EXPIRED", "The plan TTL has expired.");
     const now = this.#config.now();
-    this.#live();
+    // The host clock may have discarded or evaluated this plan reentrantly.
+    this.#ownedHandle(plan);
     if (now >= handle.expiresAt) {
       handle.status = "expired";
       throw new CoreError("PLAN_EXPIRED", "The plan TTL has expired.");

@@ -198,10 +198,9 @@ export function createScamHost(dependencies: HostDependencies) {
       try {
         const plan = await runtime.core.plan(copyJson(request), { signal: controller.signal });
         const calls = plan.scamCalls ?? [];
-        // Core has no release-plan API. Consume this preparation-only handle with
-        // missing Facts and discard its verdict; it never authorizes a signature.
-        // Consume before a potentially long prepare, so it cannot hold a slot/TTL.
-        runtime.core.evaluate(plan, { planId: plan.planId, results: {} });
+        // Release before potentially long preparation, even if cancellation
+        // happened while awaiting plan(). No verdict or notification is produced.
+        runtime.core.discard(plan);
         if (calls.length && !controller.signal.aborted) {
           await runtime.provider.prepare(calls, { planId: plan.planId, signal: controller.signal, timeoutMs: PREPARE_TIMEOUT_MS });
         }

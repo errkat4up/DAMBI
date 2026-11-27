@@ -361,6 +361,14 @@ async function consume(): Promise<void> {
   const batch: FactBatch = await fact.fetch(plan.calls, { ...options, planId: plan.planId });
   const verdict: Verdict = core.evaluate(plan, batch);
   audit(verdict);
+  const abandoned: CorePlan = await core.plan(transaction, options);
+  const discarded: void = core.discard(abandoned);
+  void discarded;
+  // @ts-expect-error Cleanup requires an instance-issued handle, not its string ID.
+  core.discard(abandoned.planId);
+  // @ts-expect-error Cleanup returns no verdict.
+  const discardVerdict: Verdict = core.discard(abandoned);
+  void discardVerdict;
   audit(await core.check(transaction, options));
   audit(await core.check(unsupported, options));
   await core.refreshPolicies(options);

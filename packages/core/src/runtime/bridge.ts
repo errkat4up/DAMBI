@@ -6,6 +6,7 @@ import type { PlannedScamCall } from "../types/scam.js";
 /** Internal generated-WASM boundary; never exposed as a host injection option. */
 export interface NativeCore {
   plan(requestJson: string, nowMs: number): string;
+  discard(planId: string): string;
   evaluate(planId: string, factsJson: string, nowMs: number): string;
   evaluate_check(planId: string, factsJson: string, nowMs: number, failure: string): string;
   evaluate_scam(planId: string, factsJson: string, scamInputJson: string, nowMs: number, clock: () => number): string;

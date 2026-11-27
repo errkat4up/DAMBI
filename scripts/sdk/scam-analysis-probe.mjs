@@ -207,8 +207,8 @@ export async function runAnalysisProbe(input, { createCore, createProvider, now 
       try {
         const plan = await core.plan(local.request);
         const calls = plan.scamCalls ?? [];
-        // Release the handle before long preparation; its verdict is discarded.
-        core.evaluate(plan, { planId: plan.planId, results: {} });
+        // Release before validation or long preparation, without a verdict/hook.
+        core.discard(plan);
         plannedRequest(calls, plan.planId, config);
         await provider.prepare(calls, { planId: plan.planId, timeoutMs: config.prepareTimeoutMs });
       } catch { failed = true; }

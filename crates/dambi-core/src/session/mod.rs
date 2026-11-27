@@ -239,6 +239,28 @@ impl CoreSession {
         Ok(result)
     }
 
+    /// Release a retained plan without evaluation, trust checks or a clock.
+    /// Expired but not yet evicted plans can also be released. Ownership and
+    /// bounded reuse errors are identical to evaluation's handle lookup.
+    pub fn discard(&mut self, plan_id: &str) -> Result<(), SessionError> {
+        self.live()?;
+        let _ = self.take_plan(plan_id)?;
+        self.retire(plan_id.to_owned(), "PLAN_CONSUMED");
+        Ok(())
+    }
+
+    fn take_plan(&mut self, plan_id: &str) -> Result<PendingPlan, SessionError> {
+        self.plans.remove(plan_id).ok_or_else(|| {
+            let code = self
+                .retired
+                .iter()
+                .rev()
+                .find(|(id, _)| id == plan_id)
+                .map_or("INVALID_PLAN", |(_, code)| *code);
+            SessionError::new(code, "plan is foreign, unknown or no longer usable")
+        })
+    }
+
     pub fn evaluate(
         &mut self,
         plan_id: &str,
@@ -361,18 +383,7 @@ impl CoreSession {
     ) -> Result<Value, SessionError> {
         self.live()?;
         clock(now_ms)?;
-        let Some(plan) = self.plans.remove(plan_id) else {
-            let code = self
-                .retired
-                .iter()
-                .rev()
-                .find(|(id, _)| id == plan_id)
-                .map_or("INVALID_PLAN", |(_, code)| *code);
-            return Err(SessionError::new(
-                code,
-                "plan is foreign, unknown or no longer usable",
-            ));
-        };
+        let plan = self.take_plan(plan_id)?;
         if now_ms >= plan.expires_at {
             self.retire(plan_id.to_owned(), "PLAN_EXPIRED");
             if check_failure.is_some() {

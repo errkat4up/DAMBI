@@ -1,5 +1,13 @@
 # SDK 정책 입력과 Native 회귀
 
+## F3 — t_1045ef56 수동 plan 폐기 인계
+
+- 담당 branch: 제공되지 않음 / 기준 parent `1fc022be3b0b16556117aaa8dd13362772c51b8a` / 소스 변경 제안, 실행 검증 대기.
+- 변경 범위: 공개 `discard(plan): void` → TS runtime/bridge → WASM → Native session. 기존 handle 조회·retire 규칙을 공유하며 판정·hook·I/O 없이 슬롯을 반환한다. 호스트와 분석 probe의 준비용 빈 Facts 평가만 교체한다. stateless Rust action runtime과 생성 WASM 선언의 `NativeCoreConstructor` 참조는 그대로 사용한다.
+- 검증 결과: 실행하지 않음(통과·실패 수 미집계). QA·CI·독립 리뷰·커밋·푸시 미수행. 실제 체인·서비스·snapshot 변경 없음.
+- 재현 대기: `cargo test --locked -p dambi-core --test session`; 동일 소스로 `npm run core:build` 후 `npm run core:test:types`, `node --test packages/core/tests/runtime.test.mjs packages/core/tests/check.test.mjs packages/core/tests/adapters/scam-analysis-probe.test.mjs`; 확장에서는 `yarn --cwd browser-extension test backend/service-worker/__tests__/scam-filter.test.ts`. 전체 runtime 시험의 기존 selected fixture/Native runner 준비는 아래 Development 관련 절차를 따른다.
+- 독립 리뷰 확인점: 단일 슬롯 즉시 재사용, 외부/복사 handle 거절, 재평가·중복 폐기 거절, hook 미발행, retained/evicted TTL 처리, clock 재진입, 기존 check 실패의 metadata·hook·슬롯 회귀, 늦은 준비 plan 및 준비 중 취소 후 live check 독립성, probe의 준비 실패·대상 불일치 정리. 이 두 호출처 전환 외의 호스트 작업을 F3 대기로 묶지 않는다.
+
 ## Scam Filter — SF0 연결 정보 확인
 
 2026-10-19, [계획서 SF0-1](../../docs/scam-filter/mvp-design-plan.md#sf0-1--연결-대상측정-근거-확인) 범위에서 전달받은 연결 정보와 대표 거래를 공개 RPC에 읽기 전용으로 대조했다. **수동 RPC 확인 6개 항목 일치·0개 불일치:** 체인 ID, pair의 factory, factory의 getPair, token0·token1 구성, 대표 거래의 블록·성공 상태, pair의 Sync→Swap 순서. 자동화 시험 통과 수나 전체 DEX 검증을 뜻하지 않는다.

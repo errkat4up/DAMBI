@@ -46,6 +46,7 @@ function runtime() {
     check: vi.fn<(request: CheckRequest, options?: CallOptions) => Promise<Verdict>>(async () => verdict),
     plan: vi.fn<(request: CheckRequest, options?: CallOptions) => Promise<CorePlan>>(),
     evaluate: vi.fn(() => verdict),
+    discard: vi.fn<(plan: CorePlan) => void>(),
     dispose: vi.fn(), setScamSettings: vi.fn(), refreshPolicies: vi.fn(), refreshScam: vi.fn(),
   } satisfies DambiCore;
   const provider = { fetch: vi.fn(), prepare: vi.fn(async () => undefined) } satisfies ScamFactProvider;
@@ -190,11 +191,59 @@ describe("optional Scam Filter host", () => {
     const host = createScamHost({ readConfig: async () => settings, open: async () => sdk });
     host.warm();
     await flush();
-    expect(sdk.core.evaluate).toHaveBeenCalledWith(plan, { planId: "prepare-only", results: {} });
+    expect(sdk.core.discard).toHaveBeenCalledExactlyOnceWith(plan);
+    expect(sdk.core.evaluate).not.toHaveBeenCalled();
     expect(sdk.provider.prepare).toHaveBeenCalledWith(calls, { planId: "prepare-only", signal: expect.any(AbortSignal), timeoutMs: 60_000 });
     expect(sdk.core.check).not.toHaveBeenCalled();
     await host.begin(message()).promise;
     expect(sdk.core.check).toHaveBeenCalledTimes(1);
+    host.invalidate();
+  });
+
+  it("discards a late preparation plan after a live caller cancels preparation", async () => {
+    const sdk = runtime();
+    const pending = deferred<CorePlan>();
+    sdk.core.plan.mockReturnValue(pending.promise);
+    const plan = { planId: "late", calls: [], scamCalls: [{ callId: "scam", method: "scam.pool_history" }],
+      expiresAt: Date.now() + 60_000 } as unknown as CorePlan;
+    const host = createScamHost({ readConfig: async () => ({ ...config(),
+      prepare: [{ kind: "transaction", chainId: "eip155:1", from: FROM }] }), open: async () => sdk });
+    host.warm();
+    await flush();
+    expect(sdk.core.plan).toHaveBeenCalledTimes(1);
+    expect(await host.begin(message()).promise).toMatchObject({ kind: "report" });
+    expect(sdk.core.plan.mock.calls[0]![1]!.signal!.aborted).toBe(true);
+    pending.resolve(plan);
+    await flush();
+    expect(sdk.core.discard).toHaveBeenCalledExactlyOnceWith(plan);
+    expect(sdk.core.evaluate).not.toHaveBeenCalled();
+    expect(sdk.provider.prepare).not.toHaveBeenCalled();
+    expect(sdk.core.dispose).not.toHaveBeenCalled();
+    host.invalidate();
+  });
+
+  it("releases before preparation and does not block a live check on cancelled preparation", async () => {
+    const sdk = runtime();
+    const waiting = deferred<void>();
+    const plan = { planId: "held-prepare", calls: [], scamCalls: [{ callId: "scam", method: "scam.pool_history" }],
+      expiresAt: Date.now() + 60_000 } as unknown as CorePlan;
+    sdk.core.plan.mockResolvedValue(plan);
+    sdk.provider.prepare.mockImplementation(() => {
+      expect(sdk.core.discard).toHaveBeenCalledExactlyOnceWith(plan);
+      return waiting.promise;
+    });
+    const host = createScamHost({ readConfig: async () => ({ ...config(),
+      prepare: [{ kind: "transaction", chainId: "eip155:1", from: FROM }] }), open: async () => sdk });
+    host.warm();
+    await flush();
+    expect(sdk.provider.prepare).toHaveBeenCalledTimes(1);
+    expect(await host.begin(message()).promise).toMatchObject({ kind: "report" });
+    const prepareOptions = sdk.provider.prepare.mock.calls[0] as unknown as [unknown, { signal: AbortSignal }];
+    expect(prepareOptions[1].signal.aborted).toBe(true);
+    waiting.reject(new Error("cancelled preparation"));
+    await flush();
+    expect(sdk.core.discard).toHaveBeenCalledTimes(1);
+    expect(sdk.core.evaluate).not.toHaveBeenCalled();
     host.invalidate();
   });
 
@@ -205,6 +254,8 @@ describe("optional Scam Filter host", () => {
     host.warm();
     await flush();
     expect(sdk.provider.prepare).not.toHaveBeenCalled();
+    expect(sdk.core.discard).toHaveBeenCalledTimes(1);
+    expect(sdk.core.evaluate).not.toHaveBeenCalled();
     host.invalidate();
   });
 });

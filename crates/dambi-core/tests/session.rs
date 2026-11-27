@@ -454,6 +454,54 @@ fn sibling_deny_survives_unknown_planning_and_fact_errors_in_both_orders() {
 }
 
 #[test]
+fn discard_releases_only_its_owned_slot_and_rejects_reuse() {
+    let mut cfg = config(vec![approve_bundle()]);
+    cfg["limits"]["maxPendingPlans"] = json!(1);
+    let mut first = CoreSession::new(&cfg.to_string(), &wire(day1()), NOW).unwrap();
+    let mut other = CoreSession::new(&cfg.to_string(), &wire(day1()), NOW).unwrap();
+    let req = request("7").to_string();
+    let plan = first.plan(&req, NOW).unwrap();
+    let id = plan["planId"].as_str().unwrap();
+    let independent = other.plan(&req, NOW).unwrap();
+    error_code(first.plan(&req, NOW), "LIMIT_EXCEEDED");
+    error_code(other.discard(id), "INVALID_PLAN");
+    error_code(first.discard("forged"), "INVALID_PLAN");
+    error_code(first.plan(&req, NOW), "LIMIT_EXCEEDED");
+    first.discard(id).unwrap();
+    error_code(first.discard(id), "PLAN_CONSUMED");
+    error_code(first.evaluate(id, &empty_facts(&plan), NOW), "PLAN_CONSUMED");
+    error_code(
+        first.evaluate_check(id, &empty_facts(&plan), NOW, "aborted"),
+        "PLAN_CONSUMED",
+    );
+    let replacement = first.plan(&req, NOW).unwrap();
+    assert_ne!(replacement["planId"], plan["planId"]);
+    error_code(other.plan(&req, NOW), "LIMIT_EXCEEDED");
+    assert_eq!(evaluate(&mut other, &independent, &empty_facts(&independent), NOW)["decision"], "allow");
+    first.dispose();
+    error_code(first.discard(replacement["planId"].as_str().unwrap()), "DISPOSED");
+}
+
+#[test]
+fn discard_does_not_require_usable_policy_or_unexpired_ttl() {
+    let mut cfg = config(vec![approve_bundle()]);
+    cfg["limits"]["maxPendingPlans"] = json!(1);
+    let mut policy = policy_value(42);
+    policy["expires_at"] = json!(NOW / 1000 + 1);
+    let mut core = CoreSession::new(&cfg.to_string(), &wire(signed_policy(policy)), NOW).unwrap();
+    let plan = core.plan(&request("7").to_string(), NOW).unwrap();
+    // Evaluation at the TTL boundary retires the handle without producing a verdict.
+    error_code(core.evaluate(plan["planId"].as_str().unwrap(), &empty_facts(&plan), NOW + 10000), "PLAN_EXPIRED");
+    error_code(core.discard(plan["planId"].as_str().unwrap()), "PLAN_EXPIRED");
+
+    let mut core = CoreSession::new(&cfg.to_string(), &wire(day1()), NOW).unwrap();
+    let plan = core.plan(&request("7").to_string(), NOW).unwrap();
+    // No timestamp is supplied to cleanup: retained plans need no validity lease.
+    core.discard(plan["planId"].as_str().unwrap()).unwrap();
+    core.plan(&request("7").to_string(), NOW).unwrap();
+}
+
+#[test]
 fn pending_plan_limit_releases_expired_plans_and_input_limits_fail_closed() {
     let mut cfg = config(vec![approve_bundle()]);
     cfg["limits"]["maxPendingPlans"] = json!(1);

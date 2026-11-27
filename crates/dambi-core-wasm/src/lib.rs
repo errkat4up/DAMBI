@@ -57,6 +57,10 @@ impl WasmCore {
         envelope(integer(now_ms, "nowMs").and_then(|now| self.session.plan(request_json, now)))
     }
 
+    pub fn discard(&mut self, plan_id: &str) -> String {
+        envelope(self.session.discard(plan_id).map(|()| Value::Null))
+    }
+
     pub fn evaluate(&mut self, plan_id: &str, facts_json: &str, now_ms: f64) -> String {
         envelope(
             integer(now_ms, "nowMs")
