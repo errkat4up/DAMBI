@@ -408,12 +408,84 @@ struct Checked<T> {
     cacheable: bool,
 }
 
+/// What the creation lookup found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Creator {
+    /// Sender of the pair-creation transaction — a settled fact of the chain's
+    /// history that cannot change, so it is the only thing kept.
+    Deployer(String),
+    /// No `PairCreated` in the 30 days the log endpoint returned. That is an
+    /// answer of the moment, not a fact: the log endpoint may be a few blocks
+    /// behind the main one and miss a pool created just now. Never kept.
+    NotRecent,
+}
+
+/// Pool → the account that created it (public chain data, nothing about users).
+/// In memory only: lost on restart, separate per server. Holds deployers only.
+type Creators = Mutex<HashMap<String, String>>;
+const CREATORS_MAX: usize = 100_000;
+
+/// Find who created `pool`:
+///   1. `PairCreated` log (last 30 days) — on `logs_rpc`, the endpoint that
+///      serves a 30-day filtered log range
+///   2. pair-creation transaction → deployer (`from`) — on `rpc`
+///
+/// `Err` carries the reason and is not kept, so the next request looks again.
+async fn find_creator(
+    rpc: &dyn ChainRpc,
+    logs_rpc: &dyn ChainRpc,
+    token: &str,
+    pool: &str,
+    head: u64,
+) -> Result<Creator, &'static str> {
+    let (token0, token1) = if token < WETH {
+        (token, WETH)
+    } else {
+        (WETH, token)
+    };
+    let filter = json!([{
+        "address": UNISWAP_V2_FACTORY,
+        "topics": [PAIR_CREATED_TOPIC, format!("0x{}", pad_address(token0)), format!("0x{}", pad_address(token1))],
+        "fromBlock": hex_block(head.saturating_sub(MAX_POOL_AGE_BLOCKS)),
+        "toBlock": hex_block(head),
+    }]);
+    let Ok(Value::Array(logs)) = logs_rpc.request("eth_getLogs", filter).await else {
+        return Err("logs_unavailable");
+    };
+    // No PairCreated in the window: the pool is older than 30 days.
+    let Some(tx_hash) = logs.first().and_then(|log| log["transactionHash"].as_str()) else {
+        return Ok(Creator::NotRecent);
+    };
+    let logged_pair = logs[0]["data"]
+        .as_str()
+        .and_then(|data| word_at(data, 0))
+        .map(word_to_address);
+    if logged_pair.as_deref() != Some(pool) {
+        return Err("pair_mismatch");
+    }
+    // Deployer = sender of the pair-creation transaction (not owner(), not the factory).
+    let tx = rpc
+        .request("eth_getTransactionByHash", json!([tx_hash]))
+        .await
+        .map_err(|_| "creation_tx_unavailable")?;
+    tx["from"]
+        .as_str()
+        .map(str::to_lowercase)
+        .filter(|from| is_address(from))
+        .map(Creator::Deployer)
+        .ok_or("creation_tx_unavailable")
+}
+
 /// Examine one pool. Round trips after the shared lookup:
-///   1. `PairCreated` log (last 30 days) · `token.balanceOf(pool)`
-///   2. pair-creation transaction → deployer (`from`)
-///   3. deployer call · control call
+///   1. who created the pool ([`find_creator`]; skipped once known) · `token.balanceOf(pool)`
+///   2. deployer call · control call
+///
+/// Whatever can change — the pool's balance and both simulated calls — is read
+/// fresh every time.
 async fn check_backdoor(
     rpc: &dyn ChainRpc,
+    logs_rpc: &dyn ChainRpc,
+    creators: &Creators,
     token: &str,
     found: &PoolLookup,
 ) -> Checked<BackdoorOutcome> {
@@ -432,27 +504,42 @@ async fn check_backdoor(
         }
         PoolLookup::Found { pool, head, .. } => (pool.as_str(), *head),
     };
-    let (token0, token1) = if token < WETH {
-        (token, WETH)
-    } else {
-        (WETH, token)
-    };
-    let filter = json!([{
-        "address": UNISWAP_V2_FACTORY,
-        "topics": [PAIR_CREATED_TOPIC, format!("0x{}", pad_address(token0)), format!("0x{}", pad_address(token1))],
-        "fromBlock": hex_block(head.saturating_sub(MAX_POOL_AGE_BLOCKS)),
-        "toBlock": hex_block(head),
-    }]);
+    let known = creators
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(pool)
+        .cloned()
+        .map(Creator::Deployer);
     let balance_data = format!("{SEL_BALANCE_OF}{}", pad_address(pool));
-    let (logs, balance) = tokio::join!(
-        rpc.request("eth_getLogs", filter),
+    let (creator, balance) = tokio::join!(
+        async {
+            if let Some(creator) = known {
+                return Ok(creator);
+            }
+            let creator = find_creator(rpc, logs_rpc, token, pool, head).await;
+            if let Ok(Creator::Deployer(deployer)) = &creator {
+                let mut all = creators
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if all.len() >= CREATORS_MAX {
+                    all.clear();
+                }
+                all.insert(pool.to_owned(), deployer.clone());
+            }
+            creator
+        },
         try_call(rpc, None, token, balance_data, "latest"),
     );
-    let Ok(Value::Array(logs)) = logs else {
-        return Checked {
-            value: BackdoorOutcome::new("undetermined", "logs_unavailable"),
-            cacheable: false,
-        };
+    let deployer = match creator {
+        Ok(Creator::Deployer(deployer)) => Some(deployer),
+        Ok(Creator::NotRecent) => None,
+        Err(reason) => {
+            return Checked {
+                value: BackdoorOutcome::new("undetermined", reason),
+                // A pair that does not match the factory's answer is not worth asking about again soon.
+                cacheable: reason == "pair_mismatch",
+            };
+        }
     };
     let pool_holds_token = match &balance {
         CallResult::Ok(data) => word_at(data, 0).map(|word| !word_is_zero(word)),
@@ -472,30 +559,6 @@ async fn check_backdoor(
         }
     };
     let unavailable = CallObservation::Unavailable;
-    // No PairCreated in the window: the pool is older than 30 days (or unknown).
-    let Some(tx_hash) = logs.first().and_then(|log| log["transactionHash"].as_str()) else {
-        return conclude(None, unavailable, unavailable, transport_failed);
-    };
-    let logged_pair = logs[0]["data"]
-        .as_str()
-        .and_then(|data| word_at(data, 0))
-        .map(word_to_address);
-    if logged_pair.as_deref() != Some(pool) {
-        return Checked {
-            value: BackdoorOutcome::new("undetermined", "pair_mismatch"),
-            cacheable: true,
-        };
-    }
-
-    // Deployer = sender of the pair-creation transaction (not owner(), not the factory).
-    let tx = rpc
-        .request("eth_getTransactionByHash", json!([tx_hash]))
-        .await;
-    transport_failed |= tx.is_err();
-    let deployer = tx
-        .ok()
-        .and_then(|tx| tx["from"].as_str().map(str::to_lowercase))
-        .filter(|from| is_address(from));
     let Some(deployer) = deployer else {
         return conclude(None, unavailable, unavailable, transport_failed);
     };
@@ -1046,6 +1109,9 @@ const LIMITER_MAX_CLIENTS: usize = 20_000;
 /// The check, its cache and its limits.
 pub struct ScamService {
     rpc: Option<Arc<dyn ChainRpc>>,
+    /// Serves the backdoor check's 30-day `PairCreated` query. `None` = `rpc`.
+    logs_rpc: Option<Arc<dyn ChainRpc>>,
+    creators: Creators,
     config: ScamConfig,
     cache: Mutex<Cache>,
     clients: Mutex<HashMap<IpAddr, Bucket>>,
@@ -1077,6 +1143,8 @@ impl ScamService {
         let lookups = Semaphore::new(config.max_concurrent_lookups.max(1));
         Self {
             rpc,
+            logs_rpc: None,
+            creators: Mutex::default(),
             config,
             cache: Mutex::default(),
             clients: Mutex::default(),
@@ -1084,16 +1152,32 @@ impl ScamService {
         }
     }
 
-    /// The service as configured by the environment (`POLICY_SCAM_RPC_URL`, …).
+    /// Send the backdoor check's 30-day log query to its own endpoint, for a
+    /// main endpoint that caps `eth_getLogs` ranges. Every other call stays on
+    /// the main endpoint.
+    #[must_use]
+    pub fn with_logs_rpc(mut self, logs_rpc: Option<Arc<dyn ChainRpc>>) -> Self {
+        self.logs_rpc = logs_rpc;
+        self
+    }
+
+    /// The service as configured by the environment (`POLICY_SCAM_RPC_URL`,
+    /// `POLICY_SCAM_LOGS_RPC_URL`, …).
     #[must_use]
     pub fn from_env() -> Self {
         let config = ScamConfig::from_env();
-        let rpc = std::env::var("POLICY_SCAM_RPC_URL")
-            .ok()
-            .map(|url| url.trim().to_owned())
-            .filter(|url| !url.is_empty())
-            .map(|url| Arc::new(HttpChainRpc::new(url, config.check_timeout)) as Arc<dyn ChainRpc>);
-        Self::new(rpc, config)
+        let endpoint = |name: &str| {
+            std::env::var(name)
+                .ok()
+                .map(|url| url.trim().to_owned())
+                .filter(|url| !url.is_empty())
+                .map(|url| {
+                    Arc::new(HttpChainRpc::new(url, config.check_timeout)) as Arc<dyn ChainRpc>
+                })
+        };
+        let rpc = endpoint("POLICY_SCAM_RPC_URL");
+        let logs_rpc = endpoint("POLICY_SCAM_LOGS_RPC_URL");
+        Self::new(rpc, config).with_logs_rpc(logs_rpc)
     }
 
     /// Take one request from `client`'s allowance. `Err` carries the seconds to wait.
@@ -1141,6 +1225,7 @@ impl ScamService {
         rules: &[RuleIn],
     ) -> Result<PoolCheckResponse, CheckError> {
         let rpc = self.rpc.as_deref().ok_or(CheckError::NotConfigured)?;
+        let logs_rpc = self.logs_rpc.as_deref().unwrap_or(rpc);
         let want_window = !rules.is_empty();
         let ttl = self.config.cache_ttl;
         let (cached_backdoor, cached_window, cached_pool) = {
@@ -1196,12 +1281,15 @@ impl ScamService {
                         return None;
                     }
                     Some(
-                        tokio::time::timeout(deadline, check_backdoor(rpc, token, &found))
-                            .await
-                            .unwrap_or(Checked {
-                                value: BackdoorOutcome::new("undetermined", "timeout"),
-                                cacheable: false,
-                            }),
+                        tokio::time::timeout(
+                            deadline,
+                            check_backdoor(rpc, logs_rpc, &self.creators, token, &found),
+                        )
+                        .await
+                        .unwrap_or(Checked {
+                            value: BackdoorOutcome::new("undetermined", "timeout"),
+                            cacheable: false,
+                        }),
                     )
                 },
                 async {
