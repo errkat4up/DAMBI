@@ -453,8 +453,7 @@ mod tests {
         };
         swap.params.slippage_bp = Some(0);
         let source = DataSource::UserSupplied;
-        swap.live_inputs.expected_amount_out =
-            Some(LiveField::new(U256::ZERO, source.clone(), now()));
+        swap.live_inputs.expected_amount_out = Some(LiveField::new(U256::ZERO, source.clone(), now()));
         swap.live_inputs.price_impact_bp = Some(LiveField::new(0, source.clone(), now()));
         swap.live_inputs.gas_estimate = Some(LiveField::new(U256::ZERO, source, now()));
         let lowered = lower_action(&body, &meta, &TxMeta { from: FROM, to: TO }).unwrap();
@@ -469,6 +468,25 @@ mod tests {
             serde_json::json!(super::u256_hex(U256::ZERO))
         );
         assert!(lowered.context.get("routeEstimatedOut").is_none());
+
+        // An explicitly observed empty route is distinct from no route. Its
+        // zero sum may be lowered; absence above must not synthesize that sum.
+        let ActionBody::Amm(AmmAction::Swap(swap)) = &mut body else {
+            panic!("expected Swap");
+        };
+        swap.live_inputs.route = Some(LiveField::new(
+            SwapRoute {
+                paths: vec![],
+                aggregator: None,
+            },
+            DataSource::UserSupplied,
+            Time::from_unix(0),
+        ));
+        let lowered = lower_action(&body, &meta, &TxMeta { from: FROM, to: TO }).unwrap();
+        assert_eq!(
+            lowered.context["routeEstimatedOut"],
+            serde_json::json!(super::u256_hex(U256::ZERO))
+        );
     }
 
     #[test]

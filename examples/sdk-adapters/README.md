@@ -182,6 +182,47 @@ or live operation has been performed. QA execution and `dambi-review` approval
 must cover the eventual same integrated candidate, not this blocked partial
 patch.
 
+### Current review response: parent `30ffbd4c95462791c42e29ad014c8eaff0356fe7`
+
+**Blocked partial revision, not an implementation-complete or CI-repair claim.**
+The supplied review reports rustfmt and Rust compilation failures in CI run
+`45939169231`. The exact known compilation blocker is
+`crates/asset-model/transition/src/effect/amm/swap.rs`: its direct `route.value`
+access and hooks address comparison need migration. That file is still absent
+from both `allowed_paths` and the supplied sources. No edit to that file is
+included, and these changes cannot repair its compilation errors.
+
+The mapper now uses one swap classification for both observation-processing
+stages. The supplied F2 formatting sites are adjusted, and regressions exercise
+all four optional observations through typed construction and serialization,
+including observed zero, original epoch timestamps, and external/inline layouts.
+The lowering regression additionally distinguishes an observed empty route's
+zero sum from an absent route. The native real-manifest regression
+`zero_output_floor_without_observations_preserves_independent_recipient_deny`
+checks both selected execute selectors: literal `minAmountOut=0`, absent quote
+and live observations, successful planning, and the Day1 recipient deny reason.
+It does not replace or relax the existing positive-floor assertions.
+
+| Additional QA input | Expected | Actual |
+| --- | --- | --- |
+| Each swap observation supplied independently, external and inline | Only that observation serialized; zero and original time retained | Not run |
+| No route versus explicitly observed empty route | Omitted `routeEstimatedOut` versus zero sum | Not run |
+| Both execute selectors, zero output floor, other recipient, no quote | Zero preserved; no whole-request invalidation; recipient deny retained | Not run |
+
+To resume the compilation repair, authorize and supply the transition file above,
+its error/result interface, and affected Rust constructor/fixture consumers.
+Absent-route handling must use that interface explicitly, not fabricate an empty
+observed route or add an unchecked compatibility wrapper. The remaining
+schema/session missing-attribute integration described above is also unresolved.
+
+Required validation after integrating the blocked consumers includes
+`cargo fmt --all -- --check`, relevant native Rust builds/tests (including the
+mapper, lowering, and `dambi-core` Universal Router regressions), the WASM build,
+and packaged consumer tests. No commands or CI-log inspection were performed
+here. Regression logs, actual-result entries, and independent `dambi-review`
+approval remain pending for the same integrated candidate. No generated snapshot
+bytes, commit, push, or live operation are supplied or claimed.
+
 ## Measuring a complete SDK check
 
 `check-timing.mjs` measures one `core.check()` call with `performance.now()`. It

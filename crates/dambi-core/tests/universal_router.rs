@@ -1,8 +1,8 @@
 //! Real Registry manifests, pinned installation, raw calldata and Day1 policy.
 //!
-//! These cases cover calldata token/amount intent and V3 recipients, not market data:
-//! the current mapper still supplies fallback slippage/pool values and empty
-//! LiveField skeletons. Passing these tests does not validate those values or
+//! These cases cover calldata token/amount intent and V3 recipients, not market data.
+//! Missing swap slippage and live observations must remain absent; unresolved
+//! venue identities still require separate integration work. These tests do not
 //! claim complete Universal Router command/chain coverage.
 //! V4's swap recipient is the manifest's tx.from; final TAKE/SETTLE recipients
 //! and actual EVM execution are not covered by that case.
@@ -195,6 +195,52 @@ fn both_execute_selectors_preserve_v3_swap_intent_and_day1_recipient_decisions()
             assert_swap(&root["actions"][0], recipient);
             assert_verdict(&mut session, &request, expected);
         }
+    }
+}
+
+#[test]
+fn zero_output_floor_without_observations_preserves_independent_recipient_deny() {
+    let manifests = manifests();
+    let artifact = artifact(manifests.clone());
+    let store = SnapshotStore::new(config(), artifact.input(), day1().input(), NOW).unwrap();
+    let mut session = session(&artifact);
+    let mut path = TOKEN_IN.parse::<Address>().unwrap().as_slice().to_vec();
+    path.extend_from_slice(&[0x00, 0x01, 0xf4]);
+    path.extend_from_slice(TOKEN_OUT.parse::<Address>().unwrap().as_slice());
+
+    // Both selected execute selectors must preserve the ABI's literal zero.
+    // A missing quote must neither invalidate the request nor suppress the
+    // independently evaluable, signed recipient deny.
+    for manifest in &manifests {
+        let input = params(
+            "step(address,uint256,uint256,bytes,bool)",
+            &[
+                address(OTHER),
+                uint(1000, 256),
+                uint(0, 256),
+                DynSolValue::Bytes(path.clone()),
+                DynSolValue::Bool(true),
+            ],
+        );
+        let request = request(manifest, &[0x00], vec![input]);
+        let decoded = decoded(&store, &request);
+        assert_eq!(decoded["decoder_id"], manifest["id"]);
+        let root = &decoded["actions"][0]["body"];
+        assert_eq!(root["domain"], "multicall");
+        assert_eq!(root["actions"].as_array().unwrap().len(), 1);
+        let swap = &root["actions"][0];
+        assert_eq!(swap["domain"], "amm");
+        assert_eq!(swap["action"], "swap");
+        assert_eq!(swap["params"]["recipient"], OTHER);
+        assert_eq!(swap["params"]["direction"]["kind"], "exact_input");
+        assert_eq!(swap["params"]["direction"]["amount_in"], "0x3e8");
+        assert_eq!(swap["params"]["direction"]["min_amount_out"], "0x0");
+        assert!(swap["params"].get("slippage_bp").is_none());
+        let live = swap["live_inputs"].as_object().unwrap();
+        for field in ["route", "expected_amount_out", "price_impact_bp", "gas_estimate"] {
+            assert!(live.get(field).is_none(), "unobserved {field}: {swap}");
+        }
+        assert_verdict(&mut session, &request, "deny");
     }
 }
 

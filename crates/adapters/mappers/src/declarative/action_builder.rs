@@ -646,6 +646,10 @@ pub fn build_action_body(
     let mut flat = flatten_body(&substituted)?;
 
     let (domain, action) = extract_tags(&flat);
+    let is_swap = matches!(
+        (domain.as_deref(), action.as_deref()),
+        (Some("amm"), Some("swap"))
+    );
 
     // Stage 2 — pick the live_inputs source. The explicit argument wins, then
     // the inline block from the body, then nothing. Variants without typed
@@ -670,9 +674,7 @@ pub fn build_action_body(
         // unobserved entries BEFORE substitution: dormant resolver/function
         // references must not invalidate otherwise decodable signed intent.
         // Explicit observations still undergo substitution and typed validation.
-        let live_template = if domain.as_deref() == Some("amm")
-            && action.as_deref() == Some("swap")
-        {
+        let live_template = if is_swap {
             match live_template {
                 JsonValue::Object(map) => JsonValue::Object(
                     map.into_iter()
@@ -693,7 +695,7 @@ pub fn build_action_body(
                         // Static route descriptions must not masquerade as a
                         // simulated route with observed estimates. The swap model
                         // represents missing observations explicitly.
-                        if domain.as_deref() == Some("amm") && action.as_deref() == Some("swap") {
+                        if is_swap {
                             live_obj.insert(field_name.clone(), swap_live_observation(src_payload));
                             continue;
                         }
@@ -2250,11 +2252,7 @@ mod tests {
             ("route", json!({"paths":[]})),
         ] {
             let descriptor = json!({"source":{"kind":"user_supplied"},"ttl_s":12});
-            assert_eq!(
-                swap_live_observation(&descriptor),
-                JsonValue::Null,
-                "{field}"
-            );
+            assert_eq!(swap_live_observation(&descriptor), JsonValue::Null, "{field}");
             let mut value_without_time = descriptor.clone();
             value_without_time["value"] = zero.clone();
             assert_eq!(
@@ -2364,10 +2362,44 @@ mod tests {
         assert_eq!(observation.value, U256::ZERO);
         assert_eq!(observation.synced_at, Time::from_unix(0));
 
+        // Exercise the actual typed builder, not only the observation helper.
+        // Every optional field must distinguish absence from an observed zero
+        // (or an observed empty route), in both manifest layouts.
+        for (field, value, wire_value) in [
+            ("expected_amount_out", json!("0"), json!("0x0")),
+            ("price_impact_bp", json!(0), json!(0)),
+            ("gas_estimate", json!("0"), json!("0x0")),
+            ("route", json!({"paths": []}), json!({"paths": []})),
+        ] {
+            for time in [0, 123] {
+                let live = json!({field: {
+                    "value": value,
+                    "synced_at": time,
+                    "source": {"kind": "user_supplied"},
+                    "ttl_s": 12
+                }});
+                let external = build_action_body(&ctx, &body, Some(&live)).unwrap();
+                let mut inline = body.clone();
+                inline["amm"]["swap"]["live_inputs"] = live;
+                assert_eq!(build_action_body(&ctx, &inline, None).unwrap(), external);
+                let wire = serde_json::to_value(&external).unwrap();
+                let inputs = wire["live_inputs"].as_object().unwrap();
+                assert_eq!(inputs.len(), 1, "only {field} was observed");
+                assert_eq!(inputs[field]["value"], wire_value, "{field}");
+                assert_eq!(inputs[field]["synced_at"], json!(time), "{field}");
+                assert_eq!(inputs[field]["ttl"], json!(12), "{field}");
+                assert_eq!(
+                    inputs[field]["source"],
+                    json!({"kind": "user_supplied"}),
+                    "{field}"
+                );
+                assert_eq!(wire["params"]["direction"]["min_amount_out"], "0x0");
+            }
+        }
+
         // Do not suppress errors in an explicitly supplied observation.
         let mut invalid = observed;
-        invalid["expected_amount_out"]["source"] =
-            json!("$resolved.unobserved_test_source");
+        invalid["expected_amount_out"]["source"] = json!("$resolved.unobserved_test_source");
         assert!(matches!(
             build_action_body(&ctx, &body, Some(&invalid)),
             Err(V3BuildError::UnknownPlaceholder(_))
