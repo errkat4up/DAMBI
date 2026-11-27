@@ -11,6 +11,12 @@ export const SCOPE = `0x${"cd".repeat(32)}`;
 const word = (value) => BigInt(value).toString(16).padStart(64, "0");
 const tail = (bytes) => word(bytes.length) + bytes.toString("hex").padEnd(Math.ceil(bytes.length / 32) * 64, "0");
 
+// Independent request oracle: F4 3fab6d8b, solc 0.8.28 methodIdentifiers.
+// Do not derive these selectors with the adapter's Keccak implementation.
+// Compare the entire canonical ABI encoding, including offsets and padding.
+export const SCOPE_CALLDATA = `0xc8121043${word(64)}${word(128)}${word(7)}${Buffer.from("staging").toString("hex").padEnd(64, "0")}${word(7)}${Buffer.from("default").toString("hex").padEnd(64, "0")}`;
+export const READ_CALLDATA = `0x3d301c91${SCOPE.slice(2)}${word(0)}`;
+
 // Independent encoder, not the adapter decoder. Synthetic RPC only: CODE is
 // not a deployed F4 registry. Hash the exact UTF-8 payload by default; explicit
 // digest overrides support inconsistent-response regressions.
@@ -37,7 +43,7 @@ export async function fakeRpc(t) {
   const state = {
     now: NOW, chainId: "0x164ce", code: CODE,
     block: { number: "0x64", hash: HASH, timestamp: `0x${(NOW / 1000).toString(16)}` },
-    tuple: encodeRead(), mode: "ok", requests: [], errors: [],
+    tuple: encodeRead(), mode: "ok", requests: [], errors: [], rejectedCalls: [],
     recheckHash: undefined, transform: undefined, hold: undefined,
   };
   const server = createServer(async (req, res) => {
@@ -76,20 +82,17 @@ export async function fakeRpc(t) {
           const [call, selector] = body.params;
           assert.equal(call.to, REGISTRY);
           assert.deepEqual(selector, { blockHash: state.block.hash, requireCanonical: true });
-          assert.match(call.data, /^0x[0-9a-f]+$/i);
-          if (call.data.length === 138) {
-            assert.equal(call.data.slice(10, 74), SCOPE.slice(2));
-            assert.equal(call.data.slice(74), word(0));
-            result = state.tuple;
-          } else {
-            const args = call.data.slice(10);
-            assert.equal(args.slice(0, 64), word(64));
-            assert.equal(args.slice(64, 128), word(128));
-            assert.equal(args.slice(128, 192), word(7));
-            assert.equal(Buffer.from(args.slice(192, 206), "hex").toString(), "staging");
-            assert.equal(args.slice(256, 320), word(7));
-            assert.equal(Buffer.from(args.slice(320, 334), "hex").toString(), "default");
-            result = SCOPE;
+          assert.equal(body.params.length, 2);
+          assert.deepEqual(Object.keys(call).sort(), ["data", "to"]);
+          if (call.data === READ_CALLDATA) result = state.tuple;
+          else if (call.data === SCOPE_CALLDATA) result = SCOPE;
+          else {
+            // An intentional bad-calldata control is an RPC rejection, not a
+            // fixture crash. Unexpected fixture assertions still fail teardown.
+            state.rejectedCalls.push(call.data);
+            res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id,
+              error: { code: -32602, message: "Unexpected F4 calldata" } }));
+            return;
           }
           break;
         }

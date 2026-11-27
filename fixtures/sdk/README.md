@@ -2,6 +2,15 @@
 
 ## F5 — 동일 인정 블록 온체인 어댑터 진행 기록
 
+### Reviewer #71 — ABI 음성 대조 및 실제 F1 주입 회귀
+
+- 작업: `t_18cd83b0` / 담당 D / 지정 작업 경로 `sdk/t_18cd83b0` / 제공 parent `e09fd66342a711251e9d4728442eeabe0d3c617b` / 상태: 수정안 작성·검증 대기. 실제 branch·작업 트리는 확인하지 않았다.
+- 변경 범위: fake RPC의 길이 기반 eth_call 분기를 제거하고 F4 `3fab6d8b`의 solc 0.8.28 methodIdentifiers와 전체 canonical calldata를 대조한다. 잘못된 selector·offset·length·padding·scope·version·truncation·trailing byte 음성 대조를 추가했다. fixture 자체 assertion 오류의 teardown 실패는 유지한다.
+- 실제 Core 경로: 기존 HTTP-envelope 양성 대조와 임의 오류 허용 검사를 실제 F1 SDK 주입 통합 진입점으로 교체했다. 공식 테스트 전용 키로 registry_ref 포함 원문을 서명하고 실제 F5 source를 공개 createCore에 직접 전달한다. active deny·INVALID_SIGNATURE·동일 원문의 revoked POLICY_EXPIRED를 구분한다. v2/v1 plan 교체·폐기·장애 유예/기한 중단/복구·재시작·재개·reorg·chain mismatch 회귀를 작성했다.
+- 필요한 입력: F1의 production JS/WASM 설치 패키지, 동일 SHA의 실제 registry_ref·Core trust/limits·deny/allow 정책 draft·원문 요청·정확한 plan 오류/폐기 refresh 계약. 이 기준선에 없는 F1을 복제하지 않으며 입력 누락은 실패다. HTTP/stub/skip 대체는 없다. 실행 변수·JSON 입력 계약은 Core README의 F1/F5 integration inputs 절에 있다.
+- 검증: 제공 리뷰의 독립 VM 60/60은 이전 SHA의 전달받은 결과다. 이번 수정에 대해 빌드·시험·QA·독립 리뷰·커밋·푸시·체인 연결은 수행하지 않았다. 신규 통과·실패 수와 재현 로그 없음.
+- 다음: 실제 F1/F5 두 전체 SHA와 입력/패키지 provenance를 지정해 독립 통합 실행 후 TAP 결과를 인수한다. F1 승인 전 대기·실제 로컬 체인 소비자 deny·Ethereum Fact 연결·F5 전체 수용은 계속 열어 둔다. 아래 HTTP 양성 대조 관련 기록은 이전 구현 이력이며 현재 통합 게이트의 근거가 아니다.
+
 ### F1 RegistryObservation 반환 형식 후속 수정
 
 - 작업: `t_18cd83b0` / 담당 D / branch 정보 미제공 / 제공 parent: `2a6748a92b6034f54821c89aa4221a7eb9784271` / 상태: 수정안 작성·검증 대기.

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import { AdapterError, createOnchainPolicySource } from "@dambi/core/adapters";
 import { keccak256 } from "../../dist/adapters/onchain-policy.js";
-import { fakeRpc, options, encodeRead, NOW, HASH } from "../../../../fixtures/sdk/onchain-policy/fake-rpc.mjs";
+import { fakeRpc, options, encodeRead, NOW, HASH, REGISTRY, SCOPE, SCOPE_CALLDATA, READ_CALLDATA } from "../../../../fixtures/sdk/onchain-policy/fake-rpc.mjs";
 
 const code = (expected) => (error) => error instanceof AdapterError && error.code === expected;
 const deferred = () => {
@@ -15,6 +15,56 @@ const deferred = () => {
 test("Keccak uses Ethereum padding and selectors, not SHA3", () => {
   assert.equal(keccak256(new Uint8Array()), "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470");
   assert.equal(keccak256(new TextEncoder().encode("transfer(address,uint256)")).slice(0, 10), "0xa9059cbb");
+  assert.equal(keccak256(new TextEncoder().encode("scopeId(string,string)")).slice(0, 10), "0xc8121043");
+  assert.equal(keccak256(new TextEncoder().encode("read(bytes32,uint256)")).slice(0, 10), "0x3d301c91");
+});
+
+test("fake RPC rejects wrong selectors and noncanonical complete F4 calldata", async (t) => {
+  const rpc = await fakeRpc(t);
+  let id = 0;
+  async function call(data) {
+    const requestId = ++id;
+    const response = await fetch(rpc.url, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: requestId, method: "eth_call",
+        params: [{ to: REGISTRY, data }, { blockHash: HASH, requireCanonical: true }] }),
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.id, requestId);
+    assert.equal(body.jsonrpc, "2.0");
+    return body;
+  }
+  assert.equal((await call(SCOPE_CALLDATA)).result, SCOPE);
+  assert.equal((await call(READ_CALLDATA)).result, rpc.tuple);
+  const replaceWord = (data, index, value) => data.slice(0, 10 + index * 64)
+    + BigInt(value).toString(16).padStart(64, "0") + data.slice(10 + (index + 1) * 64);
+  const invalid = [
+    `0x00000000${SCOPE_CALLDATA.slice(10)}`,
+    `0xdeadbeef${READ_CALLDATA.slice(10)}`,
+    `0x3d301c91${SCOPE_CALLDATA.slice(10)}`, // valid selector, wrong arguments
+    `0xc8121043${READ_CALLDATA.slice(10)}`,
+    replaceWord(SCOPE_CALLDATA, 0, 96), // wrong dynamic offset
+    replaceWord(SCOPE_CALLDATA, 1, 64), // aliased strings
+    replaceWord(SCOPE_CALLDATA, 2, 8), // wrong UTF-8 byte length
+    `${SCOPE_CALLDATA.slice(0, 10 + 3 * 64 + 14)}01${SCOPE_CALLDATA.slice(10 + 3 * 64 + 16)}`,
+    `${SCOPE_CALLDATA.slice(0, -2)}01`, // nonzero second string padding
+    `${READ_CALLDATA.slice(0, 10)}${"00".repeat(32)}${READ_CALLDATA.slice(74)}`,
+    replaceWord(READ_CALLDATA, 1, 1), // fixture requires head selection
+    SCOPE_CALLDATA.slice(0, -2), READ_CALLDATA.slice(0, -2),
+    `${SCOPE_CALLDATA}${"00".repeat(32)}`, `${READ_CALLDATA}00`,
+  ];
+  for (const data of invalid) {
+    const body = await call(data);
+    assert.equal(Object.hasOwn(body, "result"), false);
+    assert.deepEqual(body.error, { code: -32602, message: "Unexpected F4 calldata" });
+  }
+  assert.deepEqual(rpc.rejectedCalls, invalid);
+  // The actual adapter must also satisfy this independent full-byte oracle.
+  await createOnchainPolicySource(options(rpc)).fetch();
+  assert.deepEqual(rpc.requests.slice(-7).filter((r) => r.method === "eth_call")
+    .map((r) => r.params[0].data), [SCOPE_CALLDATA, READ_CALLDATA]);
+  assert.equal(rpc.rejectedCalls.length, invalid.length);
 });
 
 test("configuration is explicit and copied before any request", async (t) => {
