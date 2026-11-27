@@ -125,6 +125,12 @@ try {
     await cp(join(root, "examples/sdk-adapters", name), join(consumer, name));
   }
   await cp(new URL("./consumer-cases.mjs", import.meta.url), join(consumer, "consumer-cases.mjs"));
+  // Keep the full public-contract regression outside the workspace too. In
+  // particular, decoder declarations must come from the actual tarball, not a
+  // source alias, ambient shim or a locally generated workspace declaration.
+  if (!browserOnly) {
+    await cp(join(root, "packages/core/tests/consumer-types.ts"), join(consumer, "core-consumer-types.ts"));
+  }
   let tarball = suppliedTarball;
   if (!tarball) {
     // Pack already-built output only. The user/CI controls when builds run.
@@ -152,9 +158,15 @@ try {
     imports[name] = `/${relative(await realpath(consumer), entry).split(sep).join("/")}`;
   }
   if (!browserOnly) {
-    const cases = await import(pathToFileURL(join(consumer, "consumer-cases.mjs")).href);
+    // Reproduce the standalone QA compiler flags against installed exports.
+    // Run before importing runtime cases so missing declarations are reported
+    // as a type gate failure rather than obscured by a later module-load error.
+    await run(process.execPath, [tsc, "--strict", "--noEmit", "--skipLibCheck",
+      "--target", "ES2022", "--module", "NodeNext", "--moduleResolution", "NodeNext",
+      join(consumer, "core-consumer-types.ts")], consumer);
     await run(process.execPath, [tsc, "-p", join(consumer, "tsconfig.json")], consumer);
-    passed("types")("standalone public Core, decoder and adapter declarations resolve from the installed tarball");
+    passed("types")("standalone full contract and example declarations resolve from the installed tarball, including decoders and onchain adapters");
+    const cases = await import(pathToFileURL(join(consumer, "consumer-cases.mjs")).href);
 
     const nodeFixture = await createConsumerFixture();
     try {

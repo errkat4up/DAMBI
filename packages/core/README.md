@@ -239,10 +239,24 @@ Reproduction commands for the new tests, after obtaining matching built Core
 WASM assets (the commands below have not been run as part of this change):
 
 ```sh
-node node_modules/typescript/bin/tsc -p packages/core/tsconfig.build.json
+node node_modules/typescript/bin/tsc -p packages/core/tsconfig.build.json &&
+node scripts/sdk/build-decoders.mjs &&
+node node_modules/typescript/bin/tsc --strict --noEmit --skipLibCheck \
+  --target ES2022 --module NodeNext --moduleResolution NodeNext \
+  packages/core/tests/consumer-types.ts &&
 node --test packages/core/tests/adapters/onchain-policy.test.mjs \
   packages/core/tests/adapters/onchain-policy-core.test.mjs
 ```
+
+`tsc -p packages/core/tsconfig.build.json` alone is not the package build:
+`@dambi/core/decoders` resolves to `dist/decoders.js` and
+`dist/decoders.d.ts`, which the existing `build-decoders.mjs` step produces.
+The reported QA TS2307 for that subpath must not be suppressed or worked around
+with a source alias or hand-written declaration. Run the generator before the
+consumer type check; if it fails, retain that failure and check its selected
+snapshot prerequisites. This sequence does not rebuild WASM. A full
+`npm run core:build` already includes both decoder packaging and WASM generation.
+No generated decoder bytes or metadata are supplied by this change.
 
 The existing `core:test:adapters` script has an explicit file list and does not
 include these new files. Use the explicit command above. The fake server binds
@@ -898,6 +912,13 @@ npm run core:test:runtime
 
 Consumer checks import the built package declarations (no source aliases) and
 also compile the policy wire types. Build first to avoid stale declarations.
+A TypeScript-only build does not generate the decoder subpath: when reusing
+matching WASM assets, follow it with `node scripts/sdk/build-decoders.mjs`
+before running consumer checks. Missing generated declarations remain a hard
+failure. The standalone tarball gate also copies the full
+`packages/core/tests/consumer-types.ts` contract into the external consumer and
+compiles it with strict NodeNext resolution, in addition to checking the example.
+Neither check substitutes workspace source types for installed declarations.
 The runtime checks load actual packaged WASM and compare plan/evaluate output
 against the Native session runner. They fail if artifacts are absent and never
 build them implicitly. No legacy extension WASM package is loaded.

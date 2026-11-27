@@ -2,6 +2,15 @@
 
 ## F5 — 동일 인정 블록 온체인 어댑터 진행 기록
 
+### QA 후속 — decoder 선언 생성 선행 단계
+
+- 작업: `t_18cd83b0` / 담당 D / branch 정보 미제공 / 제공 parent·검토 SHA: `45596b966ace5f5b21c1cbe041459aef973f4e78` / 상태: 수정안 작성·재검증 대기.
+- 제공 QA 결과: TypeScript 프로젝트 검사와 TypeScript 출력 명령은 각각 종료 0, 독립 소비자 타입 검사는 종료 2이며 `@dambi/core/decoders`의 TS2307이 보고됐다. 이는 전달받은 결과이며 이번 응답에서 실행한 검사가 아니다.
+- 변경 범위: Core README의 F5 재현 순서에 기존 `build-decoders.mjs`를 추가했다. package export는 `dist/decoders.d.ts`를 가리키며 단독 `tsc`는 이 생성 단계를 대신하지 않는다. decoder import·기존 assertion은 유지하고 ambient 선언이나 source alias로 우회하지 않는다. 생성 snapshot·metadata는 제출하지 않는다.
+- 회귀: 공개 onchain 옵션·PolicySource 호환성의 양성/음성 타입 사례를 추가했다. 독립 소비자 검사기는 전체 Core 타입 회귀도 저장소 밖에 복사해 실제 설치 tarball에 대해 QA와 같은 strict NodeNext 옵션으로 검사한다. 기존 예제 타입·Node/Chromium 실행 검사는 유지한다.
+- 검증: 이번 수정 후 실행 건수 없음. 빌드·시험·QA·독립 리뷰·커밋·푸시·RPC 연결을 수행하지 않았다. 다음은 Core README의 생성 단계 포함 재현 명령과 `node scripts/sdk/verify-consumers.mjs --node-only` 실행이다. 후자는 이미 빌드된 패키지와 기존 소비자 도구가 필요하며 자동 빌드하지 않는다.
+- 남은 범위: 아래 F1/F4 계약·긍정 수명주기 연결 제한은 해소했다고 주장하지 않는다. 소비자 타입 검사 보완은 실제 로컬 체인 deny 전파나 F5 전체 수용의 대체물이 아니다.
+
 - 작업: `t_18cd83b0` / 담당 D / branch 정보 미제공 / 제공 parent: `214273829df6e1a6f4b87f589bcf4e08a011c5a0`.
 - 이번 변경: 실제 `onchain-policy.ts`, adapter export/오류, loopback fake RPC, transport 회귀와 `onchain-policy-core.test.mjs`의 실제 Core 음성 신뢰 경계 회귀. F4 tuple·scope 호출, hash 고정·재확인, 원문/base64, chain/code 검증, 취소·timeout·동일 블록 기한·재시작을 구현했다.
 - 실행 상태: 빌드·시험·QA·독립 리뷰 미실행. 통과/실패 수 없음. 커밋·푸시·RPC 실연결·배포를 수행하지 않았다. 재현 명령과 제한은 Core README의 F5 절에 있다.

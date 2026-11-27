@@ -31,6 +31,9 @@ import "@dambi/core/internal";
 import { decoderSnapshot, decoderSnapshotInfo } from "@dambi/core/decoders";
 import {
   AdapterError,
+  createOnchainPolicySource,
+  type OnchainPolicySource,
+  type OnchainPolicySourceOptions,
   createPolicyApiSource,
   createScamBundleApiSource,
   createEvmFactProvider,
@@ -49,6 +52,26 @@ import {
 const packagedSnapshot: DecoderSnapshot = decoderSnapshot;
 const packagedBytes: number = decoderSnapshotInfo.bytes;
 void [packagedSnapshot, packagedBytes];
+
+// Compile-only: exercise the optional onchain public entry point without
+// replacing the packaged decoder import or weakening its declaration check.
+function consumeOnchainPolicy(options: OnchainPolicySourceOptions): void {
+  const source: OnchainPolicySource = createOnchainPolicySource(options);
+  const port: PolicySource = source;
+  const due: boolean = source.refreshDue();
+  const bundle: Promise<SignedPolicyBundle> = port.fetch({ signal: new AbortController().signal });
+  const finality: "safe" | "finalized" = options.finality;
+  // @ts-expect-error Onchain finality cannot silently fall back to latest.
+  createOnchainPolicySource({ ...options, finality: "latest" });
+  // @ts-expect-error Whole-refresh deadlines must be numeric milliseconds.
+  createOnchainPolicySource({ ...options, timeoutMs: "1000" });
+  // @ts-expect-error Runtime code is independently pinned, not optional.
+  createOnchainPolicySource({ ...options, expectedRuntimeCode: undefined });
+  // @ts-expect-error Captured source configuration is read-only.
+  options.chainId = "eip155:1";
+  void [due, bundle, finality];
+}
+void consumeOnchainPolicy;
 
 const policyApiOptions: PolicyApiSourceOptions = {
   baseUrl: "https://policies.example",
