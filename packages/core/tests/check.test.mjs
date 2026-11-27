@@ -294,6 +294,96 @@ test("partial Unknown and sibling Fact fetch failure preserve decoded policy den
   }
 });
 
+// Encode the supported Universal Router V3 exact-input command without an
+// extra ABI package. Offsets in bytes[] are relative to its element-head area.
+function rawSwapRequest(manifest) {
+  const word = (value) => BigInt(value).toString(16).padStart(64, "0");
+  const bytes = (hex) => word(hex.length / 2) + hex.padEnd(Math.ceil(hex.length / 64) * 64, "0");
+  const path = CONTRACT.slice(2) + "0001f4" + SECOND_CONTRACT.slice(2);
+  const step = SECOND_OWNER.slice(2).padStart(64, "0") + word(1000) + word(900)
+    + word(160) + word(1) + bytes(path);
+  const deadline = manifest.abi_fragment.abi.inputs.length === 3;
+  const headBytes = deadline ? 96 : 64;
+  const commands = bytes("00");
+  const inputs = word(1) + word(32) + bytes(step);
+  return {
+    kind: "transaction", chainId: "eip155:1", from: OWNER,
+    to: "0x66a9893cc07d91d95644aedd05d03f95e1dba8af", value: "0",
+    data: manifest.match.selector + word(headBytes) + word(headBytes + commands.length / 2)
+      + (deadline ? word(NOW / 1000 + 60) : "") + commands + inputs,
+  };
+}
+
+function supplySwapZeroObservations(value) {
+  if (!value || typeof value !== "object") return 0;
+  let count = 0;
+  if (value.params?.direction && value.venue) {
+    const live = (value) => ({
+      value, source: { kind: "user_supplied" }, observed_at: NOW / 1000 - 7,
+    });
+    value.params.slippage_bp = 0;
+    value.live_inputs = {
+      route: live({ paths: [] }), expected_amount_out: live("0x0"),
+      price_impact_bp: live(0), gas_estimate: live("0x0"),
+    };
+    count++;
+  }
+  for (const child of Object.values(value)) count += supplySwapZeroObservations(child);
+  return count;
+}
+
+test("raw positive-floor Swap reports missing policy inputs together with recipient deny, unlike supplied zero", options, async (t) => {
+  const recipientId = "swap-recipient-not-self-deny";
+  const recipient = JSON.parse(initialPolicy.payload).policies.find(({ id }) => id === recipientId);
+  assert.ok(recipient, "use the signed Day1 recipient policy, not a synthetic unconditional deny");
+  const when = recipient.policy.indexOf("when");
+  assert.ok(when > 0);
+  for (const filename of ["execute-v2@1.0.0.json", "execute-v2-no-deadline@1.0.0.json"]) {
+    const manifest = await readJson(new URL(
+      `../../../registryV2/manifests/uniswap/universal-router/${filename}`, import.meta.url,
+    ));
+    const raw = rawSwapRequest(manifest);
+    for (const field of ["slippageBp", "expectedAmountOut", "priceImpactBp", "gasEstimate", "routeEstimatedOut"]) {
+      const id = `check-observed-${field}`;
+      const dependent = structuredClone(recipient);
+      dependent.id = id;
+      dependent.manifest.id = id;
+      dependent.policy = recipient.policy.slice(0, when).replaceAll(recipientId, id)
+        + `when { context.${field} == context.${field} };`;
+      for (const observed of [false, true]) {
+        const decoder = structuredClone(manifest);
+        if (observed) {
+          // Explicit local control observations, not data inferred from calldata.
+          // Never write this control into the selected product snapshot.
+          assert.ok(supplySwapZeroObservations(decoder.emit) > 0);
+        }
+        const setup = harness({ policy: signed([recipient, dependent]), bundles: [decoder] });
+        const core = await open(t, setup);
+        const verdict = await core.check(raw);
+        const label = `${filename}/${field}/observed=${observed}: ${JSON.stringify(verdict)}`;
+        assert.equal(verdict.source, "evaluated", label);
+        assert.equal(verdict.decision, "deny", label);
+        assert.ok(hasReason(verdict, recipientId), label);
+        assert.equal(hasReason(verdict, id), observed, label);
+        assert.equal(hasDiagnostic(verdict, "invalid_request"), false, label);
+        assert.equal(hasDiagnostic(verdict, "no_matching_policy"), false, label);
+        assert.equal(
+          verdict.diagnostics.some((diagnostic) => JSON.stringify(diagnostic).includes(field)),
+          !observed, label,
+        );
+        const presentation = describeCheck(verdict);
+        assert.equal(presentation.decision, "deny", label);
+        assert.equal(presentation.enforcement, verdict.enforcement, label);
+        assert.equal(presentation.reviewEligible, false, label);
+        assert.equal(presentation.signingAuthorized, false, label);
+        if (!observed) assert.equal(presentation.status, "partial_interpretation", label);
+        assert.equal(setup.fetches.length, 0, "these policies do not request RPC enrichment");
+        core.dispose();
+      }
+    }
+  }
+});
+
 test("consumer distinguishes an unmatched policy from a matched allow without inventing a Core deny", options, async (t) => {
   const setup = harness({ policy: signed([balanceEntry()]) });
   const core = await open(t, setup);

@@ -408,6 +408,67 @@ mod tests {
         assert!(saw_debit && saw_credit);
     }
 
+    /// Calldata route identity is not a pool observation. Even a fully resolved
+    /// direct declaration cannot authorize balance effects without a live route.
+    #[test]
+    fn missing_and_declared_only_routes_require_an_observed_route() {
+        use crate::action::amm::DeclaredSwapRoute;
+
+        let state = state_with_pair(U256::from(1_000_000u64), U256::ZERO);
+        let mut swap = exact_in_swap(
+            U256::from(1_000u64),
+            U256::from(800u64),
+            usdc_ref(),
+            weth_ref(),
+            v2_venue(),
+            xy_pool(10_000, 10_000, 30),
+        );
+        let observed = swap.live_inputs.route.take().unwrap();
+        let direct = DeclaredSwapRoute::from(&observed.value);
+        assert!(matches!(&direct, DeclaredSwapRoute::Direct { .. }));
+        swap.live_inputs.expected_amount_out = None;
+        swap.live_inputs.price_impact_bp = None;
+        swap.live_inputs.gas_estimate = None;
+        swap.params.slippage_bp = None;
+
+        for declaration in [
+            None,
+            Some(DeclaredSwapRoute::Empty),
+            Some(direct),
+            Some(DeclaredSwapRoute::Other),
+        ] {
+            swap.live_inputs.declared_route = declaration;
+            let error = swap.apply(&state, &ctx()).unwrap_err();
+            assert!(
+                matches!(error, ReducerError::MissingField("route")),
+                "declared route must not substitute for an observation: {error:?}"
+            );
+            assert!(swap.live_inputs.route.is_none());
+        }
+
+        // Restore only the actual route observation. Unrelated absent estimates
+        // must not prevent the existing reserve-based balance calculation.
+        swap.live_inputs.route = Some(observed);
+        let delta = swap.apply(&state, &ctx()).unwrap();
+        assert_eq!(delta.token_changes.len(), 2);
+        match &delta.token_changes[0] {
+            TokenChange::BalanceDelta { key, delta } => {
+                assert_eq!(key, &usdc_ref().key);
+                assert!(delta.is_negative());
+                assert_eq!(delta.unsigned_abs().to_string(), "1000");
+            }
+            other => panic!("expected input debit, got {other:?}"),
+        }
+        match &delta.token_changes[1] {
+            TokenChange::BalanceDelta { key, delta } => {
+                assert_eq!(key, &weth_ref().key);
+                assert!(delta.is_positive());
+                assert_eq!(delta.unsigned_abs().to_string(), "906");
+            }
+            other => panic!("expected output credit, got {other:?}"),
+        }
+    }
+
     // ----------------------------------------------------------------------
     // V2 single-hop slippage failure
     // ----------------------------------------------------------------------

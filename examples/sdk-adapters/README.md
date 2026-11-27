@@ -75,153 +75,104 @@ user authorization. `signingAuthorized` is always false in this evaluation-only
 example. A Fact-related timeout is reported as `fact_evaluation_failed`; this
 label does not assert that every timeout originated in a required RPC call.
 
-### F2 candidate / QA handoff — not acceptance evidence
+### F2 review #72 follow-up
 
-This candidate changes swap quote-relative slippage and swap live observations:
+Base candidate: `sdk/t_ea7de51d` at
+`456c75d2ff7caf9c74324772fa0db0ac8f7a8e7b`, not main.
+This revision adds the missing combinations identified by review #72; its
+execution and independent acceptance remain pending. No commands, external log
+inspection, review, commit, push or live operation were performed for this edit.
 
-| Input | Expected behavior | Regression | Actual result |
-| --- | --- | --- | --- |
-| Missing derived slippage | Absent, not zero | `swap_missing_slippage_is_not_an_explicit_zero` | Not run |
-| Explicit slippage zero | Preserve zero | Same test; lowering observation test | Not run |
-| Live source without value/time | No observed value or generated observation time | `swap_observations_require_values_and_original_times_for_each_field` | Not run |
-| Dormant swap source with unresolved placeholder or unevaluable function, external and inline layouts | Preserve signed intent and zero output floor; do not evaluate the source recipe | `swap_dormant_sources_do_not_invalidate_signed_intent` | Not run |
-| Explicit swap observation with unresolved source | Retain validation error; do not silently discard the observation | Same builder regression | Not run |
-| Explicit live zero with original time, including epoch | Preserve zero and supplied time | Same test | Not run |
-| Positive output floor, no quote | Omit quote-relative slippage | `missing_swap_observations_are_omitted_but_real_zero_is_preserved` | Not run |
-| Explicit zero output floor, no quote | Keep `minAmountOut=0`; expose unbounded slippage | `explicit_zero_floor_is_unbounded_even_without_a_quote` | Not run |
-| Complete approve evaluation | Evaluated summary; no signing authorization | Packaged `check.test.mjs` | Not run |
-| Partial tree with independent deny | Partial summary retains deny | Packaged sibling-deny regression, both child orders | Not run |
-| No matching policy | Policy-unmatched summary; no new Core deny | Packaged unmatched-policy regression | Not run |
-| Missing required Fact | Failed Fact evaluation, not a successful interpretation | Packaged required-Fact regression | Not run |
+The earlier scope/compilation blockers recorded for `945e1dbd`, `b1528c5d` and
+`30ffbd4c` are historical, not the current scope. The supplied transition source
+now handles `route: None` with `ReducerError::MissingField("route")`, and uses the
+address comparison `*hooks != Address::ZERO`. Its constructors use optional live
+inputs. The transition file is authorized in this revision. Restoring fabricated
+routes or timestamps is neither needed nor acceptable.
 
-**F2 is not complete.** Remaining integration work includes non-slippage
-`$resolved`/`$derived` fallback identities, non-swap LiveField skeletons,
-transaction-meta gas observations, static route descriptions without simulation
-provenance, all Rust construction/consumption sites for the changed swap fields,
-and schema/evaluation handling of absent swap context attributes. In particular,
-this candidate must not be described as proving that every supported raw path
-avoids `INVALID_REQUEST` or preserves independent denies with missing swap data.
-Those require the native/session and packaged WASM regressions against the same
-candidate, including the real selected decoder fixtures. No generated decoder
-snapshot or metadata bytes are included.
+#### Supplied baseline results, not new-candidate evidence
 
-### Review blocker and required scope handoff
+The operator reports the following for **456c75d2**. These references have not
+been independently fetched or verified here:
 
-The supplied review reports native/WASM compilation failures at parent
-`945e1dbd54cb5dea9826365f25167566ec666610` (CI `45836838677`):
+- [Actions 45941664465](https://github.com/errkat4up/DAMBI/actions/runs/45941664465):
+  9/9 jobs successful.
+- [Rust job 140317272800](https://github.com/errkat4up/DAMBI/actions/runs/45941664465/job/140317272800):
+  the four named regressions in the table below reported `ok`; Native Core
+  fixtures also succeeded.
+- [Core job 140317272747](https://github.com/errkat4up/DAMBI/actions/runs/45941664465/job/140317272747):
+  isolated SDK Native, WASM and runtime/check succeeded.
+- Node/types/Chromium tarball consumer job `140319002777` succeeded.
+- VM QA #72: two TypeScript checks, decoder regeneration and Node 52/52;
+  zero failures/skips, artifact `15172658106`.
 
-- `crates/asset-model/transition/src/effect/amm/swap.rs:36`: E0609,
-  direct `route.value` access after the route became optional.
-- The same file at line 86: E0277, `FixedBytes` versus `Address` comparison.
+These reports supersede the old blanket “Not run” table for the baseline only.
+They do not establish the missing combinations requested by #72 or approve this
+revision. Do not attach these results to a future SHA as if it were tested.
 
-That transition file is outside this card's allowed edit paths and its contents
-were not supplied. This revision therefore does **not** claim to repair either
-compilation failure. Restoring a mandatory route using a fabricated empty route
-or observation timestamp would violate F2 and is not an acceptable compatibility
-fix. A wrapper that merely makes unchecked `.value` access compile would also
-hide the missing-observation condition from the reducer.
+#### Field semantics and QA matrix
 
-Required next scope: supply and authorize
-`crates/asset-model/transition/src/effect/amm/swap.rs` and its reducer regression
-callers. The reducer must explicitly handle an absent route without calculating
-successful swap effects from invented observations, preserve the observed-route
-behavior, and compare the actual address types at the reported comparison site.
-Tests must cover absent-route behavior and observed-route effects. Inspect the
-actual reducer error/result interface before choosing that implementation; no
-unseen error variant or caller contract is assumed here. Schema/session handling
-of absent attributes remains a separate integration gate, not a reason to fill
-missing attributes with zero.
+The raw integration boundary exercised here is the pinned Universal Router
+`execute-v2@1.0.0` and `execute-v2-no-deadline@1.0.0` manifests on Ethereum,
+V3 exact-input command `0x00`. Existing nested V4 command tests exercise both
+accepted tuple layouts; they do not prove market-data completeness or final
+TAKE/SETTLE recipient semantics.
 
-Within the supplied paths, this revision prevents dormant swap source recipes
-from being evaluated before observation detection. It adds a typed builder
-regression for external and inline source layouts, original epoch provenance,
-explicit zero, and validation of supplied observations. It also reformats the
-identified F2 mapper/lowering additions without removing assertions. This is an
-incremental candidate, not a buildable-completion or acceptance claim.
-
-Regression execution, the complete `cargo fmt --all --check`, native/WASM builds,
-QA actual-result entries, and independent `dambi-review` approval remain pending.
-The CI failures above are supplied review feedback, not locally reproduced
-results. No build, test, review, commit, push, or live operation is claimed by this
-handoff.
-
-### Follow-up at `b1528c5d0fd4f5f5ae692b30dcc091e67ad68a11`
-
-Status: **incremental consumer correction; F2 implementation and CI repair remain
-blocked**, not an implementation-complete submission.
-
-The supplied feedback reports failure of CI run `45938135660`, but supplies no
-job log or compiler diagnostics for that run. Its failure cannot be attributed
-to a particular check from the URL alone. The earlier reducer failures documented
-above remain unresolved by this patch; no newer failure details are inferred.
-
-The consumer's factory JSDoc was separated from `createAdapterCore` by the added
-`describeCheck` function. This patch reattaches the settings/options/return
-contract to the factory and types the presentation helper directly from the
-public `DambiCore.check` return type. It does not change Core decisions or
-substitute a compatibility wrapper for absent swap observations.
-
-The packaged real-WASM regressions additionally check presentation of unsupported
-requests, malformed requests, and an independent policy deny alongside a sibling
-Fact-fetch failure in both child orders. Expected results are respectively
-`unsupported_request`, `evaluation_failed`, and `fact_evaluation_failed`; none is
-eligible for signing review, and the independent deny remains visible. Actual
-results: **not run**.
-
-To repair the known Rust integration blocker, supply and authorize
-`crates/asset-model/transition/src/effect/amm/swap.rs`, its error/result interface,
-and affected reducer construction/tests. Supply the failing job excerpts from
-run `45938135660` as well. The currently supplied action model makes `route` an
-`Option<LiveField<SwapRoute>>`; changing it back to a fabricated observed route
-would violate the acceptance criteria. Completing missing-attribute evaluation
-also requires the actual swap Cedar schema and evaluation/session consumers,
-with edit authorization for any required changes outside the current paths.
-
-No CI log inspection, build, test execution, independent approval, commit, push,
-or live operation has been performed. QA execution and `dambi-review` approval
-must cover the eventual same integrated candidate, not this blocked partial
-patch.
-
-### Current review response: parent `30ffbd4c95462791c42e29ad014c8eaff0356fe7`
-
-**Blocked partial revision, not an implementation-complete or CI-repair claim.**
-The supplied review reports rustfmt and Rust compilation failures in CI run
-`45939169231`. The exact known compilation blocker is
-`crates/asset-model/transition/src/effect/amm/swap.rs`: its direct `route.value`
-access and hooks address comparison need migration. That file is still absent
-from both `allowed_paths` and the supplied sources. No edit to that file is
-included, and these changes cannot repair its compilation errors.
-
-The mapper now uses one swap classification for both observation-processing
-stages. The supplied F2 formatting sites are adjusted, and regressions exercise
-all four optional observations through typed construction and serialization,
-including observed zero, original epoch timestamps, and external/inline layouts.
-The lowering regression additionally distinguishes an observed empty route's
-zero sum from an absent route. The native real-manifest regression
-`zero_output_floor_without_observations_preserves_independent_recipient_deny`
-checks both selected execute selectors: literal `minAmountOut=0`, absent quote
-and live observations, successful planning, and the Day1 recipient deny reason.
-It does not replace or relax the existing positive-floor assertions.
-
-| Additional QA input | Expected | Actual |
+| Input / field | Expected interpretation and decision | Regression / actual evidence |
 | --- | --- | --- |
-| Each swap observation supplied independently, external and inline | Only that observation serialized; zero and original time retained | Not run |
-| No route versus explicitly observed empty route | Omitted `routeEstimatedOut` versus zero sum | Not run |
-| Both execute selectors, zero output floor, other recipient, no quote | Zero preserved; no whole-request invalidation; recipient deny retained | Not run |
+| V3 raw amount 1000, positive output floor 900 | Preserve both signed amounts and recipient; floor is not a reference quote | Existing `both_execute_selectors_preserve_v3_swap_intent_and_day1_recipient_decisions`; baseline Native fixtures reported successful |
+| V3 raw `minAmountOut=0`, quote absent | Preserve literal zero; no minimum-output protection, not an observed zero quote; retain independent recipient deny | `zero_output_floor_without_observations_preserves_independent_recipient_deny`; baseline Rust log reported `ok` |
+| Missing derived slippage versus supplied zero | Missing is absent; explicit zero remains zero | `swap_missing_slippage_is_not_an_explicit_zero`; baseline Rust log reported `ok` |
+| Positive floor without quote; missing route, quote, price impact and gas | Omit unavailable context attributes, not observed zero values | `missing_swap_observations_are_omitted_but_real_zero_is_preserved`; baseline Rust log reported `ok` |
+| Zero floor without quote | Expose unbounded slippage without inventing a quote | `explicit_zero_floor_is_unbounded_even_without_a_quote`; baseline Rust log reported `ok` |
+| Source recipe without a value/original observation time | No fabricated observation or submission-time timestamp; dormant recipes are not executed as observations | Existing builder regressions `swap_observations_require_values_and_original_times_for_each_field` and `swap_dormant_sources_do_not_invalidate_signed_intent`; individual execution details not supplied here |
+| Positive-floor V3 raw Swap, each missing field read by a policy, recipient deny installed simultaneously | Evaluated deny retains recipient reason and field-specific incompleteness; not whole-request `INVALID_REQUEST` or policy-unmatched | New native `positive_floor_missing_observation_policy_preserves_recipient_deny` and packaged WASM `raw positive-floor Swap reports missing policy inputs together with recipient deny, unlike supplied zero`; execution pending |
+| Same ABI/request with explicit zero observations in a local control decoder | Dependent policy also matches; recipient deny remains; missing-field diagnostic disappears | Same new tests; execution pending. Control observations are deliberately supplied test data, not measurements extracted from calldata |
+| Reducer route absent; declared route absent, empty, direct or other | Explicit `MissingField("route")`, no successful balance effects | New `missing_and_declared_only_routes_require_an_observed_route`; execution pending |
+| Restore observed route while unrelated estimates remain absent | Existing V2 reserve calculation still debits 1000 and credits 906 | Same new reducer test; execution pending; existing observed-route assertions retained |
+| Complete approve / partial Unknown tree / policy unmatched / required Fact failure | Distinct consumer statuses; no signing authorization; independent denies retained | Existing packaged `check.test.mjs` cases; baseline runtime/check reported successful. Unknown-child coverage is not a substitute for the new missing-Swap-field case |
 
-To resume the compilation repair, authorize and supply the transition file above,
-its error/result interface, and affected Rust constructor/fixture consumers.
-Absent-route handling must use that interface explicitly, not fabricate an empty
-observed route or add an unchecked compatibility wrapper. The remaining
-schema/session missing-attribute integration described above is also unresolved.
+The new native and packaged tests install one field-dependent policy at a time
+alongside the real Day1 recipient policy. This prevents a missing first field or
+boolean short-circuit from hiding coverage of the other fields. The supplied-zero
+controls require that dependent policy to produce a reason, so a policy trigger
+miss cannot masquerade as correct handling of absence. The native control also
+checks the decoded zero values. An explicitly observed empty route has a zero
+estimate sum; a declared empty route has no observed estimate.
 
-Required validation after integrating the blocked consumers includes
-`cargo fmt --all -- --check`, relevant native Rust builds/tests (including the
-mapper, lowering, and `dambi-core` Universal Router regressions), the WASM build,
-and packaged consumer tests. No commands or CI-log inspection were performed
-here. Regression logs, actual-result entries, and independent `dambi-review`
-approval remain pending for the same integrated candidate. No generated snapshot
-bytes, commit, push, or live operation are supplied or claimed.
+#### Support limits and next gate
+
+The Swap observation contract is not a blanket migration of every mapper field.
+Non-slippage `$resolved`/`$derived` fallback identities remain a limitation: a
+placeholder pool/factory identity is not evidence of a resolved on-chain venue.
+Do not use successful intent decoding as proof that venue-dependent checks or
+simulation have complete inputs. Transaction-meta gas is also separate from the
+Swap's optional `gas_estimate`.
+
+Non-Swap LiveField models remain outside this correction: liquidity pool state,
+current prices, collected/withdrawn fees, intent fill estimates, lending rates
+and Pendle market-derived instruments are not certified by the Swap tests.
+Existing defaults in those paths must not be described as verified observations.
+A protocol-defined default (for example no separate executor), an explicit
+zero-valued bound and unavailable enrichment are different contracts; this work
+does not globally convert mandatory fields to optional or approve all defaults.
+
+Neither a positive output floor nor a zero price-impact estimate means unlimited
+approval. Unlimited token approval remains its separate explicit amount-based
+policy. A zero output floor removes that output protection, whereas missing
+quote-relative slippage means the relative tolerance cannot be determined.
+
+Run the relevant mapper/lowering/reducer/native tests, formatting checks, WASM
+build and packaged consumer regressions against the same new candidate. Retain
+field-labelled failures and verdicts as QA output. In particular, if the new
+missing-field tests expose a schema/evaluation or presentation failure, preserve
+the assertions and hand off that boundary for a scoped product fix; do not
+replace missing fields with zero or weaken signature verification. Those boundary
+sources are not supplied as editable files in this four-file revision.
+
+F2 acceptance still requires new-SHA CI, independent QA and `dambi-review`
+approval compared with #72. No generated decoder snapshot or metadata bytes are
+included in this handoff.
 
 ## Measuring a complete SDK check
 
