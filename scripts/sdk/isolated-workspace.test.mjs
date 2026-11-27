@@ -3,6 +3,8 @@ import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
+import { probeProviderOptions, readProbeConfig, SCAM_EXECUTION_BUDGET } from "./scam-data-probe-session.mjs";
 import { markIsolatedWorkspacePrepared, openIsolatedWorkspace } from "./isolated-workspace.mjs";
 
 test("isolated Cargo workspace supplies every inherited member dependency with the repository declaration", async () => {
@@ -36,6 +38,31 @@ test("isolated Cargo workspace supplies every inherited member dependency with t
     }
   }
   assert.ok(dependencies > 0, "check must inspect inherited dependencies");
+});
+
+test("S2a host example and probe execute with the same bounded envelope", async () => {
+  const doc = await readFile(new URL("../../browser-extension/docs/scam-filter-local-demo.md", import.meta.url), "utf8");
+  const script = doc.match(/```javascript\n(const input = \{[\s\S]*?)\n```/)[1];
+  // Evaluate configuration construction only. No storage call or network exists
+  // in this sandbox. JSON round-trip removes cross-realm object prototypes.
+  const host = JSON.parse(JSON.stringify(runInNewContext(`${script}\nscamHostConfig`, {})));
+  const config = readProbeConfig({ SCAM_HISTORY_CACHE: "1" });
+  const provider = probeProviderOptions(config);
+  const budget = SCAM_EXECUTION_BUDGET;
+  assert.equal(host.scam.config.limits.maxTargets, budget.maxTargets);
+  assert.equal(host.scam.config.limits.maxCalls, budget.maxCalls);
+  assert.equal(host.scam.config.limits.maxAlgorithmWorkUnits, budget.maxAlgorithmWorkUnits);
+  assert.equal(host.scam.config.limits.maxPoints, budget.maxPoints);
+  assert.equal(host.scam.config.limits.maxLogs, budget.maxLogs);
+  assert.equal(host.scam.config.limits.maxResultBytes, budget.maxResultBytes);
+  assert.equal(host.facts.scam.limits.maxTargets, budget.maxTargets);
+  assert.equal(host.facts.scam.limits.maxCalls, budget.maxCalls);
+  assert.deepEqual(host.facts.scam.rpc.limits, provider.rpc.limits);
+  assert.deepEqual(host.facts.scam.rpc.historyCache, provider.rpc.historyCache);
+  assert.equal(host.facts.scam.history.maxPoints, provider.history.maxPoints);
+  assert.equal(host.facts.scam.limits.maxResultBytes, provider.limits.maxResultBytes);
+  assert.equal(host.facts.scam.limits.timeoutMs, config.timeoutMs);
+  assert.equal(config.lookbackSec + config.warmupSec, 172800);
 });
 
 test("isolated sources retain the GIWA Native runner and public adapter timing helper", async () => {
