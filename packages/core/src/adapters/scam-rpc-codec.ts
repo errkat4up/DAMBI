@@ -11,6 +11,7 @@ export type RpcBlock = {
 };
 
 export type RpcLog = {
+  readonly removed: boolean;
   readonly address: `0x${string}`;
   readonly blockNumber: string;
   readonly blockHash: `0x${string}`;
@@ -109,6 +110,7 @@ export function decodeLogs(
     // A present but invalid value is not equivalent to an unsupported field.
     const observedTime = "blockTimestamp" in entry ? timestampMs(entry.blockTimestamp) : undefined;
     const decoded: RpcLog = Object.freeze({
+      removed: entry.removed,
       address: normalized(entry.address),
       blockNumber: blockNumber.toString(),
       blockHash: normalized(entry.blockHash),

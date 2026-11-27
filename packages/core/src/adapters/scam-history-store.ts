@@ -82,10 +82,10 @@ export function createScamHistoryStore(input: ScamHistoryStoreOptions) {
         || !Array.isArray(value.logs)) return invalid();
     const from = BigInt(value.fromBlock), to = BigInt(value.toBlock);
     if (from > to) return invalid();
-    if (to - from + 1n > maxSpan) return undefined;
+    if (to - from + 1n > maxSpan || value.logs.some((log) => log?.removed !== false)) return undefined;
     const logs = value.logs.map((log): RpcLog => {
       if (!decimal(log.blockNumber) || BigInt(log.blockNumber) < from || BigInt(log.blockNumber) > to) return invalid();
-      return Object.freeze({ address: log.address, blockNumber: log.blockNumber, blockHash: log.blockHash,
+      return Object.freeze({ removed: log.removed, address: log.address, blockNumber: log.blockNumber, blockHash: log.blockHash,
         ...(log.timestampMs === undefined ? {} : { timestampMs: log.timestampMs }),
         transactionHash: log.transactionHash, transactionIndex: log.transactionIndex, logIndex: log.logIndex,
         topics: Object.freeze([...log.topics]), data: log.data });

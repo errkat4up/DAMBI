@@ -9,7 +9,7 @@ import { AdapterError } from "./errors.js";
 import { callSignal } from "./http.js";
 import { address, type RpcLog } from "./scam-rpc-codec.js";
 import { decodePairCreated } from "./scam-profile-codec.js";
-import { verifyPoolCreation, type PoolCreationEvidence } from "./scam-pool-creation.js";
+import { verifyPoolCreation } from "./scam-pool-creation.js";
 import { buildPoolHistory, SCAM_DATA_BUILDER_VERSION, type PoolHistoryBuildLimits } from "./scam-pool-history.js";
 import { buildTokenProfile, type FactoryHistorySupport, type TokenAdminSupport, type TokenProfileBuildOptions } from "./scam-token-profile.js";
 import { createScamRpcSource, ScamRpcError, type ScamRpcBatch, type ScamRpcDiagnostic, type ScamRpcMetrics, type ScamRpcOptions } from "./scam-rpc.js";
@@ -340,9 +340,7 @@ export function createScamFactProvider(options: ScamFactProviderOptions): ScamFa
                   const block = await batch.block(claimed.createdAt.number);
                   const proof = verifyPoolCreation(pool.subject, { chainId: config.chainId, block }, {
                     chainId: config.chainId,
-                    // This assertion does not add a removal flag. The verifier
-                    // rejects envelopes whose acquisition discarded that flag.
-                    logs: profileTimes.creationLogs as PoolCreationEvidence["logs"],
+                    logs: profileTimes.creationLogs,
                   });
                   if (proof.kind !== "verified"
                       || proof.poolCreatedMs !== claimed.createdAt.timestampMs

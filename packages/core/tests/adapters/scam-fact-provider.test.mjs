@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createScamFactProvider } from "../../dist/adapters/index.js";
+import { PAIR_CREATED_TOPIC } from "../../dist/adapters/scam-profile-codec.js";
 import { scamProviderRpcFixture } from "./helpers/scam-provider-fixture.mjs";
 
 const NOW = 1_800_000_000_000;
@@ -292,6 +293,49 @@ test("scam provider preserves the bounded preflight cause before spending an imp
   assert.ok(metric.requests < 16);
   assert.equal(Object.isFrozen(metric.preflight), true);
   assert.equal(metric.resultBytes, 0);
+});
+
+test("scam provider verifies creation from observed PairCreated logs on cold and cached fetches", async () => {
+  const word = (value) => BigInt(value).toString(16).padStart(64, "0");
+  const block = 995;
+  const txHash = `0x${word(456)}`;
+  const f = setup();
+  delete f.config.factorySupport[0].nonRecreationSupportId;
+  const fetch = f.raw.rpc.fetch;
+  let removed = false, factoryScans = 0;
+  f.config.rpc = { ...f.raw.rpc, historyCache: historyCache(), fetch: async (...args) => {
+    const rpc = JSON.parse(args[1].body);
+    if (rpc.method !== "eth_getLogs" || rpc.params[0].address !== FACTORY) return fetch(...args);
+    factoryScans++;
+    const { fromBlock, toBlock } = rpc.params[0];
+    const inRange = BigInt(fromBlock) <= BigInt(block) && BigInt(block) <= BigInt(toBlock);
+    const result = inRange ? [{
+      address: FACTORY, blockNumber: `0x${block.toString(16)}`, blockHash: `0x${word(block + 10_000)}`,
+      transactionHash: txHash, transactionIndex: "0x0", logIndex: "0x2",
+      topics: [PAIR_CREATED_TOPIC, `0x${word(TOKEN)}`, `0x${word(QUOTE)}`],
+      data: `0x${word(POOL)}${word(1)}`, removed,
+    }] : [];
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result }));
+  } };
+  const provider = f.create();
+  for (const reuse of ["none", "interval_cache"]) {
+    const scansBefore = factoryScans;
+    const { results } = await provider.fetch(calls(), context());
+    const profile = results["a:profile"].value;
+    assert.equal(profile.verification.reuse, reuse);
+    assert.equal(profile.age.kind, "exact");
+    assert.equal(profile.age.ageSec, 5);
+    assert.equal(profile.age.evidence.transactionHash, txHash);
+    assert.equal(profile.age.evidence.logIndex, 2);
+    assert.equal(profile.age.evidence.createdAt.timestampMs, NOW - 7_000);
+    if (reuse === "none") assert.ok(factoryScans > scansBefore);
+    else assert.equal(factoryScans, scansBefore);
+  }
+  for (removed of [undefined, true]) {
+    const { results } = await f.create().fetch(calls(), context());
+    assert.equal(results["a:profile"].value.age.kind, "unknown");
+    assert.equal(results["a:profile"].value.age.evidence, undefined);
+  }
 });
 
 test("scam provider snapshots explicit capabilities and never infers age or administrator support from a configured RPC", async () => {

@@ -148,7 +148,7 @@ await chrome.storage.local.set({ "scam-filter:host-config": savedScamHost });
 
 provider의 exact 생성 결과는 해당 profile 수집에서 얻은 후보 사건과 같은 batch에서 독립 조회한 생성 헤더를 검증한 뒤에만 반환한다. 이벤트의 optional timestamp나 조회 시각으로 생성 시각을 대체하지 않는다. 검증 후에도 원래 batch의 최종 canonical 검사와 전체 결과 바이트 제한을 거친다. 나이는 현재 시계가 아니라 결과의 reference 시각과 생성 시각에 결속되어야 하며 lower-bound 근거와 exact 근거를 혼용하지 않는다.
 
-**남은 acquisition 제한:** 정규화된 `RpcLog`만 있고 원래 `removed:false`가 보존되지 않았다면 승인된 판별 함수의 계약을 만족하지 못한다. provider는 그 값을 추정하지 않고 exact draft 전체를 `data_missing`으로 거절한다. 이것은 complete 지원을 입증한 상태가 아니다. raw acquisition에서 removal 상태를 보존하는 인터페이스와 실제 생성 사건을 통한 provider 회귀 확인이 남아 있다. 이 제한을 capability 추가나 첫 Mint 시각으로 우회하지 않는다. 독립 검토에서는 이 경계와 factory 배포 provenance를 별도 확인해야 한다.
+RPC 어댑터는 원 로그의 `removed: false`를 확인해 정규화 결과와 이력 캐시에 보존한다. 제거된 로그나 제거 여부가 누락된 로그가 든 구간은 캐시에서 재사용할 수 없다. 생성 시각을 정확히 산출하려면 같은 체인의 블록 헤더, factory·pool·token이 일치하는 생성 사건, 명시적 factory 지원 설정이 필요하다.
 
 ### 공통 실행 envelope
 
