@@ -32,7 +32,7 @@ export function describeCheck(verdict) {
   const partial = codes.has("partial_decode");
   const unsupported = codes.has("unsupported_request");
   const unmatched = codes.has("no_matching_policy");
-  const failed = verdict?.source !== "evaluated";
+  const failed = verdict?.source !== "evaluated" || codes.has("engine_error");
   const status = requiredFactFailure ? "fact_evaluation_failed"
     : failed ? "evaluation_failed"
       : unsupported ? "unsupported_request"

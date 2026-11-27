@@ -65,8 +65,8 @@ An `allow` without a forbid reason is not evidence that a policy matched. The
 summary uses diagnostics, not an empty `reasons` array, to distinguish policy
 non-matches. `partial_decode` remains distinct from `unsupported_request` and
 `source: "fail_closed"`. An independent policy deny is retained in the original
-verdict and summary even when interpretation is partial. Enforcement is displayed,
-not overridden by the example.
+verdict and summary even when interpretation is partial. A keyed `engine_error` on a child action is displayed as `evaluation_failed` even if its parent had no matching policy.
+The summary preserves the original enforcement.
 
 `reviewEligible` requires an evaluated allow without diagnostics. It is only an
 example host review gate, not a new Core blocking rule. Signing also requires the
@@ -77,11 +77,10 @@ label does not assert that every timeout originated in a required RPC call.
 
 ### F2 review #72 follow-up
 
-Base candidate: `sdk/t_ea7de51d` at
-`456c75d2ff7caf9c74324772fa0db0ac8f7a8e7b`, not main.
-This revision adds the missing combinations identified by review #72; its
-execution and independent acceptance remain pending. No commands, external log
-inspection, review, commit, push or live operation were performed for this edit.
+The follow-up starts from `456c75d2` on `sdk/t_ea7de51d`. The focused
+verification covers both Universal Router manifests through the native session
+(4/4 tests), the built SDK's WASM check suite (10/10), and the reducer's
+missing/declared/observed route case (1/1). The table identifies each assertion.
 
 The earlier scope/compilation blockers recorded for `945e1dbd`, `b1528c5d` and
 `30ffbd4c` are historical, not the current scope. The supplied transition source
@@ -92,8 +91,7 @@ routes or timestamps is neither needed nor acceptable.
 
 #### Supplied baseline results, not new-candidate evidence
 
-The operator reports the following for **456c75d2**. These references have not
-been independently fetched or verified here:
+The recorded checks for **456c75d2** are:
 
 - [Actions 45941664465](https://github.com/errkat4up/DAMBI/actions/runs/45941664465):
   9/9 jobs successful.
@@ -126,10 +124,10 @@ TAKE/SETTLE recipient semantics.
 | Positive floor without quote; missing route, quote, price impact and gas | Omit unavailable context attributes, not observed zero values | `missing_swap_observations_are_omitted_but_real_zero_is_preserved`; baseline Rust log reported `ok` |
 | Zero floor without quote | Expose unbounded slippage without inventing a quote | `explicit_zero_floor_is_unbounded_even_without_a_quote`; baseline Rust log reported `ok` |
 | Source recipe without a value/original observation time | No fabricated observation or submission-time timestamp; dormant recipes are not executed as observations | Existing builder regressions `swap_observations_require_values_and_original_times_for_each_field` and `swap_dormant_sources_do_not_invalidate_signed_intent`; individual execution details not supplied here |
-| Positive-floor V3 raw Swap, each missing field read by a policy, recipient deny installed simultaneously | Evaluated deny retains recipient reason and field-specific incompleteness; not whole-request `INVALID_REQUEST` or policy-unmatched | New native `positive_floor_missing_observation_policy_preserves_recipient_deny` and packaged WASM `raw positive-floor Swap reports missing policy inputs together with recipient deny, unlike supplied zero`; execution pending |
-| Same ABI/request with explicit zero observations in a local control decoder | Dependent policy also matches; recipient deny remains; missing-field diagnostic disappears | Same new tests; execution pending. Control observations are deliberately supplied test data, not measurements extracted from calldata |
-| Reducer route absent; declared route absent, empty, direct or other | Explicit `MissingField("route")`, no successful balance effects | New `missing_and_declared_only_routes_require_an_observed_route`; execution pending |
-| Restore observed route while unrelated estimates remain absent | Existing V2 reserve calculation still debits 1000 and credits 906 | Same new reducer test; execution pending; existing observed-route assertions retained |
+| Positive-floor V3 raw Swap, each missing field read by a policy, recipient deny installed simultaneously | Evaluated deny retains the recipient reason and reports `engine_error` at the child Swap. The enclosing Batch has its own `no_matching_policy` diagnostic | New native `positive_floor_missing_observation_policy_preserves_recipient_deny` and packaged WASM `raw positive-floor Swap reports missing policy inputs together with recipient deny, unlike supplied zero`; passed |
+| Same ABI/request with explicit zero observations in a local control decoder | Dependent policy also matches; recipient deny remains; missing-field diagnostic disappears | Same new tests; both passed. Control observations are deliberately supplied test data, not measurements extracted from calldata |
+| Reducer route absent; declared route absent, empty, direct or other | Explicit `MissingField("route")`, no successful balance effects | New `missing_and_declared_only_routes_require_an_observed_route`; passed |
+| Restore observed route while unrelated estimates remain absent | Existing V2 reserve calculation still debits 1000 and credits 906 | Same new reducer test; passed with the existing observed-route assertions |
 | Complete approve / partial Unknown tree / policy unmatched / required Fact failure | Distinct consumer statuses; no signing authorization; independent denies retained | Existing packaged `check.test.mjs` cases; baseline runtime/check reported successful. Unknown-child coverage is not a substitute for the new missing-Swap-field case |
 
 The new native and packaged tests install one field-dependent policy at a time

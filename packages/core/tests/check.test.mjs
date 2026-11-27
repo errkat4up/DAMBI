@@ -3,6 +3,7 @@ import { createHash, sign } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { CoreError, createCore } from "@dambi/core";
+import { decoderSnapshot } from "@dambi/core/decoders";
 import { describeCheck } from "../../../examples/sdk-adapters/client.mjs";
 
 // Real packaged WASM, locally signed policy fixtures, and mocked external I/O.
@@ -319,7 +320,7 @@ function supplySwapZeroObservations(value) {
   let count = 0;
   if (value.params?.direction && value.venue) {
     const live = (value) => ({
-      value, source: { kind: "user_supplied" }, observed_at: NOW / 1000 - 7,
+      value, source: { kind: "user_supplied" }, synced_at: NOW / 1000 - 7,
     });
     value.params.slippage_bp = 0;
     value.live_inputs = {
@@ -338,10 +339,10 @@ test("raw positive-floor Swap reports missing policy inputs together with recipi
   assert.ok(recipient, "use the signed Day1 recipient policy, not a synthetic unconditional deny");
   const when = recipient.policy.indexOf("when");
   assert.ok(when > 0);
-  for (const filename of ["execute-v2@1.0.0.json", "execute-v2-no-deadline@1.0.0.json"]) {
-    const manifest = await readJson(new URL(
-      `../../../registryV2/manifests/uniswap/universal-router/${filename}`, import.meta.url,
-    ));
+  const { bundles } = JSON.parse(decoderSnapshot.artifact);
+  for (const name of ["execute-v2@1.0.0", "execute-v2-no-deadline@1.0.0"]) {
+    const manifest = bundles.find(({ id }) => id === `uniswap/universal-router/${name}`);
+    assert.ok(manifest, `the packaged decoder snapshot must include ${name}`);
     const raw = rawSwapRequest(manifest);
     for (const field of ["slippageBp", "expectedAmountOut", "priceImpactBp", "gasEstimate", "routeEstimatedOut"]) {
       const id = `check-observed-${field}`;
@@ -360,23 +361,23 @@ test("raw positive-floor Swap reports missing policy inputs together with recipi
         const setup = harness({ policy: signed([recipient, dependent]), bundles: [decoder] });
         const core = await open(t, setup);
         const verdict = await core.check(raw);
-        const label = `${filename}/${field}/observed=${observed}: ${JSON.stringify(verdict)}`;
+        const label = `${name}/${field}/observed=${observed}: ${JSON.stringify(verdict)}`;
         assert.equal(verdict.source, "evaluated", label);
         assert.equal(verdict.decision, "deny", label);
         assert.ok(hasReason(verdict, recipientId), label);
         assert.equal(hasReason(verdict, id), observed, label);
         assert.equal(hasDiagnostic(verdict, "invalid_request"), false, label);
-        assert.equal(hasDiagnostic(verdict, "no_matching_policy"), false, label);
-        assert.equal(
-          verdict.diagnostics.some((diagnostic) => JSON.stringify(diagnostic).includes(field)),
-          !observed, label,
-        );
+        const unmatched = verdict.diagnostics.filter(({ code }) => code === "no_matching_policy");
+        assert.deepEqual(unmatched.map(({ nodePath }) => nodePath), [[]], label);
+        const engineErrors = verdict.diagnostics.filter(({ code }) => code === "engine_error");
+        assert.deepEqual(engineErrors.map(({ nodePath }) => nodePath), observed ? [] : [[0]], label);
+        if (!observed) assert.ok(engineErrors[0].message.includes(field), label);
         const presentation = describeCheck(verdict);
         assert.equal(presentation.decision, "deny", label);
         assert.equal(presentation.enforcement, verdict.enforcement, label);
         assert.equal(presentation.reviewEligible, false, label);
         assert.equal(presentation.signingAuthorized, false, label);
-        if (!observed) assert.equal(presentation.status, "partial_interpretation", label);
+        assert.equal(presentation.status, observed ? "policy_unmatched" : "evaluation_failed", label);
         assert.equal(setup.fetches.length, 0, "these policies do not request RPC enrichment");
         core.dispose();
       }
