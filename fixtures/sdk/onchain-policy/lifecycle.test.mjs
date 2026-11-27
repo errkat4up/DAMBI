@@ -108,11 +108,20 @@ test("host refresh hint, outage grace, exact deadline stop and recovery without 
   deny(await core.check(input.request));
   await rejectedCreate(rpc, "POLICY_FETCH_FAILED");
   const pending = await core.plan(input.request);
+  const pendingAfterDeadline = await core.plan(input.request);
   rpc.now = NOW + input.stateDeadlineMs - 1;
   deny(await core.check(input.request));
+  // The plan handle remains within its 60-second TTL. Expired policy trust
+  // rejects new planning with CoreError, but evaluation of an existing live
+  // handle returns fail_closed + trust_expired, not policy_expired.
+  assert.ok(pending.expiresAt > NOW + input.stateDeadlineMs + 1);
+  assert.ok(pendingAfterDeadline.expiresAt > NOW + input.stateDeadlineMs + 1);
   rpc.now++;
   await assert.rejects(core.plan(input.request), code("POLICY_EXPIRED"));
-  assertPlanRejected(core, pending, { kind: "fail_closed", code: "policy_expired" }, CoreError);
+  assertPlanRejected(core, pending, { kind: "fail_closed", code: "trust_expired" }, CoreError);
+  rpc.now++;
+  await assert.rejects(core.plan(input.request), code("POLICY_EXPIRED"));
+  assertPlanRejected(core, pendingAfterDeadline, { kind: "fail_closed", code: "trust_expired" }, CoreError);
 
   rpc.mode = "ok";
   // Reobserving the old block cannot renew the original observation deadline.

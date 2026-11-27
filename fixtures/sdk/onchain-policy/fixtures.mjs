@@ -8,7 +8,8 @@ import { NOW, REGISTRY, encodeRead, options } from "./fake-rpc.mjs";
 
 // F1 is intentionally not copied into this F5 checkout. Injection is a real
 // installed SDK plus JSON source inputs, never a createCore wrapper/test stub.
-// Missing inputs are hard failures, not skipped tests or a legacy HTTP fallback.
+// Known lifecycle expectations are fixed below, not operator-selected outcomes.
+// Missing remaining wire/policy inputs are hard failures, never HTTP fallbacks.
 export async function loadIntegration() {
   function required(name) {
     const value = process.env[name];
@@ -30,23 +31,37 @@ export async function loadIntegration() {
   const sdk = await import(new URL(entry, pathToFileURL(packagePath)).href);
   assert.equal(typeof sdk.createCore, "function");
   assert.equal(typeof sdk.CoreError, "function");
-  const input = JSON.parse(await readFile(inputPath, "utf8"));
+  const supplied = JSON.parse(await readFile(inputPath, "utf8"));
+  assert.ok(supplied && typeof supplied === "object" && !Array.isArray(supplied));
+  // Defaults describe the reviewed F1 public contract. Keep the independent
+  // package selection and input/source SHA binding mandatory. Existing complete
+  // input files remain usable; conflicting expectations fail rather than
+  // selecting a different assertion path.
+  const input = {
+    limits: {},
+    stateDeadlineMs: 20_000,
+    planRule: "invalidate-on-new-active",
+    replacedPlan: { kind: "fail_closed", code: "trust_expired" },
+    revokedPlan: { kind: "fail_closed", code: "trust_expired" },
+    revokedRefresh: "resolves",
+    ...supplied,
+    trust: { env: "staging", profile: "default", ...supplied.trust },
+  };
   assert.equal(input.f1Sha, f1Sha, "Configuration/drafts must identify the same F1 contract");
   assert.ok(input.registryRef && typeof input.registryRef === "object" && !Array.isArray(input.registryRef));
-  assert.ok(input.trust && typeof input.trust === "object");
-  assert.ok(input.limits && typeof input.limits === "object");
+  assert.ok(input.trust && typeof input.trust === "object" && !Array.isArray(input.trust));
+  assert.equal(input.trust.env, "staging");
+  assert.equal(input.trust.profile, "default");
+  assert.ok(input.trust.registry && typeof input.trust.registry === "object"
+    && !Array.isArray(input.trust.registry), "Supply the F1 trust.registry configuration");
+  assert.ok(input.limits && typeof input.limits === "object" && !Array.isArray(input.limits));
   assert.equal(input.stateDeadlineMs, 20_000, "Fixture observation deadline is fixed, not an acceptance override");
   assert.equal(input.planRule, "invalidate-on-new-active");
-  assert.ok(["resolves", "POLICY_EXPIRED"].includes(input.revokedRefresh),
-    "Supply F1's exact confirmed-revocation refresh completion contract");
+  assert.equal(input.revokedRefresh, "resolves",
+    "F1 confirmed-revocation refresh resolves after installing the revocation");
   for (const name of ["replacedPlan", "revokedPlan"]) {
-    const expectation = input[name];
-    assert.ok(expectation && ["throw", "fail_closed"].includes(expectation.kind));
-    assert.equal(typeof expectation.code, "string");
-    // These expectations specify only the unavailable F1 lifecycle vocabulary;
-    // they cannot turn a normal verdict or an engine/transport failure into a pass.
-    assert.match(expectation.code, /^(?:[A-Z][A-Z_]*|[a-z][a-z_]*)$/);
-    assert.doesNotMatch(expectation.code.toLowerCase(), /engine|fetch|signature|unsupported|not_implemented/);
+    assert.deepEqual(input[name], { kind: "fail_closed", code: "trust_expired" },
+      `${name}: a live handle with invalidated trust must fail closed`);
   }
   assert.equal(input.request?.kind, "transaction");
   assert.equal(input.request.chainId, "eip155:1");

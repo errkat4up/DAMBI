@@ -288,11 +288,14 @@ Supply `DAMBI_F1_INPUT` as a local JSON file with these required source inputs:
 - `registryRef`: F1's actual signed `registry_ref` object for chain **91342** and
   Registry **0x1111111111111111111111111111111111111111**. Copy the approved wire
   shape, including any required scope fields; do not invent camel/snake aliases.
-- `trust` and `limits`: F1's public Core trust/limit fields configuring that same
+- `trust.registry`: F1's public Registry trust configuration for that same
   Registry, finalized observations, a **20,000ms observation lifetime** and
-  **30,000ms block age**. These JSON objects supply the F1-only fields whose names
-  are absent from this base. The fixture fixes ordinary size/deadline limits,
-  staging/default scope and the repository's official test-only public key.
+  **30,000ms block age**. Its nested wire fields are not included in the supplied
+  F5 source baseline and remain explicit input rather than guessed aliases.
+  `trust.env` and `trust.profile` default to staging/default; conflicting scope
+  is rejected. The repository's official test-only public key is installed by
+  the fixture, so operators need not supply keys. `limits` is optional: ordinary
+  size/deadline limits are already fixed by the fixture.
 - `denyDraft` and `allowDraft`: complete F1 policy payload drafts in staging/default
   scope for the same supported approve request. The first must actually deny via
   `denyPolicyId`; the second must evaluate allow. Use selected F1 policy source
@@ -304,25 +307,36 @@ Supply `DAMBI_F1_INPUT` as a local JSON file with these required source inputs:
   `snapshot-approve.json`, with no required Facts; `denyPolicyId`: its matching
   deny policy ID. This tests policy-chain/transaction-chain distinction, **not**
   Ethereum Fact retrieval or its separate integration acceptance.
+The following fields have test-only defaults and need not be supplied:
+
 - `stateDeadlineMs: 20000`, `planRule: "invalidate-on-new-active"`.
-- `replacedPlan` and `revokedPlan`: F1's exact public lifecycle expectations,
-  `{ "kind": "throw", "code": "<CoreError code>" }` or
-  `{ "kind": "fail_closed", "code": "<diagnostic code>" }`. Obtain these from
-  F1's approved tests; normal evaluated verdicts and engine/fetch/signature errors
-  are not accepted. This is explicit contract input, not error auto-detection.
-- `revokedRefresh`: F1's exact completion convention, either `"resolves"` or
-  `"POLICY_EXPIRED"`. Both paths subsequently require rejection of planning,
-  pending-plan invalidation, and no resurrection after an RPC failure.
+- `replacedPlan` and `revokedPlan`: both exactly
+  `{ "kind": "fail_closed", "code": "trust_expired" }`.
+- `revokedRefresh: "resolves"`: confirmed revocation installs successfully;
+  subsequent planning rejects with `CoreError("POLICY_EXPIRED")` and evaluation
+  of a still-live pending plan returns `deny + fail_closed + trust_expired`.
 
-The unavailable F1 configuration/wire names and lifecycle codes are deliberately
-not guessed here. These inputs and the corresponding approved F1 SDK are pending
-handoff requirements. The reported development comparison at F1
-`17a7dfae43726e838284a714afd38b88a26c4300` is not approval or evidence from this
-runner. Initialization expectations are fixed independently of input configuration:
-active succeeds and evaluates deny, bad P-256 is exactly `INVALID_SIGNATURE`, and
-the identical valid signed payload with revoked status is exactly `POLICY_EXPIRED`.
+If provided, these fields must match those exact expectations. They cannot
+select alternative error outcomes. The deadline regression likewise requires
+`POLICY_EXPIRED` from new planning and `trust_expired` from pending evaluation,
+both at the exact state deadline and one millisecond afterwards. Separate live
+handles are used because evaluation consumes each handle once.
 
-After those inputs exist, run from the F5 checkout, supplying full source SHAs:
+Lifecycle codes now follow the supplied F1 review contract rather than arbitrary
+operator expectations. This source baseline still does not include the nested
+`trust.registry` type, signed `registry_ref` schema, or F1 authorization-policy
+fixture contents. Those remaining inputs must use the existing reviewed JSON;
+this patch does not invent defaults for their unknown wire shapes. Completing
+those source defaults requires their exact definitions, not credentials or a
+new live-chain check. Initialization expectations remain fixed independently of
+input configuration: active succeeds and evaluates deny, bad P-256 is exactly
+`INVALID_SIGNATURE`, and the identical valid signed payload with revoked status
+is exactly `POLICY_EXPIRED`.
+
+For the review regression, retain the same installed F1 package and existing
+input JSON and rerun the entire official entry below without a name filter.
+Do not substitute another engine or alter policy drafts to address a diagnostic
+mismatch. Supply the installed package's F1 SHA and the revised F5 source SHA:
 
 ```sh
 DAMBI_F1_CONSUMER=/absolute/installed-f1-consumer \

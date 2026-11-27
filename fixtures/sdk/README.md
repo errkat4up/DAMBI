@@ -2,6 +2,15 @@
 
 ## F5 — 동일 인정 블록 온체인 어댑터 진행 기록
 
+### F1 공개 진단 계약 교정 — 검증 대기
+
+- 작업: `t_18cd83b0` / 담당 D / 실제 branch 미확인 / 제공 parent `90afe501163476fcb922b97bc92adff526f8d621` / 상태: 수정안 작성·검증 대기.
+- 변경 범위: lifecycle의 기한 만료 pending evaluate 기대값을 `trust_expired`로 교정했다. 새 plan의 `CoreError(POLICY_EXPIRED)`와 구분하며 정확한 기한 및 기한+1ms에 별도 live handle을 평가한다. deny·fail_closed·진단 assertion과 기존 복구/재시작 경로는 유지한다.
+- 기본값: replacedPlan/revokedPlan은 `fail_closed + trust_expired`, revokedRefresh는 `resolves`로 고정했다. 다른 기대값은 거절한다. scope·일반 limits·공식 test-only key는 fixture에서 제공하며 독립 패키지 선택과 입력/F1 SHA 결속은 유지한다.
+- 남은 입력 기본값: 제공 소스에는 F1의 nested `trust.registry` 정의·signed `registry_ref` schema·권한 시험 정책 원문이 없어 이 세 항목은 기존 검증 입력을 유지한다. 이 부분의 기본값 요청은 미완료이며 임의 wire alias나 정책을 만들지 않았다.
+- 검증: 이번 수정의 빌드·시험·QA·독립 리뷰·커밋·푸시는 수행하지 않았다. 신규 통과/실패 수 및 실행 로그 없음.
+- 다음: 동일 F1 설치 패키지와 기존 JSON으로 `packages/core/tests/adapters/onchain-policy-core.test.mjs` 전체를 이름 필터 없이 실행하고 TAP 및 패키지 provenance를 독립 검토에 전달한다. 실행 절차는 Core README를 따른다. 실제 로컬 체인 소비자 deny와 F5 전체 수용은 별도 통합 대기다.
+
 ### Reviewer #71 — ABI 음성 대조 및 실제 F1 주입 회귀
 
 - 작업: `t_18cd83b0` / 담당 D / 지정 작업 경로 `sdk/t_18cd83b0` / 제공 parent `e09fd66342a711251e9d4728442eeabe0d3c617b` / 상태: 수정안 작성·검증 대기. 실제 branch·작업 트리는 확인하지 않았다.
