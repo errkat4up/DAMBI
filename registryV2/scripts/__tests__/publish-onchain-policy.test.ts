@@ -114,6 +114,19 @@ test("signed sequence and expectedCurrent are independently bounded and must be 
     { message: "unsafe sequence" });
 });
 
+test("publication rejects string-valued wire sequences before simulation or submission", async () => {
+  const { client, original, submit, state } = await retryFixture();
+  // Re-sign the complete malformed payload so a stale signature cannot explain the failure.
+  const signedString = await intent({ ...payload(), sequence: "1" as unknown as number });
+  const stringCurrent = { ...original, expectedCurrent: "0" as unknown as number };
+  for (const candidate of [signedString, stringCurrent]) {
+    assert.throws(() => validateIntent(client, candidate, now), { message: "unsafe sequence" });
+    await assert.rejects(publishOnchainPolicy(client, candidate, submit), { message: "unsafe sequence" });
+  }
+  assert.equal(state.simulations, 0);
+  assert.equal(state.submissions, 0);
+});
+
 test("chain mismatch is checked before policy loading, signing, simulation or submission", async () => {
   const calls: string[] = [];
   const transport: typeof fetch = async (_url, init) => {

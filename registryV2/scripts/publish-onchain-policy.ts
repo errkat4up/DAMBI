@@ -224,6 +224,9 @@ export function validateIntent(client: RegistryClient, intent: Intent, now = Mat
       || Object.keys(payload).sort().join(",") !== "env,expires_at,issued_at,policies,profile,registry_ref,sequence") {
     throw new Error("intent must contain the original canonical payload");
   }
+  if (typeof payload.sequence !== "number" || typeof intent.expectedCurrent !== "number") {
+    throw new Error("unsafe sequence");
+  }
   const sequence = safeSequence(payload.sequence);
   if (sequence === 0 || safeSequence(intent.expectedCurrent) !== sequence - 1) throw new Error("sequence mismatch");
   if (payload.registry_ref !== registryReference(client.config) || payload.env !== client.config.env
