@@ -1,5 +1,14 @@
 # SDK 정책 입력과 Native 회귀
 
+## S1 재개 기록 — t_439775dd / C
+
+- 담당 branch: 제공되지 않음. 전달된 parent는 `475f317e6a9db8ebdf50c3030c7d3e061009e264`이며 실제 작업 트리·기준 커밋 포함 여부는 확인하지 않았다.
+- 구현 상태: **필수 소스 확인 대기, 제품 편입 미구현**. 이번 변경은 이 재개 기록뿐이다. manifest·selection·생성 검사·제품 snapshot·metadata를 변경하거나 S1 완료로 표시하지 않는다.
+- 검증: 실행하지 않음. 통과·실패 수 및 QA·독립 리뷰 결과 없음.
+- 구체적인 차단 사유: 제공된 GIWA 시험 manifest는 `slippage_bp=0`과 route의 reserve·fee·estimated output 0을 포함한다. 이를 제품 manifest로 복사하면 미관측 값을 제품 근거로 승격하지 말라는 S1 조건을 충족하지 못한다. 그러나 전달된 소스에는 이 값을 생략하거나 명시적 미관측으로 표현할 때의 현재 Mapper·Action·lowering 계약이 없어, 호환되는 제품 선언을 확정할 수 없다. 또한 `rpc-evidence.json`의 실제 원문과 공개 Core의 스캠 설정·plan 계약이 제공되지 않아 실제 raw→대상/`scamCalls` 회귀를 작성할 근거가 부족하다. 시험 Decoder의 과거 통과 기록은 그 대체 근거가 아니다.
+- 다음 작업에 필요한 저장소 소스: `fixtures/sdk/giwa-sf0/rpc-evidence.json`, 같은 디렉터리의 `decoder.test.mjs`, 현재 swap Mapper·Action·lowering 구현, `packages/core/src`의 Core 설정·plan·스캠 공개 계약, `packages/core/tests/scam-bundle.test.mjs` 및 해당 시험이 사용하는 설정/서명 helper. 파일에 포함된 추가 참조도 함께 확인해야 한다. RPC endpoint·계정·비밀키나 새 live 조회는 필요하지 않다.
+- 재개 범위: 위 계약 확인 후 관측된 `91342` router·`0x7ff36ab5`·WETH→HYANGNO 단일 hop만 제품 선언으로 작성한다. 기존 799개 baseline과 UR/Aave 5개를 보존하고 GIWA 1개를 추가하는 **805개/선택 6개** 생성 검사를 유지하며, 선택 사유·입력 무결성·반복 생성 일치를 검증하도록 한다. snapshot·metadata는 생성기로만 만든다. 실제 raw, 경로 변형·다른 체인/router/selector·손상 calldata, 미관측 값, tarball-only 대상/`scamCalls` 회귀와 격리 소스 목록을 함께 연결한다. LP·역방향·다중 hop·다른 토큰 및 router 구현 전체 동등성은 지원 선언에 추가하지 않는다. 구현 후 QA 재현과 독립 리뷰는 별도로 대기한다.
+
 ## Scam Filter — SF0 연결 정보 확인
 
 2026-10-19, [계획서 SF0-1](../../docs/scam-filter/mvp-design-plan.md#sf0-1--연결-대상측정-근거-확인) 범위에서 전달받은 연결 정보와 대표 거래를 공개 RPC에 읽기 전용으로 대조했다. **수동 RPC 확인 6개 항목 일치·0개 불일치:** 체인 ID, pair의 factory, factory의 getPair, token0·token1 구성, 대표 거래의 블록·성공 상태, pair의 Sync→Swap 순서. 자동화 시험 통과 수나 전체 DEX 검증을 뜻하지 않는다.
