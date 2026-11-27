@@ -1,45 +1,47 @@
 /**
- * End to end, on recorded mainnet data: a Uniswap V2 buy of a token whose pool
- * shows the pattern → shared gate → pool lookup → Sync history → the real
- * algorithm in WASM → warning payload → the card the confirmation page renders.
- * Runs in the DOM environment because the last step builds real elements.
+ * End to end on the extension's side: a Uniswap V2 buy → shared gate → the
+ * server's answer (in its wire format) → warning payload → the card the
+ * confirmation page renders. Runs in the DOM environment because the last step
+ * builds real elements. The lookup and the algorithm are the server's and are
+ * tested there (`crates/policy-server/server/tests/scam_pool_check.rs`).
  */
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { RequestType, type Message } from "@lib/types";
 import { WINDOW_WARNING_TITLE, readStoredWindowDisplay, windowConfirmKey, type WindowDisplay } from "@lib/window-display";
 import { SCAM_SCOPE_NOTICE } from "@lib/scam-display";
 import { renderWindowCard } from "../../../frontend/confirm/window-card";
-import { BACKDOOR_TIMEOUT_MS, RpcTransportError, type Rpc } from "../backdoor-check";
+import { SCAM_API_TIMEOUT_MS, parsePoolCheckAnswer, poolCheckBody, type CheckPool } from "../scam-api";
+import type { Rpc } from "../scam-chain";
 import { GATE_TIMEOUT_MS, beginScamChecks, type ScamChecksDeps } from "../scam-checks";
-import { WINDOW_TIMEOUT_MS } from "../window-check";
-import { DEFAULT_WINDOW_SETTINGS, type EngineAnalysis } from "../window-rules";
-import { realWindowAnalyze } from "./helpers/real-wasm";
+import { DEFAULT_WINDOW_SETTINGS } from "../window-rules";
 
 vi.mock("../scam-filter", () => ({ beginScamCheck: () => { throw new Error("not used"); }, scamHostConfigured: async () => false }));
-vi.mock("../wasm-bridge", () => ({ scamWindowAnalyze: async () => { throw new Error("tests inject analyze"); } }));
+vi.mock("../dambi-auth/client", () => ({ getServerBaseUrl: () => "https://server.invalid" }));
 vi.mock("webextension-polyfill", () => ({
   default: { storage: { sync: { get: async () => ({}) }, local: { get: async () => ({}), set: async () => {} }, onChanged: { addListener: () => {} } } },
 }));
 
-const here = dirname(fileURLToPath(import.meta.url));
-const fx = JSON.parse(readFileSync(join(here, "fixtures/window-fired-mainnet.json"), "utf8")) as {
-  token: string; pool: string; head: { number: number; timestampMs: number }; startReserves: string; logs: unknown[];
-  expected: { poolAgeSec: number; sensitive: { observed: number; threshold: number } } };
+/**
+ * What the server answered for a real mainnet pool recorded on 2026-11-25
+ * (the same recording the server's own tests replay through the algorithm).
+ */
+const fx = {
+  token: "0x0370f261c43a1f67890b415f46df52f8b8576244", pool: "0x845e4f7c5121f67d8d1104a37706250356f1838d",
+  expected: { poolAgeSec: 300, sensitive: { observed: 8, threshold: 5 } },
+};
 const USER = "0x" + "51".padStart(40, "0");
-const word = (n: bigint): string => n.toString(16).padStart(64, "0");
 
-/** A node that answers exactly what mainnet answered for this pool at that block. */
-const recordedNode: Rpc = async (method, params) => {
-  if (method === "eth_getBlockByNumber") return { number: "0x" + fx.head.number.toString(16), timestamp: "0x" + (fx.head.timestampMs / 1000).toString(16) };
-  if (method === "eth_getLogs") return (params[0] as { address: string }).address === fx.pool ? fx.logs : [];
-  const tx = params[0] as { data: string };
-  if (tx.data.startsWith("0xe6a43905")) return "0x" + fx.pool.slice(2).padStart(64, "0"); // factory.getPair
-  if (tx.data === "0x0902f1ac") return fx.startReserves;                                  // pair.getReserves at head-300
-  if (tx.data.startsWith("0x70a08231")) return "0x" + word(0n);                           // the user holds none of it
-  throw new RpcTransportError("unexpected " + method);
+/** The chain, for the one thing the extension asks it: the user holds none of the token. */
+const holdsNothing: Rpc = async () => "0x" + "0".repeat(64);
+
+/** The server: checks the body it is sent and answers as the real one did, over the wire format. */
+const recordedServer: CheckPool = async (request) => {
+  const body = JSON.parse(JSON.stringify(poolCheckBody(request))) as { token: string; rules: { id: string; count: number }[] };
+  const wire = { chainId: 1, token: body.token, pool: fx.pool, backdoor: { result: "off", reason: "not_requested" },
+    window: { result: "fired", reason: "rule_fired", poolAgeSec: fx.expected.poolAgeSec,
+      rules: body.rules.map((rule) => ({ id: rule.id, outcome: "fired", observed: fx.expected.sensitive.observed, threshold: rule.count })) } };
+  const answer = parsePoolCheckAnswer(JSON.parse(JSON.stringify(wire)), body.token);
+  return answer ? { ok: true, answer } : { ok: false, reason: "bad_response" };
 };
 
 /** swapExactETHForTokens(0, [WETH, token], user, deadline) as the extension's decoder reports it. */
@@ -52,12 +54,11 @@ const buy: Message = { requestId: "e2e", data: { type: RequestType.TRANSACTION, 
 const deps = (presetId: string): ScamChecksDeps => ({
   backdoorEnabled: async () => false,
   sdkConfigured: async () => false,
-  gateRpc: () => recordedNode,
-  backdoorRpc: () => recordedNode,
+  gateRpc: () => holdsNothing,
+  checkPool: recordedServer,
   beginSdk: () => { throw new Error("no host configuration"); },
   windowSettings: async () => ({ ...DEFAULT_WINDOW_SETTINGS, enabled: true, presetId }),
-  analyze: async (request) => realWindowAnalyze<EngineAnalysis>(request),
-  gateTimeoutMs: GATE_TIMEOUT_MS, backdoorTimeoutMs: BACKDOOR_TIMEOUT_MS, windowTimeoutMs: WINDOW_TIMEOUT_MS,
+  gateTimeoutMs: GATE_TIMEOUT_MS, poolCheckTimeoutMs: SCAM_API_TIMEOUT_MS,
 });
 async function check(presetId: string): Promise<WindowDisplay | undefined> {
   const handle = beginScamChecks(buy, deps(presetId));
@@ -65,7 +66,7 @@ async function check(presetId: string): Promise<WindowDisplay | undefined> {
   return (await handle.promise).window;
 }
 
-describe("window-rule warning, from recorded mainnet logs to the card on screen", () => {
+describe("window-rule warning, from the server's answer to the card on screen", () => {
   it("the sensitive preset warns, and the confirmation page shows why", async () => {
     const display = await check("window-sensitive");
     expect(display).toBeDefined();

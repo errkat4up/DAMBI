@@ -42,6 +42,8 @@ const REASON_KO: Record<string, string> = {
   algorithm_error: "규칙 계산 오류", pool_older_than_window: "첫 유동성 공급 후 1시간이 지난 풀", no_weth_pair: "WETH 풀 없음",
   no_liquidity_yet: "아직 유동성 없음", no_active_rule: "켜진 규칙 없음", partial_coverage: "관찰 구간 일부 누락",
   no_usable_segment: "쓸 수 있는 자료 없음", resolution_too_coarse: "관찰 간격이 규칙에 비해 큼", error: "검사 오류",
+  // The check is made by the server; these are the ways asking it can fail.
+  server_unavailable: "검사 서버에 연결할 수 없음", server_refused: "검사 서버가 요청을 거절함", bad_response: "검사 서버 응답을 읽을 수 없음",
 };
 
 function lastCheckText(last: WindowCheckStatus, ko: boolean): string {
@@ -54,7 +56,7 @@ function lastCheckText(last: WindowCheckStatus, ko: boolean): string {
 /**
  * `/scam` — scam filter. Two independent sections:
  *  1. Pool-backdoor check: one switch.
- *  2. Window rules, evaluated inside the extension: a switch and a preset. When
+ *  2. Window rules, evaluated by the server check: a switch and a preset. When
  *     the team's local-demo host configuration is stored, the SDK runs that
  *     check instead and this section only says so.
  * Neither depends on the other.
@@ -117,8 +119,8 @@ export function ScamPage() {
           </label>
           <p className="sf-note">
             {ko
-              ? "꺼져 있으면 검사용 조회 요청을 보내지 않습니다. 경고만 하며 정책 판정은 바꾸지 않습니다."
-              : "When off, no lookup request is sent. It only warns and never changes the policy verdict."}
+              ? "검사는 담비 서버가 수행하며, 서버에는 사려는 토큰의 주소만 보냅니다. 지갑 주소와 금액은 보내지 않습니다. 꺼져 있으면 아무 요청도 보내지 않습니다. 경고만 하며 정책 판정은 바꾸지 않습니다."
+              : "The check is made by Dambi's server, which is sent only the address of the token you are buying — not your wallet address or the amount. When off, no request is sent. It only warns and never changes the policy verdict."}
           </p>
           {unavailable && (
             <p className="sf-error" role="alert">
@@ -145,8 +147,8 @@ export function ScamPage() {
               </div>
               <p className="sf-note">
                 {ko
-                  ? "확장 프로그램에 로컬 시연용 호스트 설정이 저장되어 있어 SDK가 윈도우 검사를 수행합니다. 이 설정이 있는 동안 아래 확장 프로그램 자체 검사는 돌지 않습니다."
-                  : "A local-demo host configuration is stored in the extension, so the SDK runs the window check. The extension's own check does not run while it is present."}
+                  ? "확장 프로그램에 로컬 시연용 호스트 설정이 저장되어 있어 SDK가 윈도우 검사를 수행합니다. 이 설정이 있는 동안 서버의 윈도우 규칙 검사는 돌지 않습니다."
+                  : "A local-demo host configuration is stored in the extension, so the SDK runs the window check. The server's window rule check does not run while it is present."}
               </p>
             </>
           ) : (
@@ -193,8 +195,8 @@ export function ScamPage() {
 
               <p className="sf-note">
                 {ko
-                  ? "1시간이 지난 풀에서는 규칙이 돌지 않습니다. 조회 실패·요청 제한·2.5초 초과는 판정 불가로 끝나며 경고하지 않습니다. 경고만 하며 정책 판정은 바꾸지 않습니다."
-                  : "No rule runs on a pool older than one hour. A failed lookup, a rate limit or exceeding 2.5 s ends undetermined, without a warning. It only warns and never changes the policy verdict."}
+                  ? "검사는 담비 서버가 수행하며, 서버에는 토큰 주소와 규칙 값만 보냅니다. 1시간이 지난 풀에서는 규칙이 돌지 않습니다. 조회 실패·요청 제한·2.5초 초과·서버 연결 실패는 판정 불가로 끝나며 경고하지 않습니다. 경고만 하며 정책 판정은 바꾸지 않습니다."
+                  : "The check is made by Dambi's server, which is sent only the token address and the rule values. No rule runs on a pool older than one hour. A failed lookup, a rate limit, exceeding 2.5 s or an unreachable server ends undetermined, without a warning. It only warns and never changes the policy verdict."}
               </p>
               {windowRules?.last && (
                 <p className="sf-note sf-last" data-result={windowRules.last.result}>

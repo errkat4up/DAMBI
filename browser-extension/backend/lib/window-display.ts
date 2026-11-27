@@ -1,5 +1,5 @@
 /**
- * Display payload for a window-rule warning evaluated inside the extension
+ * Display payload for a window-rule warning decided by the server check
  * (not the SDK's `ScamReport`). A payload exists only when a rule fired.
  */
 export interface WindowFiredRule {

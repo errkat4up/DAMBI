@@ -55,7 +55,7 @@ export interface ScamSettingsView {
     readonly presets: readonly string[];
     /** Saved overrides / additional rules the extension's check ignores, with the reason. */
     readonly rejected: readonly { readonly id: string; readonly reason: string }[];
-    /** Outcome of the most recent in-extension check, or null. */
+    /** Outcome of the most recent window check, or null. */
     readonly last: WindowStatus | null;
   };
 }
