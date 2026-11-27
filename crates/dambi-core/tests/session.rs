@@ -469,7 +469,10 @@ fn discard_releases_only_its_owned_slot_and_rejects_reuse() {
     error_code(first.plan(&req, NOW), "LIMIT_EXCEEDED");
     first.discard(id).unwrap();
     error_code(first.discard(id), "PLAN_CONSUMED");
-    error_code(first.evaluate(id, &empty_facts(&plan), NOW), "PLAN_CONSUMED");
+    error_code(
+        first.evaluate(id, &empty_facts(&plan), NOW),
+        "PLAN_CONSUMED",
+    );
     error_code(
         first.evaluate_check(id, &empty_facts(&plan), NOW, "aborted"),
         "PLAN_CONSUMED",
@@ -477,9 +480,15 @@ fn discard_releases_only_its_owned_slot_and_rejects_reuse() {
     let replacement = first.plan(&req, NOW).unwrap();
     assert_ne!(replacement["planId"], plan["planId"]);
     error_code(other.plan(&req, NOW), "LIMIT_EXCEEDED");
-    assert_eq!(evaluate(&mut other, &independent, &empty_facts(&independent), NOW)["decision"], "allow");
+    assert_eq!(
+        evaluate(&mut other, &independent, &empty_facts(&independent), NOW)["decision"],
+        "allow"
+    );
     first.dispose();
-    error_code(first.discard(replacement["planId"].as_str().unwrap()), "DISPOSED");
+    error_code(
+        first.discard(replacement["planId"].as_str().unwrap()),
+        "DISPOSED",
+    );
 }
 
 #[test]
@@ -491,8 +500,18 @@ fn discard_does_not_require_usable_policy_or_unexpired_ttl() {
     let mut core = CoreSession::new(&cfg.to_string(), &wire(signed_policy(policy)), NOW).unwrap();
     let plan = core.plan(&request("7").to_string(), NOW).unwrap();
     // Evaluation at the TTL boundary retires the handle without producing a verdict.
-    error_code(core.evaluate(plan["planId"].as_str().unwrap(), &empty_facts(&plan), NOW + 10000), "PLAN_EXPIRED");
-    error_code(core.discard(plan["planId"].as_str().unwrap()), "PLAN_EXPIRED");
+    error_code(
+        core.evaluate(
+            plan["planId"].as_str().unwrap(),
+            &empty_facts(&plan),
+            NOW + 10000,
+        ),
+        "PLAN_EXPIRED",
+    );
+    error_code(
+        core.discard(plan["planId"].as_str().unwrap()),
+        "PLAN_EXPIRED",
+    );
 
     let mut core = CoreSession::new(&cfg.to_string(), &wire(day1()), NOW).unwrap();
     let plan = core.plan(&request("7").to_string(), NOW).unwrap();
