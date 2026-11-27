@@ -52,16 +52,24 @@ describe("selected SDK source materialization parity", () => {
     }
   });
 
-  it("pins exact UR and Aave originals for isolated selected-product reconstruction", () => {
+  it("pins exact UR, Aave and GIWA originals for isolated selected-product reconstruction", () => {
     const inputs = new URL("fixtures/sdk/resolved-decoders/", ROOT);
     const selected = JSON.parse(readFileSync(new URL("selection.json", inputs), "utf8")) as {
       schema_version: number; manifests: string[];
     };
     expect(selected.schema_version).toBe(1);
-    expect(selected.manifests).toHaveLength(5);
+    const expectedManifests = [
+      "manifests/uniswap/universal-router/execute-v2@1.0.0.json",
+      "manifests/uniswap/universal-router/execute-v2-no-deadline@1.0.0.json",
+      "manifests/aave/governance/core-redeemCancellationFee@1.0.0.json",
+      "manifests/aave/governance/core-updateRepresentativesForChain@1.0.0.json",
+      "manifests/aave/umbrella/batch-claimRewardsPermit@1.0.0.json",
+      "manifests/giwa/v2-router/swap-exact-eth-for-tokens@1.0.0.json",
+    ];
+    expect([...selected.manifests].sort()).toEqual(expectedManifests.sort());
     for (const path of selected.manifests) {
-      expect(readFileSync(new URL(path, inputs), "utf8"), path)
-        .toBe(readFileSync(new URL(`registryV2/${path}`, ROOT), "utf8"));
+      expect(readFileSync(new URL(path, inputs)), path)
+        .toEqual(readFileSync(new URL(`registryV2/${path}`, ROOT)));
     }
   });
 });

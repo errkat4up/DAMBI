@@ -158,7 +158,10 @@ fn opcode_bundle(nested: bool) -> (Value, &'static str) {
                 }
             }
         });
-        (bundle, "/emit/per_opcode_body/0x10/nested/per_opcode_body/0x06")
+        (
+            bundle,
+            "/emit/per_opcode_body/0x10/nested/per_opcode_body/0x06",
+        )
     } else {
         (bundle, "/emit/per_opcode_body/0x06")
     }
@@ -182,7 +185,8 @@ fn opcode_abi_alternatives_install_at_top_level_and_in_nested_dispatch() {
         no_alternatives.pointer_mut(entry_path).unwrap()["inputs_abi_alternatives"] = json!([]);
         for bundle in [bundle, alternatives_only, no_alternatives] {
             let artifact = artifact(vec![bundle.clone()]);
-            let store = SnapshotStore::new(config(), artifact.input(), day1().input(), NOW).unwrap();
+            let store =
+                SnapshotStore::new(config(), artifact.input(), day1().input(), NOW).unwrap();
             // Validation never strips or rewrites a signed ABI candidate.
             assert_eq!(
                 store.current(NOW).unwrap().decoder().bundle_digests(),
@@ -214,7 +218,12 @@ fn malformed_opcode_abi_alternatives_reject_the_complete_snapshot() {
         let (mut bundle, entry_path) = opcode_bundle(nested);
         bundle.pointer_mut(entry_path).unwrap()["inputs_abi"] = json!("(bytes");
         expect_code(
-            SnapshotStore::new(config(), artifact(vec![bundle]).input(), day1().input(), NOW),
+            SnapshotStore::new(
+                config(),
+                artifact(vec![bundle]).input(),
+                day1().input(),
+                NOW,
+            ),
             "INVALID_DECODER_SNAPSHOT",
         );
     }
@@ -584,7 +593,11 @@ fn external_bundle_requires_decoder_role_signature_and_requested_jcs_digest() {
     // requested bundle digest. The zero-digest case also pins direct mismatch.
     for (bytes, signature, requested) in [
         (&canonical[..], signature.as_str(), ZERO_DIGEST),
-        (&different[..], different_signature.as_str(), expected.as_str()),
+        (
+            &different[..],
+            different_signature.as_str(),
+            expected.as_str(),
+        ),
     ] {
         expect_code(
             SnapshotStore::new(
