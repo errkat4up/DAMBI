@@ -21,7 +21,7 @@ import {
   isScamSettingsRequest,
   scamSettingsDeps,
 } from "./scam-settings-handlers";
-import { warmScamHost } from "./scam-filter";
+import { registerScamHostRefresh, warmScamHost } from "./scam-filter";
 import {
   ensureLoaded as ensureNotifySettings,
   shouldDesktop,
@@ -112,6 +112,7 @@ const WALLET_ACTION_TYPES = new Set<string>([
 console.log("Dambi SW alive at", new Date().toISOString());
 // Optional SDK initialization/preparation is independent of legacy policy boot.
 // With no explicit local configuration this performs no network work.
+registerScamHostRefresh();
 warmScamHost();
 
 // SW boot sequence: serialize the install stages so they don't race each other

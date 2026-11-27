@@ -19,6 +19,11 @@ export const SCAM_HOST_CONFIG_KEY = "scam-filter:host-config";
 export const SCAM_USER_SETTINGS_KEY = "scam-filter:settings";
 const CHECK_TIMEOUT_MS = 2_500;
 const PREPARE_TIMEOUT_MS = 60_000;
+// Scheduling is owned by the MV3 host, not by Core. This is a polling interval,
+// not a bundle validity extension: Core still validates signed expiry on use.
+export const SCAM_HOST_REFRESH_MS = 60_000;
+export const SCAM_HOST_REFRESH_ALARM = "dambi-scam-host-refresh";
+const REFRESH_TIMEOUT_MS = 60_000;
 type UnavailableReason = Extract<ScamDisplay, { kind: "unavailable" }>["reason"];
 type JsonPolicySource = Omit<PolicyApiSourceOptions, "fetch">;
 type JsonScamSource = Omit<ScamBundleApiSourceOptions, "fetch">;
@@ -49,6 +54,8 @@ interface Session {
   readonly callers: Set<AbortController>;
   readonly ready: Promise<HostRuntime>;
   runtime?: HostRuntime;
+  refreshedAt?: number;
+  refreshing?: Promise<void>;
   preparation?: AbortController;
   preparationStarted: boolean;
 }
@@ -181,6 +188,7 @@ export function createScamHost(dependencies: HostDependencies) {
       }).then((runtime) => {
         if (controller.signal.aborted) { runtime.core.dispose(); throw new HostFailure("aborted"); }
         current.runtime = runtime;
+        current.refreshedAt = Date.now();
         return runtime;
       }).catch((error: unknown) => {
         // Keep this attempt's failure for every caller already awaiting it.
@@ -193,6 +201,62 @@ export function createScamHost(dependencies: HostDependencies) {
     // A malformed/unsupported caller can finish before initialization settles.
     void current.ready.catch(() => {});
     return current;
+  }
+
+  async function ensureFresh(current: Session, runtime: HostRuntime, force = false): Promise<void> {
+    if (session !== current || current.controller.signal.aborted) throw new HostFailure("aborted");
+    if (current.refreshing) return current.refreshing;
+    const now = Date.now();
+    if (!force && current.refreshedAt !== undefined && now >= current.refreshedAt
+        && now - current.refreshedAt < SCAM_HOST_REFRESH_MS) return;
+
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let onAbort!: () => void;
+    const interrupted = new Promise<never>((_resolve, reject) => {
+      onAbort = () => { controller.abort(); reject(new HostFailure("aborted")); };
+      current.controller.signal.addEventListener("abort", onAbort, { once: true });
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new HostFailure("timeout"));
+      }, REFRESH_TIMEOUT_MS);
+    });
+    current.preparation?.abort();
+    const work = Promise.race([
+      Promise.resolve().then(async () => {
+        if (controller.signal.aborted) throw new HostFailure("aborted");
+        // Reuse the signed-source refresh interfaces. Do not recreate Core on
+        // ordinary fetch failures or implement a second bundle/expiry cache.
+        await runtime.core.refreshPolicies({ signal: controller.signal });
+        if (controller.signal.aborted) throw new HostFailure("aborted");
+        await runtime.core.refreshScam({ signal: controller.signal });
+      }),
+      interrupted,
+    ]).then(() => {
+      if (session !== current || controller.signal.aborted) throw new HostFailure("aborted");
+      current.refreshedAt = Date.now();
+      current.preparationStarted = false;
+    }).catch((error: unknown) => {
+      // An uncooperative timed-out refresh must not mutate a runtime we reuse.
+      // Identity matters: an old failure cannot invalidate a replacement.
+      if (error instanceof HostFailure && error.reason === "timeout" && session === current) invalidate();
+      throw error;
+    }).finally(() => {
+      clearTimeout(timer);
+      current.controller.signal.removeEventListener("abort", onAbort);
+      controller.abort();
+      delete current.refreshing;
+    });
+    current.refreshing = work;
+    return work;
+  }
+
+  async function refresh(): Promise<void> {
+    const current = await select();
+    if (!current) return;
+    const runtime = await current.ready;
+    await ensureFresh(current, runtime, true);
+    await prepare(current, runtime);
   }
 
   async function prepare(current: Session, runtime: HostRuntime): Promise<void> {
@@ -219,7 +283,11 @@ export function createScamHost(dependencies: HostDependencies) {
   function warm(): void {
     void (async () => {
       const current = await select();
-      if (current) await prepare(current, await current.ready);
+      if (current) {
+        const runtime = await current.ready;
+        await ensureFresh(current, runtime);
+        await prepare(current, runtime);
+      }
     })().catch(() => { /* A later live request may retry initialization once. */ });
   }
 
@@ -248,11 +316,16 @@ export function createScamHost(dependencies: HostDependencies) {
       timeout();
       return true;
     };
+    const obsolete = (): boolean => {
+      // Also covers replacement between select() returning and caller attachment.
+      if (attached && (session !== attached || attached.controller.signal.aborted)) controller.abort();
+      return controller.signal.aborted || expired();
+    };
     const timer = setTimeout(timeout, Math.max(0, deadline - Date.now()));
     controller.signal.addEventListener("abort", onAbort, { once: true });
     void (async () => {
       attached = await select(controller.signal, deadline);
-      if (controller.signal.aborted || expired()) return;
+      if (obsolete()) return;
       if (!attached) { finish(undefined); return; }
       attached.callers.add(controller);
       attached.preparation?.abort();
@@ -261,18 +334,23 @@ export function createScamHost(dependencies: HostDependencies) {
       try { request = requestForMessage(owned); }
       catch (error) { throw error instanceof HostFailure ? error : new HostFailure("invalid_request"); }
       const runtime = await attached.ready;
-      if (controller.signal.aborted || expired()) return;
+      if (obsolete()) return;
+      // Alarms can be delayed or unavailable while the worker is suspended.
+      // A live request joins the same refresh and retains its own 2.5 s budget;
+      // cancelling that caller does not cancel another caller's refresh.
+      await ensureFresh(attached, runtime);
+      if (obsolete()) return;
       const result = await runtime.core.check(request, { signal: controller.signal });
       // Synchronous WASM cannot be preempted by a timer; reject a late result
       // even when its promise microtask runs before the queued timer callback.
-      if (controller.signal.aborted || expired()) return;
+      if (obsolete()) return;
       finish(result.scam ? { version: 1, kind: "report", report: result.scam, holding: "unknown" } : unavailable("report_missing"));
     })().catch((error: unknown) => {
-      if (!controller.signal.aborted && !expired()) finish(unavailable(error instanceof HostFailure ? error.reason : "host_error"));
+      if (!obsolete()) finish(unavailable(error instanceof HostFailure ? error.reason : "host_error"));
     });
     return { promise, cancel: () => controller.abort() };
   }
-  return { warm, begin, invalidate };
+  return { warm, refresh, begin, invalidate };
 }
 
 /**
@@ -320,5 +398,25 @@ function listenForConfiguration(): void {
     host.warm();
   });
 }
+/** Register synchronously on every worker boot; recreate a missing alarm too.
+ * No account, persistent runtime, or Core timer is introduced. Alarm failures
+ * leave the request-time refresh fallback in place. The default server window
+ * route, server backdoor checks and legacy policy enforcement are independent.
+ */
+export function registerScamHostRefresh(
+  alarms: Pick<typeof Browser.alarms, "get" | "create" | "onAlarm"> = Browser.alarms,
+  refresh: () => Promise<void> = () => host.refresh(),
+): void {
+  alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name !== SCAM_HOST_REFRESH_ALARM) return;
+    void refresh().catch(() => { /* No success display on refresh failure; retry at the next event. */ });
+  });
+  void (async () => {
+    if (!await alarms.get(SCAM_HOST_REFRESH_ALARM)) {
+      await alarms.create(SCAM_HOST_REFRESH_ALARM, { periodInMinutes: SCAM_HOST_REFRESH_MS / 60_000 });
+    }
+  })().catch(() => { /* Request-time freshness does not depend on alarms. */ });
+}
+
 export function warmScamHost(): void { listenForConfiguration(); host.warm(); }
 export function beginScamCheck(message: Message): ReturnType<typeof host.begin> { listenForConfiguration(); return host.begin(message); }

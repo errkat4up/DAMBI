@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CallOptions, CheckRequest, CorePlan, DambiCore, ScamReport, Verdict } from "@dambi/core";
 import type { ScamFactProvider } from "@dambi/core/adapters";
 import { RequestType, type Message, type TransactionPayload } from "@lib/types";
-import { createScamHost, withUserSettings } from "../scam-filter";
+import { createScamHost, registerScamHostRefresh, SCAM_HOST_REFRESH_ALARM, SCAM_HOST_REFRESH_MS, withUserSettings } from "../scam-filter";
 
 // These tests inject readConfig/open into createScamHost. Importing the module
 // must not load the extension-only polyfill or silently use real host storage.
@@ -206,6 +206,213 @@ describe("optional Scam Filter host", () => {
     await flush();
     expect(sdk.provider.prepare).not.toHaveBeenCalled();
     host.invalidate();
+  });
+});
+
+// These regressions exercise the actual extension host lifecycle with injected
+// Core ports. They do not stand in for signed-bundle/algorithm integration,
+// Chromium screenshots, wallet enforcement, or external-service acceptance.
+describe("MV3 SDK host refresh", () => {
+  it("refreshes both signed sources once for concurrent overdue callers and recovers after failure", async () => {
+    vi.useFakeTimers();
+    const sdk = runtime();
+    const open = vi.fn(async () => sdk);
+    const host = createScamHost({ readConfig: async () => config(), open });
+    expect(await host.begin(message()).promise).toMatchObject({ kind: "report" });
+    expect(sdk.core.refreshPolicies).not.toHaveBeenCalled();
+    expect(sdk.core.refreshScam).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(SCAM_HOST_REFRESH_MS);
+    const pending = deferred<void>();
+    sdk.core.refreshScam.mockReturnValueOnce(pending.promise);
+    const first = host.begin(message());
+    const second = host.begin(message());
+    await flush();
+    expect(sdk.core.refreshPolicies).toHaveBeenCalledTimes(1);
+    expect(sdk.core.refreshScam).toHaveBeenCalledTimes(1);
+    expect(sdk.core.check).toHaveBeenCalledTimes(1); // no stale check during refresh
+    pending.reject(new Error("local bundle service down"));
+    expect(await first.promise).toMatchObject({ kind: "unavailable", reason: "host_error" });
+    expect(await second.promise).toMatchObject({ kind: "unavailable", reason: "host_error" });
+    expect(sdk.core.check).toHaveBeenCalledTimes(1);
+    expect(sdk.core.dispose).not.toHaveBeenCalled();
+
+    // Failed fetches do not renew the freshness time. The next event retries
+    // using the same Core (including its accepted-version state).
+    expect(await host.begin(message()).promise).toMatchObject({ kind: "report", report });
+    expect(sdk.core.refreshPolicies).toHaveBeenCalledTimes(2);
+    expect(sdk.core.refreshScam).toHaveBeenCalledTimes(2);
+    expect(open).toHaveBeenCalledTimes(1);
+    await host.begin(message()).promise;
+    expect(sdk.core.refreshScam).toHaveBeenCalledTimes(2);
+    host.invalidate();
+  });
+
+  it("does not turn a policy refresh error into a successful scam check", async () => {
+    const sdk = runtime();
+    const host = createScamHost({ readConfig: async () => config(), open: async () => sdk });
+    await host.begin(message()).promise;
+    sdk.core.refreshPolicies.mockRejectedValueOnce(new Error("invalid signed policy"));
+    await expect(host.refresh()).rejects.toThrow("invalid signed policy");
+    expect(sdk.core.refreshScam).not.toHaveBeenCalled();
+    expect(sdk.core.check).toHaveBeenCalledTimes(1);
+    await host.refresh();
+    expect(sdk.core.refreshScam).toHaveBeenCalledTimes(1);
+    host.invalidate();
+  });
+
+  it("keeps caller cancellation and deadlines separate from a shared refresh", async () => {
+    vi.useFakeTimers();
+    const sdk = runtime();
+    const host = createScamHost({ readConfig: async () => config(), open: async () => sdk });
+    await host.begin(message()).promise;
+    await vi.advanceTimersByTimeAsync(SCAM_HOST_REFRESH_MS);
+    const pending = deferred<void>();
+    sdk.core.refreshScam.mockReturnValueOnce(pending.promise);
+    const cancelled = host.begin(message());
+    const timedOut = host.begin(message());
+    await flush();
+    cancelled.cancel();
+    expect(await cancelled.promise).toMatchObject({ reason: "aborted" });
+    const signal = sdk.core.refreshScam.mock.calls[0]![0].signal as AbortSignal;
+    expect(signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(await timedOut.promise).toMatchObject({ reason: "timeout" });
+    expect(signal.aborted).toBe(false);
+    pending.resolve();
+    await flush();
+    expect(sdk.core.check).toHaveBeenCalledTimes(1);
+    expect(await host.begin(message()).promise).toMatchObject({ kind: "report" });
+    expect(sdk.core.refreshScam).toHaveBeenCalledTimes(1);
+    expect(await cancelled.promise).toMatchObject({ reason: "aborted" });
+    expect(await timedOut.promise).toMatchObject({ reason: "timeout" });
+    host.invalidate();
+  });
+
+  it("discards late refresh success and failure from replaced sessions", async () => {
+    for (const fail of [false, true]) {
+      const old = runtime(), next = runtime();
+      const pending = deferred<void>();
+      old.core.refreshScam.mockReturnValueOnce(pending.promise);
+      const open = vi.fn().mockResolvedValueOnce(old).mockResolvedValueOnce(next);
+      const host = createScamHost({ readConfig: async () => config(), open });
+      await host.begin(message()).promise;
+      const refreshing = host.refresh();
+      const outcome = refreshing.catch((error: unknown) => error);
+      await flush();
+      const checking = host.begin(message());
+      await flush();
+      expect(old.core.check).toHaveBeenCalledTimes(1);
+      host.invalidate();
+      expect(await checking.promise).toMatchObject({ reason: "aborted" });
+      expect(await outcome).toMatchObject({ reason: "aborted" });
+      expect(await host.begin(message()).promise).toMatchObject({ kind: "report" });
+      if (fail) pending.reject(new Error("late failure")); else pending.resolve();
+      await flush();
+      expect(await checking.promise).toMatchObject({ reason: "aborted" });
+      expect(await host.begin(message()).promise).toMatchObject({ kind: "report" });
+      expect(open).toHaveBeenCalledTimes(2);
+      expect(old.core.dispose).toHaveBeenCalledTimes(1);
+      expect(next.core.dispose).not.toHaveBeenCalled();
+      host.invalidate();
+    }
+  });
+
+  it("bounds a stuck background refresh and does not reuse its runtime", async () => {
+    vi.useFakeTimers();
+    const old = runtime(), next = runtime();
+    const pending = deferred<void>();
+    old.core.refreshScam.mockReturnValueOnce(pending.promise);
+    const open = vi.fn().mockResolvedValueOnce(old).mockResolvedValueOnce(next);
+    const host = createScamHost({ readConfig: async () => config(), open });
+    await host.begin(message()).promise;
+    const refreshing = host.refresh().catch((error: unknown) => error);
+    await flush();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await refreshing).toMatchObject({ reason: "timeout" });
+    expect(old.core.dispose).toHaveBeenCalledTimes(1);
+    expect(await host.begin(message()).promise).toMatchObject({ kind: "report" });
+    pending.resolve();
+    await flush();
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(next.core.dispose).not.toHaveBeenCalled();
+    host.invalidate();
+  });
+
+  it("opens and prepares afresh after worker restart, and disposes a late old initialization", async () => {
+    const old = runtime(), next = runtime();
+    const opening = deferred<ReturnType<typeof runtime>>();
+    const settings = { ...config(), prepare: [{ kind: "transaction", chainId: "eip155:1", from: FROM }] };
+    const first = createScamHost({ readConfig: async () => settings, open: () => opening.promise });
+    first.warm();
+    const checking = first.begin(message());
+    await flush();
+    first.invalidate();
+    expect(await checking.promise).toMatchObject({ reason: "aborted" });
+
+    const ready = deferred<ReturnType<typeof runtime>>();
+    next.core.plan.mockResolvedValue({ planId: "restart", calls: [], scamCalls: [{ callId: "history", method: "scam.pool_history" }],
+      expiresAt: Date.now() + 60_000 } as unknown as CorePlan);
+    const open = vi.fn(() => ready.promise);
+    const restarted = createScamHost({ readConfig: async () => settings, open });
+    restarted.warm();
+    await flush();
+    expect(next.core.plan).not.toHaveBeenCalled();
+    expect(next.core.check).not.toHaveBeenCalled();
+    ready.resolve(next);
+    await flush();
+    expect(next.provider.prepare).toHaveBeenCalledTimes(1);
+    expect(await restarted.begin(message()).promise).toMatchObject({ kind: "report" });
+    opening.resolve(old);
+    await flush();
+    expect(old.core.dispose).toHaveBeenCalledTimes(1);
+    expect(old.core.check).not.toHaveBeenCalled();
+    expect(old.provider.prepare).not.toHaveBeenCalled();
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(await checking.promise).toMatchObject({ reason: "aborted" });
+    restarted.invalidate();
+  });
+
+  it("registers the alarm synchronously, preserves existing schedules, and refreshes only the SDK host", async () => {
+    const listeners: Array<(alarm: { name: string; scheduledTime: number }) => void> = [];
+    const alarms = {
+      get: vi.fn().mockResolvedValue(undefined),
+      create: vi.fn(),
+      onAlarm: {
+        addListener: vi.fn((listener) => { listeners.push(listener); }),
+        removeListener: vi.fn(), hasListener: vi.fn(),
+      },
+    } as Parameters<typeof registerScamHostRefresh>[0];
+    const sdk = runtime();
+    const host = createScamHost({ readConfig: async () => config(), open: async () => sdk });
+    await host.begin(message()).promise;
+    registerScamHostRefresh(alarms, () => host.refresh());
+    expect(listeners).toHaveLength(1);
+    await flush();
+    expect(alarms!.create).toHaveBeenCalledWith(SCAM_HOST_REFRESH_ALARM, { periodInMinutes: 1 });
+    listeners[0]!({ name: "dambi-weekly-summary", scheduledTime: Date.now() });
+    await flush();
+    expect(sdk.core.refreshScam).not.toHaveBeenCalled();
+    sdk.core.refreshScam.mockRejectedValueOnce(new Error("offline"));
+    listeners[0]!({ name: SCAM_HOST_REFRESH_ALARM, scheduledTime: Date.now() });
+    await flush();
+    listeners[0]!({ name: SCAM_HOST_REFRESH_ALARM, scheduledTime: Date.now() });
+    await flush();
+    expect(sdk.core.refreshPolicies).toHaveBeenCalledTimes(2);
+    expect(sdk.core.refreshScam).toHaveBeenCalledTimes(2);
+    expect(sdk.core.check).toHaveBeenCalledTimes(1); // alarms never analyze a wallet request
+    host.invalidate();
+
+    vi.mocked(alarms!.get).mockResolvedValue({ name: SCAM_HOST_REFRESH_ALARM, scheduledTime: Date.now(), periodInMinutes: 1 });
+    vi.mocked(alarms!.create).mockClear();
+    const open = vi.fn();
+    const absent = createScamHost({ readConfig: async () => undefined, open });
+    registerScamHostRefresh(alarms, () => absent.refresh());
+    await flush();
+    expect(alarms!.create).not.toHaveBeenCalled();
+    listeners[1]!({ name: SCAM_HOST_REFRESH_ALARM, scheduledTime: Date.now() });
+    await flush();
+    expect(open).not.toHaveBeenCalled();
   });
 });
 
