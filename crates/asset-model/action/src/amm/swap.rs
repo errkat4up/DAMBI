@@ -78,6 +78,11 @@ pub enum SwapDirection {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Tsify)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct SwapLiveInputs {
+    /// Route declared by the decoder from transaction calldata, without a simulation timestamp.
+    /// Its hop identities can resolve the native pool-side token; its estimates are unobserved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
+    pub declared_route: Option<DeclaredSwapRoute>,
     /// Concrete executed route. Single-pool / single-hop has `paths.len() == 1 && hops.len() == 1`.
     /// Aggregator / multi-hop cases express split and cross-protocol routes here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -95,6 +100,45 @@ pub struct SwapLiveInputs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[tsify(optional, type = "LiveField<string>")]
     pub gas_estimate: Option<LiveField<U256>>,
+}
+
+/// Calldata route identity used by single-pool checks. No quote or state snapshot is implied.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DeclaredSwapRoute {
+    /// Explicit route with no paths.
+    Empty,
+    /// One hop carrying the entire input.
+    Direct {
+        /// Single-pool venue.
+        venue: Box<AmmVenue>,
+        /// Input token of the pool hop.
+        token_in: TokenRef,
+        /// Output token of the pool hop.
+        token_out: TokenRef,
+    },
+    /// The route could not be resolved to one complete direct hop.
+    Other,
+}
+
+impl From<&SwapRoute> for DeclaredSwapRoute {
+    fn from(route: &SwapRoute) -> Self {
+        if route.aggregator.is_some() {
+            return Self::Other;
+        }
+        match &route.paths[..] {
+            [] => Self::Empty,
+            [path] if path.share_bp == 10_000 && path.hops.len() == 1 => {
+                let hop = &path.hops[0];
+                Self::Direct {
+                    venue: Box::new(hop.venue.clone()),
+                    token_in: hop.token_in.clone(),
+                    token_out: hop.token_out.clone(),
+                }
+            }
+            _ => Self::Other,
+        }
+    }
 }
 
 /// Concrete execution route for a swap — unified split + multi-hop + cross-protocol representation.

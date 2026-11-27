@@ -29,11 +29,9 @@ pub(crate) fn lower(swap: &SwapAction, ctx: &LowerCtx<'_>) -> Result<LoweredActi
     // Only sum an observed route. An absent route is not an observed empty
     // route whose estimated output happens to be zero.
     let route_estimated_out = swap.live_inputs.route.as_ref().map(|route| {
-        route
-            .value
-            .paths
-            .iter()
-            .fold(U256::ZERO, |acc, path| acc.saturating_add(path.estimated_out))
+        route.value.paths.iter().fold(U256::ZERO, |acc, path| {
+            acc.saturating_add(path.estimated_out)
+        })
     });
 
     let mut m = Map::new();
@@ -69,10 +67,16 @@ pub(crate) fn lower(swap: &SwapAction, ctx: &LowerCtx<'_>) -> Result<LoweredActi
         );
     }
     if let Some(observed) = &swap.live_inputs.price_impact_bp {
-        m.insert("priceImpactBp".into(), Value::from(i64::from(observed.value)));
+        m.insert(
+            "priceImpactBp".into(),
+            Value::from(i64::from(observed.value)),
+        );
     }
     if let Some(observed) = &swap.live_inputs.gas_estimate {
-        m.insert("gasEstimate".into(), Value::String(u256_hex(observed.value)));
+        m.insert(
+            "gasEstimate".into(),
+            Value::String(u256_hex(observed.value)),
+        );
     }
     // `custom` is OMITTED here — it is filled later by enrichment.
 
@@ -149,7 +153,7 @@ fn effective_slippage_bp(params: &SwapParams) -> Option<i64> {
         SwapDirection::ExactInput { min_amount_out, .. } if *min_amount_out == U256::ZERO
     );
     if unbounded {
-        Some(params.slippage_bp.map(i64::from).unwrap_or(0).max(10_000))
+        Some(params.slippage_bp.map_or(0, i64::from).max(10_000))
     } else {
         params.slippage_bp.map(i64::from)
     }
@@ -256,6 +260,7 @@ mod tests {
                 slippage_bp: Some(slippage_bp),
             },
             live_inputs: SwapLiveInputs {
+                declared_route: None,
                 route: Some(
                     LiveField::new(route, pool_source.clone(), now())
                         .with_ttl(Duration::from_secs(12)),
@@ -373,6 +378,7 @@ mod tests {
                 slippage_bp: Some(75),
             },
             live_inputs: SwapLiveInputs {
+                declared_route: None,
                 route: Some(LiveField::new(route, src.clone(), now())),
                 expected_amount_out: Some(LiveField::new(
                     U256::from(300_000_000_000_000_000u64),
@@ -453,7 +459,8 @@ mod tests {
         };
         swap.params.slippage_bp = Some(0);
         let source = DataSource::UserSupplied;
-        swap.live_inputs.expected_amount_out = Some(LiveField::new(U256::ZERO, source.clone(), now()));
+        swap.live_inputs.expected_amount_out =
+            Some(LiveField::new(U256::ZERO, source.clone(), now()));
         swap.live_inputs.price_impact_bp = Some(LiveField::new(0, source.clone(), now()));
         swap.live_inputs.gas_estimate = Some(LiveField::new(U256::ZERO, source, now()));
         let lowered = lower_action(&body, &meta, &TxMeta { from: FROM, to: TO }).unwrap();
@@ -714,6 +721,7 @@ mod tests {
                 slippage_bp: Some(50),
             },
             live_inputs: SwapLiveInputs {
+                declared_route: None,
                 route: Some(LiveField::new(route, src.clone(), now())),
                 expected_amount_out: Some(LiveField::new(
                     U256::from(300_000_000_000_000_000u64),

@@ -491,10 +491,11 @@ mod smoke {
                     min_amount_out: U256::from(74_000_000u64),
                 },
                 recipient: user(),
-                slippage_bp: 100,
+                slippage_bp: Some(100),
             },
             live_inputs: amm::SwapLiveInputs {
-                route: LiveField::new(
+                declared_route: None,
+                route: Some(LiveField::new(
                     route,
                     DataSource::VenueApi {
                         endpoint: "https://api.1inch.dev/swap/v6.0/1/swap".into(),
@@ -502,8 +503,8 @@ mod smoke {
                         auth: None,
                     },
                     now(),
-                ),
-                expected_amount_out: LiveField::new(
+                )),
+                expected_amount_out: Some(LiveField::new(
                     U256::from(75_000_000u64),
                     DataSource::VenueApi {
                         endpoint: "https://api.1inch.dev/swap/v6.0/1/quote".into(),
@@ -511,8 +512,8 @@ mod smoke {
                         auth: None,
                     },
                     now(),
-                ),
-                price_impact_bp: LiveField::new(
+                )),
+                price_impact_bp: Some(LiveField::new(
                     24u32,
                     DataSource::VenueApi {
                         endpoint: "https://api.1inch.dev/swap/v6.0/1/quote".into(),
@@ -520,8 +521,8 @@ mod smoke {
                         auth: None,
                     },
                     now(),
-                ),
-                gas_estimate: LiveField::new(
+                )),
+                gas_estimate: Some(LiveField::new(
                     U256::from(280_000u64),
                     DataSource::VenueApi {
                         endpoint: "https://api.1inch.dev/swap/v6.0/1/quote".into(),
@@ -529,7 +530,7 @@ mod smoke {
                         auth: None,
                     },
                     now(),
-                ),
+                )),
             },
         });
 
@@ -607,25 +608,28 @@ mod smoke {
                     min_amount_out: U256::from(300_000_000_000_000_000u64),
                 },
                 recipient: user(),
-                slippage_bp: 50,
+                slippage_bp: Some(50),
             },
             live_inputs: amm::SwapLiveInputs {
-                route: LiveField::new(route, pool_source.clone(), now())
-                    .with_ttl(Duration::from_secs(12)),
-                expected_amount_out: LiveField::new(
+                declared_route: None,
+                route: Some(
+                    LiveField::new(route, pool_source.clone(), now())
+                        .with_ttl(Duration::from_secs(12)),
+                ),
+                expected_amount_out: Some(LiveField::new(
                     U256::from(305_000_000_000_000_000u64),
                     pool_source.clone(),
                     now(),
-                ),
-                price_impact_bp: LiveField::new(12u32, pool_source, now()),
-                gas_estimate: LiveField::new(
+                )),
+                price_impact_bp: Some(LiveField::new(12u32, pool_source, now())),
+                gas_estimate: Some(LiveField::new(
                     U256::from(180_000u64),
                     DataSource::OracleFeed {
                         provider: OracleProvider::Pyth,
                         feed_id: "gas/arbitrum".into(),
                     },
                     now(),
-                ),
+                )),
             },
         });
 

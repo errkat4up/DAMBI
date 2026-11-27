@@ -116,19 +116,14 @@ test("observed swap raw request resolves the actual token, pool and factory", ()
   assert.equal(action.body.params.recipient, swapTx.from);
   assert.equal(BigInt(action.body.params.direction.amount_in), BigInt(swapTx.value));
   assert.equal(BigInt(action.body.params.direction.min_amount_out), 0n);
-  const route = action.body.live_inputs.route;
-  assert.deepEqual(route.source, { kind: "derived_from", inputs: [], calc_id: "sf0_fixture_calldata_single_hop_route" });
-  assert.equal(route.value.paths.length, 1);
-  assert.equal(route.value.paths[0].share_bp, 10_000);
-  assert.equal(route.value.paths[0].hops.length, 1);
-  const hop = route.value.paths[0].hops[0];
+  const hop = action.body.live_inputs.declared_route;
+  assert.equal(hop.kind, "direct");
   assert.deepEqual(hop.token_in.key, { standard: "erc20", chain: "eip155:91342", address: WETH });
   assert.deepEqual(hop.token_out, action.body.params.token_out);
   assert.deepEqual(hop.venue, action.body.venue);
-  // Identity only: these skeletons are not fetched liquidity or a quote.
-  assert.equal(BigInt(hop.pool_state.reserve_in), 0n);
-  assert.equal(BigInt(hop.pool_state.reserve_out), 0n);
-  assert.equal(BigInt(hop.estimated_out), 0n);
+  assert.equal(Object.hasOwn(hop, "pool_state"), false);
+  assert.equal(Object.hasOwn(hop, "estimated_out"), false);
+  assert.equal(Object.hasOwn(action.body.live_inputs, "route"), false);
 });
 
 test("explicit route values stay typed without seeding other live values", () => {
@@ -145,10 +140,10 @@ test("explicit route values stay typed without seeding other live values", () =>
   const valid = run();
   assert.equal(valid.ok, true, JSON.stringify(valid));
   const decodedLive = valid.data.actions[0].body.live_inputs;
-  assert.equal(decodedLive.route.value.paths.length, 1);
-  assert.equal(BigInt(decodedLive.expected_amount_out.value), 0n);
-  assert.equal(decodedLive.price_impact_bp.value, 0);
-  assert.equal(BigInt(decodedLive.gas_estimate.value), 0n);
+  assert.equal(decodedLive.declared_route.kind, "direct");
+  for (const field of ["route", "expected_amount_out", "price_impact_bp", "gas_estimate"]) {
+    assert.equal(Object.hasOwn(decodedLive, field), false, field);
+  }
 
   // A malformed explicit route is rejected, not replaced by an empty route.
   live.route.value = null;

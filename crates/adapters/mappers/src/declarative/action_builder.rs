@@ -49,6 +49,9 @@ pub enum V3BuildError {
         /// JSON-encoded args value the walker was inspecting.
         args: String,
     },
+    /// An explicit calldata route did not have paths or its direct path lacked hops.
+    #[error("invalid declared swap route: {0}")]
+    InvalidDeclaredRoute(&'static str),
     /// Final `from_value::<ActionBody>` did not match the target enum shape.
     #[error("serde from_value: {0}")]
     SerdeFromValue(#[from] serde_json::Error),
@@ -674,39 +677,41 @@ pub fn build_action_body(
         // unobserved entries BEFORE substitution: dormant resolver/function
         // references must not invalidate otherwise decodable signed intent.
         // Explicit observations still undergo substitution and typed validation.
-        let live_template = if is_swap {
-            match live_template {
-                JsonValue::Object(map) => JsonValue::Object(
-                    map.into_iter()
-                        .map(|(field, payload)| (field, swap_live_observation(&payload)))
-                        .collect(),
-                ),
-                other => other,
+        let live_substituted = if let (true, Some(fields)) = (is_swap, live_template.as_object()) {
+            let mut inputs = JsonMap::new();
+            for (name, payload) in fields {
+                if name == "route" && payload.get("synced_at").is_none() {
+                    if let Some(value) = payload.get("value") {
+                        inputs.insert("declared_route".into(), declared_swap_route(ctx, value)?);
+                    }
+                }
+                if name != "declared_route" {
+                    inputs.insert(
+                        name.clone(),
+                        substitute_placeholders(ctx, &swap_live_observation(payload))?,
+                    );
+                }
             }
+            JsonValue::Object(inputs)
         } else {
-            live_template
+            substitute_placeholders(ctx, &live_template)?
         };
-        let live_substituted = substitute_placeholders(ctx, &live_template)?;
         if let Some(map) = live_substituted.as_object() {
             match layout {
                 LiveInputLayout::Nested => {
                     let mut live_obj = JsonMap::with_capacity(map.len());
                     for (field_name, src_payload) in map {
-                        // Static route descriptions must not masquerade as a
-                        // simulated route with observed estimates. The swap model
-                        // represents missing observations explicitly.
                         if is_swap {
-                            live_obj.insert(field_name.clone(), swap_live_observation(src_payload));
+                            live_obj.insert(field_name.clone(), src_payload.clone());
                             continue;
                         }
-                        let route_value = None;
                         let wrapped = wrap_live_field(
                             ctx,
                             domain.as_deref(),
                             action.as_deref(),
                             field_name,
                             src_payload,
-                            route_value,
+                            None,
                         );
                         live_obj.insert(field_name.clone(), wrapped);
                     }
@@ -1004,6 +1009,44 @@ fn wrap_live_field(
         JsonValue::Number(ctx.submitted_at.as_unix().into()),
     );
     JsonValue::Object(out)
+}
+
+/// Retain only calldata identities for a static single-hop route. A decoder can
+/// include dormant pool-state or estimate lookups in the same route template.
+fn declared_swap_route(
+    ctx: &V3MapContext<'_>,
+    route: &JsonValue,
+) -> Result<JsonValue, V3BuildError> {
+    let other = serde_json::json!({"kind":"other"});
+    let paths = route
+        .get("paths")
+        .and_then(JsonValue::as_array)
+        .ok_or(V3BuildError::InvalidDeclaredRoute("paths must be an array"))?;
+    if route
+        .get("aggregator")
+        .is_some_and(|value| !value.is_null())
+    {
+        return Ok(other);
+    }
+    let path = match paths.as_slice() {
+        [] => return Ok(serde_json::json!({"kind":"empty"})),
+        [path] => path,
+        _ => return Ok(other),
+    };
+    let Some([hop]) = path
+        .get("hops")
+        .and_then(JsonValue::as_array)
+        .map(Vec::as_slice)
+    else {
+        return Ok(other);
+    };
+    if !substitute_placeholders(ctx, &path["share_bp"])
+        .is_ok_and(|value| value.as_u64() == Some(10_000))
+    {
+        return Ok(other);
+    }
+    let identity = serde_json::json!({"kind":"direct", "token_in":hop["token_in"], "token_out":hop["token_out"], "venue":hop["venue"]});
+    Ok(substitute_placeholders(ctx, &identity).unwrap_or(other))
 }
 
 /// Preserve observation provenance, including explicit zero values and epoch
@@ -2252,7 +2295,11 @@ mod tests {
             ("route", json!({"paths":[]})),
         ] {
             let descriptor = json!({"source":{"kind":"user_supplied"},"ttl_s":12});
-            assert_eq!(swap_live_observation(&descriptor), JsonValue::Null, "{field}");
+            assert_eq!(
+                swap_live_observation(&descriptor),
+                JsonValue::Null,
+                "{field}"
+            );
             let mut value_without_time = descriptor.clone();
             value_without_time["value"] = zero.clone();
             assert_eq!(
@@ -2314,7 +2361,12 @@ mod tests {
             }
         });
         let baseline = build_action_body(&ctx, &body, None).unwrap();
-        for field in ["route", "expected_amount_out", "price_impact_bp", "gas_estimate"] {
+        for field in [
+            "route",
+            "expected_amount_out",
+            "price_impact_bp",
+            "gas_estimate",
+        ] {
             for source in [
                 json!("$resolved.unobserved_test_source"),
                 json!({"$fn": "array_len", "$args": []}),
@@ -2344,6 +2396,29 @@ mod tests {
         assert_eq!(swap.live_inputs.expected_amount_out, None);
         assert_eq!(swap.live_inputs.price_impact_bp, None);
         assert_eq!(swap.live_inputs.gas_estimate, None);
+
+        // Calldata can identify the hop even when price and pool state recipes are dormant.
+        let mut declared = json!({"route":{"value":{"paths":[{"share_bp":10000,"hops":[{
+            "venue":body["amm"]["swap"]["venue"], "token_in":body["amm"]["swap"]["params"]["token_in"],
+            "token_out":{"key":{"standard":"erc20","chain":"$chain","address":"$tx.from"}},
+            "pool_state":"$resolved.missing_snapshot", "estimated_out":"$derived.missing_quote"
+        }], "estimated_out":"$derived.missing_quote"}]}}});
+        let declared_action = build_action_body(&ctx, &body, Some(&declared)).unwrap();
+        let wire = serde_json::to_value(declared_action).unwrap();
+        assert_eq!(wire["live_inputs"]["declared_route"]["kind"], "direct");
+        assert!(wire["live_inputs"]["declared_route"]
+            .get("estimated_out")
+            .is_none());
+        assert!(wire["live_inputs"].get("route").is_none());
+        declared["route"]["value"]["paths"][0]["hops"][0]["venue"] =
+            json!("$resolved.missing_venue");
+        let unresolved =
+            serde_json::to_value(build_action_body(&ctx, &body, Some(&declared)).unwrap()).unwrap();
+        assert_eq!(unresolved["live_inputs"]["declared_route"]["kind"], "other");
+        assert_eq!(
+            unresolved["params"]["recipient"],
+            wire["params"]["recipient"]
+        );
 
         // A real zero with its original epoch timestamp survives both passes.
         let observed = json!({

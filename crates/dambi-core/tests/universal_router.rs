@@ -237,7 +237,12 @@ fn zero_output_floor_without_observations_preserves_independent_recipient_deny()
         assert_eq!(swap["params"]["direction"]["min_amount_out"], "0x0");
         assert!(swap["params"].get("slippage_bp").is_none());
         let live = swap["live_inputs"].as_object().unwrap();
-        for field in ["route", "expected_amount_out", "price_impact_bp", "gas_estimate"] {
+        for field in [
+            "route",
+            "expected_amount_out",
+            "price_impact_bp",
+            "gas_estimate",
+        ] {
             assert!(live.get(field).is_none(), "unobserved {field}: {swap}");
         }
         assert_verdict(&mut session, &request, "deny");

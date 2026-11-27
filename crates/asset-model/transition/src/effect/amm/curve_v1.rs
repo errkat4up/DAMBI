@@ -539,20 +539,25 @@ mod tests {
                     min_amount_out: U256::ZERO,
                 },
                 recipient: Address::from([3u8; 20]),
-                slippage_bp: 50,
+                slippage_bp: Some(50),
             },
             live_inputs: SwapLiveInputs {
-                route: LiveField::new(
+                declared_route: None,
+                route: Some(LiveField::new(
                     SwapRoute {
                         paths: vec![],
                         aggregator: None,
                     },
                     DataSource::UserSupplied,
                     now(),
-                ),
-                expected_amount_out: LiveField::new(U256::ZERO, DataSource::UserSupplied, now()),
-                price_impact_bp: LiveField::new(0u32, DataSource::UserSupplied, now()),
-                gas_estimate: LiveField::new(U256::ZERO, DataSource::UserSupplied, now()),
+                )),
+                expected_amount_out: Some(LiveField::new(
+                    U256::ZERO,
+                    DataSource::UserSupplied,
+                    now(),
+                )),
+                price_impact_bp: Some(LiveField::new(0u32, DataSource::UserSupplied, now())),
+                gas_estimate: Some(LiveField::new(U256::ZERO, DataSource::UserSupplied, now())),
             },
         }
     }

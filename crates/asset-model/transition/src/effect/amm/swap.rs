@@ -33,7 +33,12 @@ use super::{
 impl Reducer for SwapAction {
     #[allow(clippy::too_many_lines)]
     fn apply(&self, state: &WalletState, ctx: &EvalContext) -> ReducerResult<StateDelta> {
-        let route = &self.live_inputs.route.value;
+        let route = &self
+            .live_inputs
+            .route
+            .as_ref()
+            .ok_or(ReducerError::MissingField("route"))?
+            .value;
 
         // Exact-output simulation uses the user-signed `max_amount_in` spend
         // cap until venue-specific inverse quotes are available.
@@ -321,10 +326,11 @@ mod tests {
 
     fn make_live_inputs(route: SwapRoute) -> SwapLiveInputs {
         SwapLiveInputs {
-            route: LiveField::new(route, DataSource::UserSupplied, now()),
-            expected_amount_out: LiveField::new(U256::ZERO, DataSource::UserSupplied, now()),
-            price_impact_bp: LiveField::new(0u32, DataSource::UserSupplied, now()),
-            gas_estimate: LiveField::new(U256::ZERO, DataSource::UserSupplied, now()),
+            declared_route: None,
+            route: Some(LiveField::new(route, DataSource::UserSupplied, now())),
+            expected_amount_out: Some(LiveField::new(U256::ZERO, DataSource::UserSupplied, now())),
+            price_impact_bp: Some(LiveField::new(0u32, DataSource::UserSupplied, now())),
+            gas_estimate: Some(LiveField::new(U256::ZERO, DataSource::UserSupplied, now())),
         }
     }
 
@@ -352,7 +358,7 @@ mod tests {
                     min_amount_out: min_out,
                 },
                 recipient: user(),
-                slippage_bp: 50,
+                slippage_bp: Some(50),
             },
             live_inputs: make_live_inputs(route),
         }
@@ -478,7 +484,7 @@ mod tests {
                     min_amount_out: U256::from(900u64),
                 },
                 recipient: user(),
-                slippage_bp: 50,
+                slippage_bp: Some(50),
             },
             live_inputs: make_live_inputs(route),
         };
@@ -550,7 +556,7 @@ mod tests {
                     min_amount_out: U256::ZERO,
                 },
                 recipient: user(),
-                slippage_bp: 50,
+                slippage_bp: Some(50),
             },
             live_inputs: make_live_inputs(route),
         };
@@ -595,7 +601,7 @@ mod tests {
                     amount_out: U256::from(500u64),
                 },
                 recipient: user(),
-                slippage_bp: 50,
+                slippage_bp: Some(50),
             },
             live_inputs: make_live_inputs(route),
         };
@@ -1026,7 +1032,7 @@ mod tests {
                     min_amount_out: min_out,
                 },
                 recipient: user(),
-                slippage_bp: 50,
+                slippage_bp: Some(50),
             },
             live_inputs: make_live_inputs(route),
         }
@@ -1146,7 +1152,7 @@ mod tests {
                     min_amount_out: U256::ZERO,
                 },
                 recipient: user(),
-                slippage_bp: 50,
+                slippage_bp: Some(50),
             },
             live_inputs: make_live_inputs(route),
         };

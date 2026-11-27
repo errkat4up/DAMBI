@@ -2,6 +2,11 @@ import { createCore } from "@dambi/core";
 import { decoderSnapshot } from "@dambi/core/decoders";
 import { createEvmFactProvider, createPolicyApiSource } from "@dambi/core/adapters";
 
+/** @type {ReadonlyArray<import("@dambi/core").CoreDiagnosticCode>} */
+const requiredFactFailureCodes = [
+  "required_fact_missing", "projection_failed", "invalid_fact", "fact_plan_mismatch", "fact_fetch_failed", "timeout",
+];
+
 /**
  * @typedef {object} AdapterSettings
  * @property {Pick<import("@dambi/core/adapters").PolicyApiSourceOptions, "baseUrl" | "maxResponseBytes" | "headers">} policy
@@ -23,8 +28,7 @@ import { createEvmFactProvider, createPolicyApiSource } from "@dambi/core/adapte
 export function describeCheck(verdict) {
   const codes = new Set((verdict?.diagnostics ?? []).map(({ code }) => code));
   const requiredFactFailure = verdict?.source === "fail_closed"
-    && ["required_fact_missing", "projection_failed", "invalid_fact", "fact_plan_mismatch",
-      "fact_fetch_failed", "timeout"].some((code) => codes.has(code));
+    && requiredFactFailureCodes.some((code) => codes.has(code));
   const partial = codes.has("partial_decode");
   const unsupported = codes.has("unsupported_request");
   const unmatched = codes.has("no_matching_policy");

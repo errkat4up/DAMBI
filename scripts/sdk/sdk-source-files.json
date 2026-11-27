@@ -47,6 +47,7 @@
     { "from": "packages/core/tests/fixtures/aave.mjs" },
     { "from": "packages/core/tests/fixtures/pools.mjs" },
     { "from": "packages/core/tests/check.test.mjs" },
+    { "from": "examples/sdk-adapters/client.mjs" },
     { "from": "packages/core/tests/scam-bundle.test.mjs" },
     { "from": "packages/core/tests/adapters" },
     { "from": "crates/dambi-core/Cargo.toml" },
