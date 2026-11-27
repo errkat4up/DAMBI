@@ -56,12 +56,7 @@ fn retained_registry_snapshot_renews_only_on_new_blocks_and_rechecks_at_commit()
     relabelled.observed_at_ms += 1000;
     let replay_ticket = store.begin_refresh().unwrap();
     expect_code(
-        store.prepare_registry_refresh(
-            &replay_ticket,
-            policy.input(),
-            relabelled,
-            NOW + 1000,
-        ),
+        store.prepare_registry_refresh(&replay_ticket, policy.input(), relabelled, NOW + 1000),
         "POLICY_SEQUENCE_REJECTED",
     );
     store.cancel_refresh(&replay_ticket).unwrap();

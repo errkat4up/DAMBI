@@ -9,8 +9,8 @@ use std::sync::{
 };
 
 use crate::bundle::{
-    parse_policy_bundle, validate_policy_bundle_with_registry, PolicyUpdate, PolicyValidationConfig,
-    RegistryRef, TrustedKeys, ValidatedPolicyBundle, VerificationKey,
+    parse_policy_bundle, validate_policy_bundle_with_registry, PolicyUpdate,
+    PolicyValidationConfig, RegistryRef, TrustedKeys, ValidatedPolicyBundle, VerificationKey,
 };
 
 use super::{

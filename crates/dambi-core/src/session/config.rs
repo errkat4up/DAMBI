@@ -1,7 +1,9 @@
 use serde::Deserialize;
 
 use crate::bundle::{KeyRole, PolicyValidationConfig, VerificationKey};
-use crate::snapshot::{RegistryConfig, RegistryObservation, SignedPolicyInput, SnapshotStoreConfig};
+use crate::snapshot::{
+    RegistryConfig, RegistryObservation, SignedPolicyInput, SnapshotStoreConfig,
+};
 
 use super::{parse_json, SessionError, MAX_SAFE_INTEGER};
 

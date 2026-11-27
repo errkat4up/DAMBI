@@ -677,8 +677,7 @@ fn registry_state_enforces_block_lease_revocation_replacement_and_restart() {
     repeat["registryState"]["observedAtMs"] = json!(NOW + 1999);
     registry_refresh(&mut core, &repeat, NOW + 1999).unwrap();
     let pinned = core.plan(&request("7").to_string(), NOW + 1999).unwrap();
-    let unavailable =
-        json!({"payload":"","signature":"","registryState":{"status":"unavailable"}});
+    let unavailable = json!({"payload":"","signature":"","registryState":{"status":"unavailable"}});
     error_code(
         registry_refresh(&mut core, &unavailable, NOW + 1999),
         "POLICY_FETCH_FAILED",
@@ -760,11 +759,7 @@ fn registry_rejects_tampering_scope_rollback_conflicts_and_late_refreshes() {
             json!(format!("{} ", initial["payload"].as_str().unwrap())),
             "INVALID_SIGNATURE",
         ),
-        (
-            "/registryState/chainId",
-            json!(1),
-            "POLICY_SCOPE_MISMATCH",
-        ),
+        ("/registryState/chainId", json!(1), "POLICY_SCOPE_MISMATCH"),
         (
             "/registryState/profile",
             json!("foreign"),

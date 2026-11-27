@@ -640,7 +640,9 @@ impl CoreSession {
                     observation,
                     now_ms,
                 )?,
-                None => self.store.prepare_refresh(&ticket, policy.input(), now_ms)?,
+                None => self
+                    .store
+                    .prepare_refresh(&ticket, policy.input(), now_ms)?,
             };
             self.store.commit_refresh(prepared, now_ms)?;
             Ok(())
