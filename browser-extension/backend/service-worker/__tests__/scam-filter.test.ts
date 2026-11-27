@@ -46,7 +46,9 @@ function runtime() {
     check: vi.fn<(request: CheckRequest, options?: CallOptions) => Promise<Verdict>>(async () => verdict),
     plan: vi.fn<(request: CheckRequest, options?: CallOptions) => Promise<CorePlan>>(),
     evaluate: vi.fn(() => verdict),
-    dispose: vi.fn(), setScamSettings: vi.fn(), refreshPolicies: vi.fn(), refreshScam: vi.fn(),
+    dispose: vi.fn(), setScamSettings: vi.fn(),
+    refreshPolicies: vi.fn<DambiCore["refreshPolicies"]>(),
+    refreshScam: vi.fn<DambiCore["refreshScam"]>(),
   } satisfies DambiCore;
   const provider = { fetch: vi.fn(), prepare: vi.fn(async () => undefined) } satisfies ScamFactProvider;
   return { core, provider };
@@ -261,6 +263,46 @@ describe("MV3 SDK host refresh", () => {
     host.invalidate();
   });
 
+  it.each(["refreshPolicies", "refreshScam"] as const)(
+    "retries a failed forced %s before checking, even inside the polling interval",
+    async (method) => {
+      vi.useFakeTimers();
+      const sdk = runtime();
+      const open = vi.fn(async () => sdk);
+      const host = createScamHost({ readConfig: async () => config(), open });
+      try {
+        expect(await host.begin(message()).promise).toMatchObject({ kind: "report" });
+        const startedAt = Date.now();
+        sdk.core[method].mockRejectedValueOnce(new Error("local service unavailable"));
+        await expect(host.refresh()).rejects.toThrow("local service unavailable");
+        expect(sdk.core.check).toHaveBeenCalledTimes(1);
+
+        // No clock advance: an earlier successful initialization must not hide
+        // this failed forced refresh from the next wallet request.
+        sdk.core[method].mockRejectedValueOnce(new Error("still unavailable"));
+        expect(await host.begin(message()).promise).toMatchObject({
+          kind: "unavailable", reason: "host_error",
+        });
+        expect(sdk.core[method]).toHaveBeenCalledTimes(2);
+        expect(sdk.core.check).toHaveBeenCalledTimes(1);
+        expect(sdk.core.dispose).not.toHaveBeenCalled();
+
+        expect(await host.begin(message()).promise).toMatchObject({ kind: "report", report });
+        expect(sdk.core[method]).toHaveBeenCalledTimes(3);
+        expect(sdk.core.check).toHaveBeenCalledTimes(2);
+        expect(open).toHaveBeenCalledTimes(1);
+        expect(Date.now()).toBe(startedAt);
+
+        // Only the successful retry restores request-time freshness.
+        await host.begin(message()).promise;
+        expect(sdk.core[method]).toHaveBeenCalledTimes(3);
+        expect(sdk.core.check).toHaveBeenCalledTimes(3);
+      } finally {
+        host.invalidate();
+      }
+    },
+  );
+
   it("keeps caller cancellation and deadlines separate from a shared refresh", async () => {
     vi.useFakeTimers();
     const sdk = runtime();
@@ -274,7 +316,7 @@ describe("MV3 SDK host refresh", () => {
     await flush();
     cancelled.cancel();
     expect(await cancelled.promise).toMatchObject({ reason: "aborted" });
-    const signal = sdk.core.refreshScam.mock.calls[0]![0].signal as AbortSignal;
+    const signal = sdk.core.refreshScam.mock.calls[0]![0]!.signal!;
     expect(signal.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(2_500);
     expect(await timedOut.promise).toMatchObject({ reason: "timeout" });

@@ -210,6 +210,11 @@ export function createScamHost(dependencies: HostDependencies) {
     if (!force && current.refreshedAt !== undefined && now >= current.refreshedAt
         && now - current.refreshedAt < SCAM_HOST_REFRESH_MS) return;
 
+    // Once a refresh starts, the previous successful fetch time must not let
+    // later callers skip a failed refresh. This also applies to forced alarm
+    // refreshes inside the normal polling interval. Only success below restores
+    // freshness; ordinary failures retain Core's accepted-version state.
+    delete current.refreshedAt;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let onAbort!: () => void;
