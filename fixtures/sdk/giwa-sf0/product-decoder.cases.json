@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "scope": "Synthetic unsigned mutations of the recorded product swap; not additional chain observations or router implementation-equivalence evidence. Keep chain, router, selector, value and static ABI arguments unchanged.",
+  "cases": [
+    {
+      "id": "other-output-token",
+      "path": ["0x4200000000000000000000000000000000000006", "0x1111111111111111111111111111111111111111"],
+      "expected": "unknown"
+    },
+    {
+      "id": "reverse-path",
+      "path": ["0x0274c57358c3a6b8a08b7297ba51665c303a471f", "0x4200000000000000000000000000000000000006"],
+      "expected": "unknown"
+    },
+    {
+      "id": "multihop",
+      "path": ["0x4200000000000000000000000000000000000006", "0x1111111111111111111111111111111111111111", "0x0274c57358c3a6b8a08b7297ba51665c303a471f"],
+      "expected": "unknown"
+    },
+    {
+      "id": "empty-path",
+      "path": [],
+      "expected": "unknown"
+    },
+    {
+      "id": "single-token-path",
+      "path": ["0x4200000000000000000000000000000000000006"],
+      "expected": "unknown"
+    },
+    {
+      "id": "truncated-address",
+      "truncateBytes": 1,
+      "expected": "malformed"
+    },
+    {
+      "id": "missing-address-word",
+      "truncateBytes": 32,
+      "expected": "malformed"
+    },
+    {
+      "id": "selector-only",
+      "keepBytes": 4,
+      "expected": "malformed"
+    }
+  ]
+}

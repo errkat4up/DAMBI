@@ -34,6 +34,65 @@ function replaceWord(calldata, index, value) {
   return calldata.slice(0, start) + value + calldata.slice(start + 64);
 }
 
+// Re-encode only the dynamic tail. In particular, empty/short paths are valid
+// ABI arrays, not truncated encodings: they must exercise the manifest defaults.
+function boundaryCalldata(calldata, entry) {
+  assert.equal(BigInt(`0x${calldata.slice(74, 138)}`), 128n, "recorded path offset");
+  if (entry.expected === "unknown") {
+    assert.ok(Array.isArray(entry.path));
+    for (const address of entry.path) assert.match(address, /^0x[0-9a-f]{40}$/);
+    return calldata.slice(0, 10 + 4 * 64)
+      + entry.path.length.toString(16).padStart(64, "0")
+      + entry.path.map((address) => address.slice(2).padStart(64, "0")).join("");
+  }
+  assert.equal(entry.expected, "malformed");
+  return entry.keepBytes === undefined
+    ? calldata.slice(0, -entry.truncateBytes * 2)
+    : calldata.slice(0, 2 + entry.keepBytes * 2);
+}
+
+test("GIWA product defaults emit Unknown without leaking the recorded pool; truncated ABI fails", () => {
+  const fixture = readJson("./product-decoder.cases.json");
+  assert.equal(fixture.schema_version, 1);
+  assert.deepEqual(fixture.cases.map(({ id }) => id), [
+    "other-output-token", "reverse-path", "multihop", "empty-path", "single-token-path",
+    "truncated-address", "missing-address-word", "selector-only",
+  ]);
+  const original = recordedInput();
+  const { swap } = readJson("./rpc-evidence.json").observations;
+  assert.equal(boundaryCalldata(original.calldata, { expected: "unknown", path: swap.path }),
+    original.calldata, "tail encoder must reproduce the recorded positive input exactly");
+  const requests = fixture.cases.map((entry) => ({ id: entry.id,
+    input: { ...original, calldata: boundaryCalldata(original.calldata, entry) } }));
+  const results = decodeProduct(requests);
+  for (let index = 0; index < results.length; index++) {
+    const entry = fixture.cases[index];
+    const { input } = requests[index];
+    const decoded = results[index];
+    const label = `${entry.id}: ${JSON.stringify(decoded)}`;
+    assert.equal(input.chain_id, 91342);
+    assert.equal(input.to, original.to);
+    assert.equal(input.selector, original.selector);
+    assert.equal(input.calldata.slice(0, 10), original.selector);
+    assert.notEqual(input.calldata, original.calldata);
+    if (entry.expected === "malformed") {
+      assert.equal(decoded.ok, false, label);
+      continue;
+    }
+    // A generic decoder failure is not a successful default-branch regression.
+    assert.equal(decoded.ok, true, label);
+    assert.equal(decoded.data.decoder_id, "giwa/v2-router/swap-exact-eth-for-tokens@1.0.0", label);
+    assert.equal(decoded.data.actions.length, 1, label);
+    const { body } = decoded.data.actions[0];
+    assert.equal(body.domain, "unknown", label);
+    assert.notEqual(body.action, "swap", label);
+    const serialized = JSON.stringify(decoded.data).toLowerCase();
+    assert.equal(serialized.includes(swap.pool.toLowerCase()), false, label);
+    assert.equal(serialized.includes(swap.factory.toLowerCase()), false, label);
+    assert.equal(serialized.includes('"declared_route"'), false, label);
+  }
+});
+
 test("GIWA product preserves changed raw amounts and recipient without inventing market observations", () => {
   // Synthetic, unsigned mutations of the recorded call; not additional chain
   // evidence. In particular, a zero-only test cannot detect a defaulted minimum.

@@ -28,6 +28,7 @@
     { "from": "fixtures/sdk/giwa-sf0/rpc-evidence.json" },
     { "from": "fixtures/sdk/helpers/native-backend.mjs" },
     { "from": "fixtures/sdk/giwa-sf0/product-decoder.test.mjs" },
+    { "from": "fixtures/sdk/giwa-sf0/product-decoder.cases.json" },
     { "from": "fixtures/sdk/giwa-sf0/decoders/swap-exact-eth-for-tokens.json" },
     { "from": "fixtures/sdk/pool-materialization/selection.json" },
     { "from": "fixtures/sdk/pool-materialization/templates" },

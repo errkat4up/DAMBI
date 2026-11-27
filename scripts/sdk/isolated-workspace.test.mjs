@@ -47,6 +47,7 @@ test("isolated sources retain the GIWA Native runner and public adapter timing h
   // timing helper. A full checkout must not mask either missing isolated input.
   for (const path of [
     "fixtures/sdk/giwa-sf0/product-decoder.test.mjs",
+    "fixtures/sdk/giwa-sf0/product-decoder.cases.json",
     "fixtures/sdk/helpers/native-backend.mjs",
     "crates/dambi-core/examples/fixture_runner.rs",
     "examples/sdk-adapters/client.mjs",

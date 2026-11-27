@@ -42,6 +42,12 @@ async function giwaPlanningFixture() {
     return { kind: "transaction", chainId: `eip155:${BigInt(tx.chainId)}`, from: tx.from,
       to: tx.to, value: BigInt(tx.value).toString(), data: tx.input };
   };
+  const boundaries = JSON.parse(await readFile(join(root, "fixtures/sdk/giwa-sf0/product-decoder.cases.json"), "utf8"));
+  assert.equal(boundaries.schema_version, 1);
+  assert.deepEqual(boundaries.cases.map(({ id }) => id), [
+    "other-output-token", "reverse-path", "multihop", "empty-path", "single-token-path",
+    "truncated-address", "missing-address-word", "selector-only",
+  ]);
   const swap = evidence.observations.swap;
   const chainId = Number(evidence.chainId);
   const [quoteToken, token] = swap.path;
@@ -67,6 +73,7 @@ async function giwaPlanningFixture() {
     request: requestFor("0x212c9856eee05e3dc92710267106842dcd44eb624668998b9079272136185cb9"),
     unrelated: requestFor("0x55f28ca8295e4526361edfc735b3eedb69052051591c52d98fac06b278ef3578"),
     subject: { chainId, venue: "uniswap_v2", factory: swap.factory, pool: swap.pool, token, quoteToken },
+    boundaries: boundaries.cases,
     bundle: { payload, signature },
     config: { settings: { enabled: true, presetId, overrides: [], additionalRules: [], locale: "ko" },
       trust: { env: "staging", profile: "default", keys: [{ role: "scam", keyId: "consumer", publicKeySpkiBase64 }] },
