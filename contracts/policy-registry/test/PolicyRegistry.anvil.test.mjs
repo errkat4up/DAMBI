@@ -121,12 +121,40 @@ test("real registry and fixed publisher: CAS, receipts, retries, revocation, rot
   const encodedScope = await rpc("eth_call", [{ to: registry, data: calldata("scopeId(string,string)", "staging", "default") }, "latest"]);
   assert.equal(encodedScope.toLowerCase(), scope);
   const data = tool.publicationData(client, first);
+  // Bypass the TS validator only for negative contract transactions. All other
+  // arguments remain valid, so these exercise Solidity's version checks.
+  const rawPublication = (targetScope, expectedCurrent, sequence, signed) => calldata(
+    "publish(bytes32,uint256,uint256,bytes32,bytes,bytes,string)",
+    targetScope, expectedCurrent, sequence, tool.sha256(Buffer.from(signed.payload)),
+    "0x" + Buffer.from(signed.payload).toString("hex"),
+    "0x" + Buffer.from(signed.signature, "base64").toString("hex"), signed.key_id,
+  );
+  const rawRecord = (target, targetScope, sequence) => rpc("eth_call", [{
+    to: target, data: calldata("read(bytes32,uint256)", targetScope, sequence),
+  }, "latest"]);
   // Actual authority and data-integrity failures, not mocked publisher responses.
   assert.equal((await send(outsider, registry, data)).status, "0x0");
   const badDigest = calldata("publish(bytes32,uint256,uint256,bytes32,bytes,bytes,string)", scope, 0, 1,
     "0x" + "00".repeat(32), "0x" + Buffer.from(first.signed.payload).toString("hex"),
     "0x" + Buffer.from(first.signed.signature, "base64").toString("hex"), first.signed.key_id);
   assert.equal((await send(owner, registry, badDigest)).status, "0x0");
+  const maximumSequence = 9_007_199_254_740_991n;
+  assert.equal(tool.safeSequence(maximumSequence.toString()), Number.MAX_SAFE_INTEGER);
+  const emptyRecord = await client.read();
+  assert.equal(emptyRecord.head, 0);
+  assert.equal(emptyRecord.status, 0);
+  for (const [name, expectedCurrent, sequence] of [
+    ["zero", 0n, 0n],
+    ["skipped version", 0n, 2n],
+    ["above MAX_SEQUENCE", maximumSequence, maximumSequence + 1n],
+  ]) {
+    const before = await rawRecord(registry, scope, sequence);
+    const failed = await send(owner, registry, rawPublication(scope, expectedCurrent, sequence, first.signed));
+    assert.equal(failed.status, "0x0", `${name}: must produce a failed receipt`);
+    assert.equal(failed.to.toLowerCase(), registry.toLowerCase());
+    assert.deepEqual(await client.read(), emptyRecord, `${name}: head and record unchanged`);
+    assert.equal(await rawRecord(registry, scope, sequence), before, `${name}: no version stored`);
+  }
   let firstHash;
   const published = await tool.publishOnchainPolicy(client, first, submit, {
     pollMs: 20,
@@ -237,6 +265,87 @@ test("real registry and fixed publisher: CAS, receipts, retries, revocation, rot
   assert.equal(rotated.config.finality, "finalized");
   assert.equal((await rotated.read()).head, 3);
   assert.equal((await rotated.read(2)).status, 3);
+
+  // Reuse only the existing test harness, never add seeding to production.
+  // This isolates the 2^53 boundary without billions of preliminary writes.
+  const boundaryArtifact = JSON.parse(await readFile(resolve(foundryRoot,
+    process.env.FOUNDRY_OUT || "out", "PolicyRegistry.t.sol", "BoundaryRegistry.json"), "utf8"));
+  const boundaryDeployment = await send(owner, undefined, boundaryArtifact.bytecode.object);
+  assert.equal(boundaryDeployment.status, "0x1");
+  const boundaryAddress = boundaryDeployment.contractAddress;
+  assert.ok(boundaryAddress);
+  const boundaryConfig = { ...config, registry: boundaryAddress };
+  const boundaryClient = new tool.RegistryClient(boundaryConfig);
+  await boundaryClient.guard();
+  const boundaryScope = tool.scopeId(boundaryConfig);
+  const onchainMaximum = BigInt(await rpc("eth_call", [{
+    to: boundaryAddress, data: calldata("MAX_SEQUENCE()"),
+  }, "latest"]));
+  assert.equal(onchainMaximum, maximumSequence);
+  const maximum = tool.safeSequence(onchainMaximum.toString());
+  assert.equal(maximum, Number.MAX_SAFE_INTEGER);
+  assert.equal(BigInt(maximum), onchainMaximum, "TS conversion must be lossless");
+  assert.throws(() => tool.safeSequence((onchainMaximum + 1n).toString()), /unsafe sequence/);
+  const seed = await send(owner, boundaryAddress,
+    calldata("seedHead(bytes32,uint256)", boundaryScope, onchainMaximum - 1n));
+  assert.equal(seed.status, "0x1");
+  const seeded = await boundaryClient.read();
+  assert.equal(seeded.head, maximum - 1);
+  assert.equal(seeded.status, 0, "seedHead must not synthesize a policy record");
+  const maximumIntent = await prepare(boundaryClient);
+  assert.equal(maximumIntent.expectedCurrent, maximum - 1);
+  assert.equal(JSON.parse(maximumIntent.signed.payload).sequence, maximum);
+  assert.equal(JSON.parse(maximumIntent.signed.payload).registry_ref, tool.registryReference(boundaryConfig));
+  const maximumPublication = await tool.publishOnchainPolicy(boundaryClient, maximumIntent, submit, {
+    pollMs: 20,
+    async onSubmitted(hash) {
+      const included = await receipt(hash);
+      assert.equal(included.status, "0x1");
+      await advanceFinalizedThrough(included);
+    },
+  });
+  assert.equal(maximumPublication.outcome, "confirmed");
+  assert.equal(maximumPublication.receipt.status, "0x1");
+  assert.ok(BigInt(maximumPublication.blockNumber) >= BigInt(maximumPublication.receipt.blockNumber));
+  const maximumRecord = await boundaryClient.read(maximum);
+  assert.equal(maximumRecord.head, maximum);
+  assert.equal(BigInt(maximumRecord.head), onchainMaximum);
+  assert.equal(maximumRecord.status, 1);
+  assert.equal(maximumRecord.payload, maximumIntent.signed.payload);
+  assert.equal(maximumRecord.signature, maximumIntent.signed.signature);
+  assert.equal(maximumRecord.keyId, maximumIntent.signed.key_id);
+  assert.equal(maximumRecord.digest, tool.sha256(Buffer.from(maximumIntent.signed.payload)));
+  assert.deepEqual(await boundaryClient.read(), maximumRecord);
+  const latestMaximum = BigInt(await rpc("eth_call", [{
+    to: boundaryAddress, data: calldata("latest(bytes32)", boundaryScope),
+  }, "latest"]));
+  assert.equal(latestMaximum, onchainMaximum, "actual Solidity head must equal the TS head");
+  await assert.rejects(prepare(boundaryClient), /sequence exhausted/);
+  await assert.rejects(boundaryClient.read(maximum + 1), /unsafe sequence/);
+
+  // Even a freshly signed full payload cannot exceed the numeric wire bound.
+  // Raw ABI submission is intentional: TS must reject it, AND the real EVM
+  // transaction must fail independently with no change to the active record.
+  const overflowPayload = { ...JSON.parse(maximumIntent.signed.payload), sequence: maximum + 1 };
+  const overflowSigned = await signer.signPayload(overflowPayload, {
+    mode: "local", privKeyHex: Buffer.from(secret).toString("hex"), keyId: maximumIntent.signed.key_id,
+  });
+  assert.throws(() => tool.validateIntent(boundaryClient, {
+    expectedCurrent: maximum, signed: overflowSigned,
+  }), /unsafe sequence/);
+  for (const [name, expectedCurrent, sequence, signed] of [
+    ["exhausted successor", onchainMaximum, onchainMaximum + 1n, overflowSigned],
+    ["exhausted expectedCurrent", onchainMaximum, onchainMaximum, maximumIntent.signed],
+  ]) {
+    const before = await rawRecord(boundaryAddress, boundaryScope, sequence);
+    const failed = await send(owner, boundaryAddress,
+      rawPublication(boundaryScope, expectedCurrent, sequence, signed));
+    assert.equal(failed.status, "0x0", `${name}: must produce a failed receipt`);
+    assert.equal(failed.to.toLowerCase(), boundaryAddress.toLowerCase());
+    assert.deepEqual(await boundaryClient.read(), maximumRecord, `${name}: active state unchanged`);
+    assert.deepEqual(await boundaryClient.read(maximum), maximumRecord, `${name}: immutable bytes unchanged`);
+    assert.equal(await rawRecord(boundaryAddress, boundaryScope, sequence), before, `${name}: selected record unchanged`);
+  }
 
   const measurements = {
     deploymentGas: BigInt(deployment.gasUsed).toString(),

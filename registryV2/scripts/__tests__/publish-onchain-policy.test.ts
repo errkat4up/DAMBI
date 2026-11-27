@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { p256 } from "@noble/curves/nist.js";
 import {
-  RegistryClient, registryReference, safeSequence, validateIntent, publishOnchainPolicy,
+  RegistryClient, registryReference, safeSequence, validateIntent, publishOnchainPolicy, sha256,
   prepareOnchainPolicy, type RegistryConfig, type Intent,
 } from "../publish-onchain-policy.js";
 import { signPayload, type BundlePayload } from "../publish-policy-bundle.js";
 
+// QA entry point (Node 22, from registryV2):
+//   node --import tsx --test scripts/__tests__/publish-onchain-policy.test.ts
+// Run on the same candidate as Forge and isolated Anvil; no execution result is implied here.
 // Ephemeral-policy test identity, unrelated to transaction publication authority.
 const privateKey = new Uint8Array(32);
 privateKey[31] = 7;
@@ -36,19 +39,27 @@ test("existing signer binds original bytes, scope and safe sequence; HTTP null i
   const good = await intent();
   assert.equal(validateIntent(client, good).sequence, 1);
   assert.throws(() => validateIntent(client, { ...good, signed: { ...good.signed, payload: good.signed.payload + "\n" } }), /canonical/);
-  for (const change of [
-    { env: "production" as const }, { profile: "other" },
-    { registry_ref: registryReference({ ...config, registry: "0x" + "33".repeat(20) }) },
-    { registry_ref: registryReference({ ...config, network: "giwa" }) },
-    { registry_ref: null },
-  ]) assert.throws(() => validateIntent(client, { ...good, signed: { ...good.signed, payload: JSON.stringify(change) } }));
-  for (const changed of [
-    { ...payload(), env: "production" as const }, { ...payload(), profile: "other" },
-    { ...payload(), registry_ref: null },
-  ]) assert.throws(() => validateIntent(client, { ...good, signed: ({} as Intent["signed"]) }));
-  // A valid signature for the wrong scope is still rejected.
-  const wrongScope = await intent({ ...payload(), env: "production" });
-  assert.throws(() => validateIntent(client, wrongScope), /scope/);
+  const scopeChanges: Array<[string, Partial<BundlePayload>]> = [
+    ["environment", { env: "production" }],
+    ["profile", { profile: "other" }],
+    ["registry address", { registry_ref: registryReference({ ...config, registry: "0x" + "33".repeat(20) }) }],
+    ["registry chain ID", { registry_ref: registryReference({ ...config, network: "giwa" }) }],
+    ["HTTP null reference", { registry_ref: null }],
+  ];
+  for (const [name, change] of scopeChanges) {
+    // Change one scope component of a complete valid payload and re-sign its
+    // canonical bytes. A malformed object or stale signature is not this test.
+    const changed = { ...payload(), ...change };
+    const wrongScope = await intent(changed);
+    assert.deepEqual(JSON.parse(wrongScope.signed.payload), changed, name);
+    assert.equal(p256.verify(
+      Buffer.from(wrongScope.signed.signature, "base64"),
+      Buffer.from(sha256(Buffer.from(wrongScope.signed.payload)).slice(2), "hex"),
+      Buffer.from(publicKey, "hex"), { prehash: false, lowS: false },
+    ), true, `${name}: signature must be valid`);
+    assert.throws(() => validateIntent(client, wrongScope, now),
+      { message: "signed scope mismatch" }, name);
+  }
   const http = await signPayload({ ...payload(), registry_ref: null, expires_at: null }, {
     mode: "local", privKeyHex: Buffer.from(privateKey).toString("hex"),
   });
@@ -62,6 +73,41 @@ test("existing signer binds original bytes, scope and safe sequence; HTTP null i
   assert.throws(() => validateIntent(client, good, now + 3600), /lifetime/);
   assert.equal(safeSequence("9007199254740991"), Number.MAX_SAFE_INTEGER);
   for (const bad of ["9007199254740992", 9007199254740992, -1, 1.5, "1e3", "01"]) assert.throws(() => safeSequence(bad), /sequence/);
+});
+
+test("signed sequence and expectedCurrent are independently bounded and must be adjacent", async () => {
+  const client = new RegistryClient(config);
+  const first = await intent();
+  const second = await intent({ ...payload(), sequence: 2 });
+  assert.equal(validateIntent(client, second, now).sequence, 2);
+  // A correctly re-signed next sequence cannot reuse the previous CAS value.
+  assert.throws(() => validateIntent(client, { ...second, expectedCurrent: 0 }, now),
+    { message: "sequence mismatch" });
+  // Conversely, changing only the CAS value cannot advance the signed sequence.
+  assert.throws(() => validateIntent(client, { ...first, expectedCurrent: 1 }, now),
+    { message: "sequence mismatch" });
+  const zero = await intent({ ...payload(), sequence: 0 });
+  assert.throws(() => validateIntent(client, { ...zero, expectedCurrent: 0 }, now),
+    { message: "sequence mismatch" });
+  for (const sequence of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    const changed = await intent({ ...payload(), sequence });
+    assert.throws(() => validateIntent(client, { ...changed, expectedCurrent: 0 }, now),
+      { message: "unsafe sequence" }, `signed sequence ${sequence}`);
+  }
+  for (const expectedCurrent of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => validateIntent(client, { ...first, expectedCurrent }, now),
+      { message: "unsafe sequence" }, `expectedCurrent ${expectedCurrent}`);
+  }
+  const maximum = await intent({ ...payload(), sequence: Number.MAX_SAFE_INTEGER });
+  assert.equal(maximum.expectedCurrent, Number.MAX_SAFE_INTEGER - 1);
+  assert.equal(validateIntent(client, maximum, now).sequence, Number.MAX_SAFE_INTEGER);
+  for (const expectedCurrent of [Number.MAX_SAFE_INTEGER - 2, Number.MAX_SAFE_INTEGER]) {
+    assert.throws(() => validateIntent(client, { ...maximum, expectedCurrent }, now),
+      { message: "sequence mismatch" });
+  }
+  const overflow = await intent({ ...payload(), sequence: Number.MAX_SAFE_INTEGER + 1 });
+  assert.throws(() => validateIntent(client, { ...overflow, expectedCurrent: Number.MAX_SAFE_INTEGER }, now),
+    { message: "unsafe sequence" });
 });
 
 test("chain mismatch is checked before policy loading, signing, simulation or submission", async () => {
