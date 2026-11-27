@@ -2430,6 +2430,7 @@ dependencies = [
  "policy-transition",
  "redis",
  "reqwest",
+ "scam-filter",
  "serde",
  "serde_json",
  "sha2",
@@ -3141,6 +3142,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "scam-filter"
+version = "0.2.0"
+dependencies = [
+ "serde",
+ "thiserror",
 ]
 
 [[package]]

@@ -306,14 +306,20 @@ pub fn build_router_with_config(state: AppState, config: &ServerConfig) -> Route
         .route("/v1/audit", post(audit_handlers::record_audit_event))
         .route_layer(from_fn_with_state(state.clone(), require_api_key));
 
+    // The scam pool check keeps its own state (RPC client, cache, limits) and
+    // needs neither a login nor an API key: its request carries a token address
+    // and rule values, nothing about a user. See `crate::scam`.
+    let scam = crate::scam::router(Arc::new(crate::scam::ScamService::from_env()));
+
     public
         .merge(protected)
         .merge(host_api)
+        .with_state(state)
+        .merge(scam)
         .layer(TraceLayer::new_for_http().make_span_with(sanitized_trace_span))
         .layer(RequestBodyLimitLayer::new(config.http_body_limit_bytes))
         .layer(cors_layer(config))
         .layer(from_fn(add_security_headers))
-        .with_state(state)
 }
 
 fn sanitized_trace_span(req: &Request) -> tracing::Span {

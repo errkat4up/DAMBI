@@ -18,6 +18,9 @@ policy-sync.workspace = true
 # PostgreSQL-backed wallet state persistence. Handlers stay db-agnostic where
 # possible by operating on `&dyn WalletStore`.
 policy-db.workspace = true
+# Scam Filter window rules for `POST /v1/scam/pool-check`: the same unmodified
+# algorithm crate the SDK uses, evaluated here over history this server fetches.
+scam-filter = { path = "../../scam-filter", version = "0.2.0" }
 serde.workspace = true
 serde_json.workspace = true
 # ABI helpers for the on-chain `lending.health_factor` reads: keccak256 (4-byte

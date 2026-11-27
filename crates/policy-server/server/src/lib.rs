@@ -52,6 +52,7 @@ pub mod market_handlers;
 pub(crate) mod methods;
 pub mod read_handlers;
 pub mod readiness;
+pub mod scam;
 pub mod storage;
 pub mod store;
 pub mod sync_config;

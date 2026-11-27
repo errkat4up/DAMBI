@@ -844,6 +844,94 @@ paths:
         "503":
           description: Key or audit store unavailable
 
+  /v1/scam/pool-check:
+    post:
+      tags: [scam]
+      summary: Check the Uniswap V2 token/WETH pool of a token (pool backdoor + window rules)
+      description: |
+        The extension sends the token a swap is about to buy and the window
+        rules it wants evaluated. The server looks the pool up on Ethereum
+        mainnet (read-only), decides, and answers with both results. One
+        lookup per token is reused for about one block; the rules are
+        evaluated per request by the unmodified `scam-filter` crate.
+
+        Public: no login and no API key. The request carries a token address
+        and rule values only — unknown fields are rejected, so no wallet
+        address, amount or calldata can reach this endpoint — and the token is
+        never logged. Requests are limited per client address.
+
+        Advisory: a failed lookup, a rate limit or the deadline ends as
+        `undetermined`, never as a warning.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [chainId, token]
+              properties:
+                chainId: { type: integer, enum: [1] }
+                token: { type: string, description: 0x-prefixed ERC-20 address }
+                backdoor: { type: boolean, default: true, description: false switches the pool-backdoor check off }
+                rules:
+                  type: array
+                  maxItems: 16
+                  description: change_count rules to evaluate; empty switches the window check off
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [id, lookbackSec, metric, direction, changeMode, thresholdBps, count]
+                    properties:
+                      id: { type: string }
+                      lookbackSec: { type: integer, minimum: 1, maximum: 3600 }
+                      metric: { type: string, enum: [price_quote_per_token, quote_reserve] }
+                      direction: { type: string, enum: [up, down, either] }
+                      changeMode: { type: string, enum: [step, cumulative] }
+                      thresholdBps: { type: integer, minimum: 1, maximum: 1000000 }
+                      count: { type: integer, minimum: 1, maximum: 1000 }
+      responses:
+        "200":
+          description: Both results for the token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  chainId: { type: integer }
+                  token: { type: string }
+                  pool: { type: string, nullable: true }
+                  backdoor:
+                    type: object
+                    properties:
+                      result: { type: string, enum: [flagged, clear, undetermined, skipped, "off"] }
+                      reason: { type: string }
+                      deployer: { type: string, description: present only when flagged }
+                  window:
+                    type: object
+                    properties:
+                      result: { type: string, enum: [fired, clear, incomplete, not_evaluable, skipped, undetermined, "off"] }
+                      reason: { type: string }
+                      poolAgeSec: { type: integer }
+                      rules:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id: { type: string }
+                            outcome: { type: string, enum: [fired, clear, incomplete, not_evaluable] }
+                            reason: { type: string }
+                            observed: { type: integer }
+                            threshold: { type: integer }
+        "400":
+          description: Unsupported chain, invalid token or rule
+        "422":
+          description: Malformed body or unknown field
+        "429":
+          description: Too many requests from this client, or the server is busy (see `Retry-After`)
+        "503":
+          description: "`POLICY_SCAM_RPC_URL` is not configured"
+
 components:
   securitySchemes:
     bearerAuth:
