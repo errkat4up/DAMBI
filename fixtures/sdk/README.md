@@ -2,9 +2,10 @@
 
 ## F3 — t_1045ef56 수동 plan 폐기 인계
 
-- 담당 branch: 제공되지 않음 / 기준 parent `1fc022be3b0b16556117aaa8dd13362772c51b8a` / 소스 변경 제안, 실행 검증 대기.
+- 담당 branch: 제공되지 않음 / 기준 parent `32e9bb8f70231b9489d2ae0ba48a473739c831bb` / F3 CI 피드백 대응 소스 변경 제안, 실행 검증 대기.
 - 변경 범위: 공개 `discard(plan): void` → TS runtime/bridge → WASM → Native session. 기존 handle 조회·retire 규칙을 공유하며 판정·hook·I/O 없이 슬롯을 반환한다. 호스트와 분석 probe의 준비용 빈 Facts 평가만 교체한다. stateless Rust action runtime과 생성 WASM 선언의 `NativeCoreConstructor` 참조는 그대로 사용한다.
-- 검증 결과: 실행하지 않음(통과·실패 수 미집계). QA·CI·독립 리뷰·커밋·푸시 미수행. 실제 체인·서비스·snapshot 변경 없음.
+- CI 피드백 대응: 호스트 시험의 `prepare` mock을 실제 `ScamFactProvider` 메서드 타입으로 선언한다. 기존 `async () => undefined`의 좁은 반환형 추론은 새 취소 회귀의 `Promise<void>` 구현과 충돌하며, `satisfies`만으로는 추론형이 넓어지지 않는다. 호출 인자도 이 타입으로 직접 검사하고, 단일 호출+인자 검증은 기본 matcher 두 개로 동등하게 유지한다. 준비 전 폐기·늦은 plan 정리·취소 후 live check 독립성 assertions는 유지한다.
+- 검증 결과: 제공된 피드백은 위 parent의 CI 실패 통지이며 실패 job/로그 본문은 제공되지 않았다. 링크 조회·빌드·시험을 실행하지 않아 이 수정이 해당 CI 실패 전체를 해소한다고 확정하지 않는다(통과·실패 수 미집계). QA·독립 리뷰·커밋·푸시 미수행. 실제 체인·서비스·snapshot 변경 없음.
 - 재현 대기: `cargo test --locked -p dambi-core --test session`; 동일 소스로 `npm run core:build` 후 `npm run core:test:types`, `node --test packages/core/tests/runtime.test.mjs packages/core/tests/check.test.mjs packages/core/tests/adapters/scam-analysis-probe.test.mjs`; 확장에서는 `yarn --cwd browser-extension test backend/service-worker/__tests__/scam-filter.test.ts`. 전체 runtime 시험의 기존 selected fixture/Native runner 준비는 아래 Development 관련 절차를 따른다.
 - 독립 리뷰 확인점: 단일 슬롯 즉시 재사용, 외부/복사 handle 거절, 재평가·중복 폐기 거절, hook 미발행, retained/evicted TTL 처리, clock 재진입, 기존 check 실패의 metadata·hook·슬롯 회귀, 늦은 준비 plan 및 준비 중 취소 후 live check 독립성, probe의 준비 실패·대상 불일치 정리. 이 두 호출처 전환 외의 호스트 작업을 F3 대기로 묶지 않는다.
 
