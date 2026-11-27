@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.24;
+pragma solidity ^0.8.24;
 
 import {PolicyRegistry} from "../src/PolicyRegistry.sol";
+import {DeployPolicyRegistry} from "../script/DeployPolicyRegistry.s.sol";
 
 interface TestVm {
     function prank(address sender) external;
     function expectRevert(bytes4 selector) external;
+    function expectRevert(bytes calldata revertData) external;
+    function chainId(uint256 newChainId) external;
 }
 
 contract BoundaryRegistry is PolicyRegistry {
@@ -153,6 +156,16 @@ contract PolicyRegistryTest {
         require(boundary.latest(scope) == maximum, "maximum safe integer accepted");
         vm.expectRevert(PolicyRegistry.InvalidVersion.selector);
         boundary.publish(scope, maximum, maximum + 1, bodyDigest, body, signature, "telemetry");
+    }
+
+    // Importing and instantiating the real deployment entry point also keeps
+    // its compiler requirement in the offline forge-test compilation graph.
+    // No environment, wallet or broadcast access is needed for this rejection.
+    function testDeploymentRejectsEthereumBeforeApprovalOrBroadcast() public {
+        DeployPolicyRegistry deployment = new DeployPolicyRegistry();
+        vm.chainId(1);
+        vm.expectRevert(abi.encodeWithSignature("Error(string)", "GIWA testnet only"));
+        deployment.run();
     }
 
     function testScopeSeparation() public {

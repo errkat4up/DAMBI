@@ -4,6 +4,8 @@ test = "test"
 script = "script"
 out = "out"
 libs = []
+# Reproducible default; offline QA may override with --use /path/to/solc.
+# Solidity sources accept compatible 0.8.x compilers; the EVM target stays fixed.
 solc_version = "0.8.24"
 evm_version = "paris"
 optimizer = true

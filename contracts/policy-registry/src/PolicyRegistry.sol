@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.24;
+pragma solidity ^0.8.24;
 
 /// @notice Immutable, directly addressable policy bytes; no proxy or indexer.
 /// @dev Publication authority is NOT a wallet's P-256 trust root. Consumers must
