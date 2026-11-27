@@ -83,9 +83,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(&config.bind_addr).await?;
     tracing::info!(addr = %config.bind_addr, "policy-server listening");
 
-    axum::serve(listener, router)
-        .with_graceful_shutdown(shutdown_signal(shutdown_tx))
-        .await?;
+    // Connect info: the scam pool check limits requests per client address.
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal(shutdown_tx))
+    .await?;
     Ok(())
 }
 

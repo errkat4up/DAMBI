@@ -1,5 +1,5 @@
 /**
- * Storage for the in-extension window-rule check.
+ * Storage for the window-rule check (settings and last outcome).
  *
  *  - Settings: `scam-filter:settings` in `chrome.storage.local`, the `ScamSettings`
  *    shape written by the /scam page (`scam-settings-handlers.ts`).

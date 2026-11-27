@@ -1,30 +1,25 @@
 /**
- * Window rules evaluated inside the extension — the pure half: presets, the
- * user's settings laid over them, and the algorithm request. No I/O.
+ * Window rules — the extension's half: presets, the user's settings laid over
+ * them, and the status the /scam page shows. Pure, no I/O.
  *
- * The algorithm itself is the unmodified `crates/scam-filter`, reached through
- * the extension's own WASM (`scam_window_analyze_json`). This file only decides
- * WHICH rules run and builds the request the algorithm expects.
+ * The rules are evaluated by Dambi's server (`scam-api.ts`), which runs the
+ * unmodified `crates/scam-filter` over history it fetches. This file decides
+ * WHICH rules are sent.
  *
  * Scope:
  *  - Only `change_count` rules. The other three kinds are ignored wherever they
- *    appear (preset, override, additional rule) and never evaluated.
+ *    appear (preset, override, additional rule) and never sent.
  *  - Only pools inside their first hour since first liquidity. An older pool has
  *    no rule that can run, and no setting can switch one on.
- *  - `lookbackSec` can never exceed the fetched window (one hour).
+ *  - `lookbackSec` can never exceed the window the server fetches (one hour).
  *
  * Settings keep the SDK's `ScamSettings` field names (`thresholdBps`,
  * `changeMode`, `count`, …) — the storage format from `scam-filter:settings` is
- * used as is. `toEngineRule` maps them onto the crate's wire names, the same
- * table as `crates/dambi-core/src/scam/window_rules.rs`.
+ * used as is, and the same names go to the server.
  */
 
-/** The fetched history: the pool's `Sync` logs over the last this-many blocks. */
-export const WINDOW_BLOCKS = 300;
 /** A pool is "new" for this long after its first liquidity. Mainnet: 300 blocks × 12 s. */
 export const NEW_POOL_MAX_AGE_SEC = 3_600;
-/** Mainnet slot time. Only used by the algorithm's resolution check. */
-export const BUCKET_MS = 12_000;
 const MAX_RULES = 16;
 
 /** A `change_count` rule in the SDK's `ScamSettings` vocabulary. */
@@ -135,68 +130,7 @@ export function effectiveRules(settings: WindowRuleSettings): EffectiveRules {
   return { presetId: settings.presetId, rules: rules.filter((rule) => rule.enabled), rejected };
 }
 
-/** The crate's wire names for one rule. */
-export function toEngineRule(rule: ChangeCountRule): Record<string, unknown> {
-  return {
-    kind: "change_count", id: rule.id, lookbackSec: rule.lookbackSec,
-    metric: rule.metric === "quote_reserve" ? "liquidity" : "price",
-    direction: rule.direction === "either" ? "both" : rule.direction,
-    mode: rule.changeMode, minChangeBps: rule.thresholdBps, minCount: rule.count,
-  };
-}
-
-/** End-of-block reserves of a pool: the last `Sync` of one block. */
-export interface PoolPoint {
-  readonly block: number;
-  readonly tMs: number;
-  /** Raw integers as decimal strings. */
-  readonly reserveQuote: string;
-  readonly reserveToken: string;
-}
-
-/**
- * The algorithm request for one pool, as of `asOf`.
- *
- * Composition (the one the validation numbers were produced with): the history
- * is the points from the pool's first `Sync` on — nothing is synthesised before
- * it — and that first `Sync` is both the start of the history and the pool's
- * creation time for the algorithm. Times are real block timestamps.
- * Decimals are a fixed 18/18: every supported rule looks at relative change,
- * where a constant scale factor cancels out.
- */
-export function buildAnalysisRequest(input: {
-  chainId: number; pool: string; token: string; quote: string;
-  asOf: { block: number; tMs: number };
-  points: readonly PoolPoint[];
-  rules: readonly ChangeCountRule[];
-}): Record<string, unknown> {
-  const fromMs = input.points[0]?.tMs ?? input.asOf.tMs;
-  return {
-    subject: { chainId: input.chainId, pool: input.pool, token: input.token, quote: input.quote, venue: "uniswap_v2" },
-    asOf: { block: String(input.asOf.block), blockHash: "0x" + "0".repeat(64), tMs: input.asOf.tMs },
-    rules: input.rules.map(toEngineRule),
-    rulesHash: "0x" + "0".repeat(64),
-    poolHistory: {
-      schema: "extension.pool_history/1", builderVersion: "extension-local/1", fromMs, bucketMs: BUCKET_MS,
-      points: input.points.map((p) => ({ tMs: p.tMs, reserveQuote: p.reserveQuote, reserveToken: p.reserveToken, decimalsQuote: 18, decimalsToken: 18 })),
-      missing: [],
-      warmup: { fromMs, complete: true },
-    },
-    tokenProfile: { schema: "extension.token_profile/1", poolCreatedMs: fromMs, adminEvents: [], missing: [] },
-  };
-}
-
-/** The part of the crate's `ScamAnalysis` this extension reads. */
-export interface EngineRuleResult {
-  readonly ruleId: string;
-  readonly outcome: "fired" | "clear" | "incomplete" | "not_evaluable";
-  readonly reason?: string;
-  readonly observed?: number;
-  readonly threshold: number;
-}
-export interface EngineAnalysis { readonly rules: readonly EngineRuleResult[] }
-
-/** Where the outcome of the most recent in-extension window check is kept (`chrome.storage.local`). */
+/** Where the outcome of the most recent window check is kept (`chrome.storage.local`). */
 export const WINDOW_STATUS_KEY = "scam-filter:window-last";
 
 /**

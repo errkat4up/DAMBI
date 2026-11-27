@@ -2,7 +2,7 @@ import Browser from "webextension-polyfill";
 import { backdoorConfirmKey, type BackdoorDisplay } from "@lib/backdoor-display";
 import { windowConfirmKey, type WindowDisplay } from "@lib/window-display";
 
-// Warnings evaluated inside the extension reach the confirmation page through
+// Pool-backdoor and window-rule warnings (decided by the server) reach the confirmation page through
 // session storage. The page removes its record after reading; the index bounds
 // records whose window was closed or never opened.
 const TTL_MS = 5 * 60_000;
