@@ -422,9 +422,9 @@ describe("MV3 SDK host refresh", () => {
       create: vi.fn(),
       onAlarm: {
         addListener: vi.fn((listener) => { listeners.push(listener); }),
-        removeListener: vi.fn(), hasListener: vi.fn(),
+        removeListener: vi.fn(), hasListener: vi.fn(), hasListeners: vi.fn(() => listeners.length > 0),
       },
-    } as Parameters<typeof registerScamHostRefresh>[0];
+    } satisfies NonNullable<Parameters<typeof registerScamHostRefresh>[0]>;
     const sdk = runtime();
     const host = createScamHost({ readConfig: async () => config(), open: async () => sdk });
     await host.begin(message()).promise;

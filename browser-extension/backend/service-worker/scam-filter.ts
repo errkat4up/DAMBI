@@ -323,7 +323,7 @@ export function createScamHost(dependencies: HostDependencies) {
     };
     const obsolete = (): boolean => {
       // Also covers replacement between select() returning and caller attachment.
-      if (attached && (session !== attached || attached.controller.signal.aborted)) controller.abort();
+      if (attached?.controller.signal.aborted) controller.abort();
       return controller.signal.aborted || expired();
     };
     const timer = setTimeout(timeout, Math.max(0, deadline - Date.now()));
