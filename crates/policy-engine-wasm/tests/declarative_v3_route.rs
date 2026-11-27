@@ -1774,14 +1774,8 @@ fn t2_v2_swap_exact_tokens_for_tokens() {
     );
     assert_eq!(body["params"]["direction"]["kind"], "exact_input");
     assert_eq!(body["params"]["slippage_bp"], 50);
-    assert_eq!(
-        body["live_inputs"]["route"]["source"]["kind"],
-        "onchain_view"
-    );
-    assert_eq!(
-        body["live_inputs"]["gas_estimate"]["source"]["kind"],
-        "oracle_feed"
-    );
+    // The manifest supplies lookup descriptors. No provider observation was supplied.
+    assert_eq!(body["live_inputs"], serde_json::json!({}), "{body}");
 }
 
 // ---------------------------------------------------------------------------
@@ -7354,7 +7348,6 @@ const VAULT_MAINNET: &str = "0xba12222222228d8ba445958a75a0704d566bf2c8";
 // A realistic Balancer V2 weighted-pool id shape: 20-byte pool address ++
 // 2-byte specifier ++ 10-byte nonce. (Any bytes32 decodes; this is plausible.)
 const LBP_POOL_ID: &str = "0xc45d42f801105e861e86658648e3678ad7aa70f900020000000000000000011e";
-const LBP_POOL_ADDR: &str = "0xc45d42f801105e861e86658648e3678ad7aa70f9";
 
 const B5_BALANCER_VAULT_SWAP_V3: &str = r#"{
   "type": "adapter_action",
@@ -7585,28 +7578,8 @@ fn t21_balancer_vault_swap_given_in_exact_input() {
     );
     assert_eq!(body["params"]["slippage_bp"], 50, "{body}");
 
-    // live_inputs: Fjord-LBP identification (host:registry) on `route`, swap
-    // quote on `expected_amount_out`.
-    assert_eq!(
-        body["live_inputs"]["route"]["source"]["kind"], "registry_api",
-        "{body}"
-    );
-    assert_eq!(
-        body["live_inputs"]["route"]["source"]["resource"]["kind"], "pool_meta",
-        "{body}"
-    );
-    assert_eq!(
-        body["live_inputs"]["route"]["source"]["resource"]["pool_addr"], LBP_POOL_ADDR,
-        "{body}"
-    );
-    assert_eq!(
-        body["live_inputs"]["expected_amount_out"]["source"]["kind"], "onchain_view",
-        "{body}"
-    );
-    assert_eq!(
-        body["live_inputs"]["gas_estimate"]["source"]["kind"], "oracle_feed",
-        "{body}"
-    );
+    // The manifest supplies lookup descriptors. No provider observation was supplied.
+    assert_eq!(body["live_inputs"], serde_json::json!({}), "{body}");
 }
 
 // ---------------------------------------------------------------------------
@@ -7749,10 +7722,8 @@ fn t22b_balancer_v2_batchswap_single_step_stays_swap() {
         body["params"]["direction"]["amount_in"], "0xf4240",
         "{body}"
     );
-    assert_eq!(
-        body["live_inputs"]["route"]["source"]["resource"]["pool_addr"], LBP_POOL_ADDR,
-        "{body}"
-    );
+    // The manifest supplies lookup descriptors. No provider observation was supplied.
+    assert_eq!(body["live_inputs"], serde_json::json!({}), "{body}");
 }
 
 #[test]

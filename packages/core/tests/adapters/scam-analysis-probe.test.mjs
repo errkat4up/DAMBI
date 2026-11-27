@@ -15,6 +15,7 @@ const env = { SCAM_TIMEOUT_MS: "2500", SCAM_LOOKBACK_SEC: "10", SCAM_WARMUP_SEC:
 test("analysis probe declares real rules and accepts a 24-hour prefix without inventing deployment support", () => {
   const config = readAnalysisProbeConfig({ SCAM_WARMUP_SEC: "86400" });
   assert.equal(config.warmupSec, 86400);
+  assert.equal(readAnalysisProbeConfig({}).warmupSec, 86400);
   assert.equal(config.rules[0].changeMode, "cumulative");
   assert.equal(config.rules[1].kind, "switch_density");
   assert.deepEqual(config.factorySupport, []);
@@ -114,6 +115,10 @@ test("analysis probe reaches production WASM through signed local bundles and re
     assert.equal(trial.targets[0].algorithm.contractVersion, 2);
     assert.equal(trial.plannedHistories[0].lookbackSec, 10);
     assert.ok(trial.provider.requests > 0);
+    assert.deepEqual(trial.provider.stages.map((stage) => stage.operation),
+      ["pool_identity", "pool_history", "token_profile"]);
+    assert.ok(trial.provider.stages.every((stage) => stage.executions === 1 && stage.durationMs >= 0));
+    assert.equal(result.settings.executionBudget.maxAlgorithmWorkUnits, 1_000_000);
     assert.ok(trial.facts.length === 2);
   }
   assert.doesNotMatch(JSON.stringify(result), /SECRET|PRIVATE KEY/);

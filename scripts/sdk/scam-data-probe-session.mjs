@@ -9,6 +9,13 @@ const DEFAULT = {
 const EVENT_KINDS = ["owner_changed", "proxy_upgraded", "admin_changed", "paused", "unpaused"];
 const HISTORY_VERIFICATIONS = ["all_event_headers", "rpc_anchor"];
 const TARGET_BUDGET_MS = 2500;
+// S2a diagnostic envelope, not a guarantee that every input below each limit
+// completes. Keep the host example and real-algorithm probe on this same budget.
+export const SCAM_EXECUTION_BUDGET = Object.freeze({
+  maxTargets: 4, maxCalls: 8, maxAlgorithmWorkUnits: 1_000_000,
+  maxPoints: 20_000, maxLogs: 100_000, maxResultBytes: 16_000_000,
+  cacheMaxBlockSpan: 200_000,
+});
 const address = (value) => typeof value === "string" && /^0x[0-9a-fA-F]{40}$/.test(value);
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 class ProbeConfigError extends Error { constructor() { super("Invalid probe configuration; endpoint and values omitted."); } }
@@ -30,14 +37,14 @@ export function readProbeConfig(env = {}) {
   const historyVerification = env.SCAM_HISTORY_VERIFICATION ?? "all_event_headers";
   requireConfig(HISTORY_VERIFICATIONS.includes(historyVerification));
   const cacheEnabled = integer(env, "SCAM_HISTORY_CACHE", 0, 0, 1) === 1;
-  const cacheMaxBlockSpan = integer(env, "SCAM_CACHE_MAX_BLOCK_SPAN", 100_000, 1, 1_000_000);
+  const cacheMaxBlockSpan = integer(env, "SCAM_CACHE_MAX_BLOCK_SPAN", SCAM_EXECUTION_BUDGET.cacheMaxBlockSpan, 1, 1_000_000);
   const prepareTimeoutMs = integer(env, "SCAM_PREPARE_TIMEOUT_MS", undefined, 1, 60_000);
   requireConfig(prepareTimeoutMs === undefined || cacheEnabled);
   const targets = json(env, "SCAM_TARGETS_JSON", [{
     factory: env.SCAM_FACTORY ?? DEFAULT.factory, pool: env.SCAM_POOL ?? DEFAULT.pool,
     token: env.SCAM_TOKEN ?? DEFAULT.token, quoteToken: env.SCAM_QUOTE_TOKEN ?? DEFAULT.quoteToken,
   }]);
-  requireConfig(Array.isArray(targets) && targets.length >= 1 && targets.length <= 4);
+  requireConfig(Array.isArray(targets) && targets.length >= 1 && targets.length <= SCAM_EXECUTION_BUDGET.maxTargets);
   const subjects = targets.map((target) => {
     requireConfig(record(target) && Object.keys(target).every((key) => Object.hasOwn(DEFAULT, key))
       && Object.keys(DEFAULT).every((key) => address(target[key]))
@@ -60,7 +67,7 @@ export function readProbeConfig(env = {}) {
     repeats: integer(env, "SCAM_REPEATS", 1, 1, 20),
     timeoutMs: integer(env, "SCAM_TIMEOUT_MS", 2500, 1, 60_000),
     lookbackSec: integer(env, "SCAM_LOOKBACK_SEC", 86_400, 1, 86_400),
-    warmupSec: integer(env, "SCAM_WARMUP_SEC", 3600, 0, 86_400),
+    warmupSec: integer(env, "SCAM_WARMUP_SEC", 86_400, 0, 86_400),
     confirmDepth: integer(env, "SCAM_CONFIRM_DEPTH", 2, 0, 1000),
     ageThresholdSec: integer(env, "SCAM_AGE_THRESHOLD_SEC", 86_400, 1, 31_536_000),
     minRequestIntervalMs, retryDelayMs, maxRetryDelayMs,
@@ -195,6 +202,21 @@ export function failureSummary(value) {
   } catch { return undefined; } // A malformed diagnostic cannot replace the outcome.
 }
 
+export function stageSummary(value) {
+  if (!Array.isArray(value) || value.length > 3) return [];
+  const seen = new Set();
+  const result = [];
+  for (const item of value) {
+    if (!record(item) || !["pool_identity", "pool_history", "token_profile"].includes(item.operation)
+        || seen.has(item.operation) || !Number.isSafeInteger(item.executions) || item.executions < 1
+        || !Number.isFinite(item.durationMs) || item.durationMs < 0
+        || item.durationMs > Number.MAX_SAFE_INTEGER) return [];
+    seen.add(item.operation);
+    result.push({ operation: item.operation, executions: item.executions, durationMs: item.durationMs });
+  }
+  return result;
+}
+
 export function preflightSummary(value) {
   try {
     if (!record(value)) return undefined;
@@ -224,11 +246,11 @@ export function probeProviderOptions(config, onMetrics) {
       limits: { maxRequests: 512, maxResponseBytes: 8_000_000, maxTotalResponseBytes: 32_000_000,
         maxLogs: 100_000, maxBlocksPerQuery: 10_000, concurrency: 2, maxRetries: 1,
         minRequestIntervalMs: config.minRequestIntervalMs, retryDelayMs: config.retryDelayMs, maxRetryDelayMs: config.maxRetryDelayMs } },
-    history: { maxPoints: 20_000, maxLogs: 100_000, maxBlockLookups: 512, blockTimeHintMs: 1000 },
+    history: { maxPoints: SCAM_EXECUTION_BUDGET.maxPoints, maxLogs: SCAM_EXECUTION_BUDGET.maxLogs, maxBlockLookups: 512, blockTimeHintMs: 1000 },
     profile: { maxEvents: 20_000, maxLogs: 100_000, maxBlockLookups: 512, blockTimeHintMs: 1000 },
     factorySupport: config.factorySupport, adminSupport: config.adminSupport,
     limits: { timeoutMs: config.timeoutMs, maxCalls: config.subjects.length * 2, maxTargets: config.subjects.length,
-      maxRequestBytes: 100_000, maxResultBytes: 16_000_000 },
+      maxRequestBytes: 100_000, maxResultBytes: SCAM_EXECUTION_BUDGET.maxResultBytes },
     onMetrics,
   };
 }
@@ -274,6 +296,7 @@ export function createProbeSession(input, createProvider) {
         ...(Number.isSafeInteger(preflightGroup) && preflightGroup >= 1 && preflightGroup <= config.subjects.length
           ? { preflightGroup } : {}) }),
       durationMs, providerDurationMs: metrics?.durationMs ?? null,
+      stages: stageSummary(metrics?.stages),
       requests: metrics?.requests ?? null, retries: metrics?.retries ?? null,
       receivedBytes: metrics?.receivedBytes ?? null, logChunks: metrics?.logChunks ?? null,
       failedChunks: metrics?.failedChunks ?? null, resultBytes: metrics?.resultBytes ?? null,
@@ -315,6 +338,7 @@ export function createProbeSession(input, createProvider) {
       : "enabled; the same provider retains bounded raw log intervals; every fetch obtains a new reference and result",
     settings: { chainId: config.chainId, targets: config.subjects.length, repeats: config.repeats,
       verification: { ...config.verification },
+      executionBudget: { ...SCAM_EXECUTION_BUDGET },
       historyCache: config.historyCache === undefined ? null : { ...config.historyCache },
       ...(config.prepareTimeoutMs === undefined ? {} : { prepareTimeoutMs: config.prepareTimeoutMs }),
       timeoutMs: config.timeoutMs, lookbackSec: config.lookbackSec, warmupSec: config.warmupSec,

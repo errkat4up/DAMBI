@@ -3,6 +3,8 @@ import { createHash, sign } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { CoreError, createCore } from "@dambi/core";
+import { decoderSnapshot } from "@dambi/core/decoders";
+import { describeCheck } from "../../../examples/sdk-adapters/client.mjs";
 
 // Real packaged WASM, locally signed policy fixtures, and mocked external I/O.
 // Missing artifacts fail normally; this suite never builds or substitutes an engine.
@@ -150,6 +152,8 @@ test("check evaluates no-Fact approve and distinguishes unsupported requests fro
   const warn = await core.check(request("approve", MAX_U256));
   assert.equal(allow.decision, "allow");
   assert.equal(allow.source, "evaluated");
+  assert.equal(describeCheck(allow).status, "evaluated");
+  assert.equal(describeCheck(allow).signingAuthorized, false);
   assert.equal(warn.decision, "warn");
   assert.ok(hasReason(warn, "unlimited-approval-deny"));
   assert.equal(warn.metadata.policyVersion, "42");
@@ -161,6 +165,12 @@ test("check evaluates no-Fact approve and distinguishes unsupported requests fro
     assert.equal(unsupported.decision, "warn");
     assert.equal(unsupported.source, "evaluated");
     assert.ok(hasDiagnostic(unsupported, "unsupported_request"));
+    const presentation = describeCheck(unsupported);
+    assert.equal(presentation.status, "unsupported_request");
+    assert.equal(presentation.decision, unsupported.decision);
+    assert.equal(presentation.enforcement, unsupported.enforcement);
+    assert.equal(presentation.reviewEligible, false);
+    assert.equal(presentation.signingAuthorized, false);
     assert.deepEqual(unsupported.metadata, { status: "unavailable", reason: "unsupported_request" });
     assert.ok(hasDiagnostic(unsupported, "audit_metadata_unavailable"));
     assert.deepEqual(emitted.at(-1), unsupported);
@@ -168,6 +178,8 @@ test("check evaluates no-Fact approve and distinguishes unsupported requests fro
   }
   const malformed = await core.check({ ...request("approve"), data: 123 });
   failClosed(malformed, "invalid_request");
+  assert.equal(describeCheck(malformed).status, "evaluation_failed");
+  assert.equal(describeCheck(malformed).reviewEligible, false);
   assert.deepEqual(malformed.metadata, { status: "unavailable", reason: "invalid_request" });
   assert.ok(hasDiagnostic(malformed, "audit_metadata_unavailable"));
   assert.deepEqual(emitted.at(-1), malformed);
@@ -217,7 +229,10 @@ test("raw transfer retains U256 precision and catalog optional semantics while r
   const requiredSetup = harness({ policy: signed([requiredEntry]) });
   const required = await open(t, requiredSetup);
   requiredSetup.setFacts(async (_calls, { planId }) => ({ planId, results: {} }));
-  failClosed(await required.check(request()), "required_fact_missing");
+  const missingRequired = await required.check(request());
+  failClosed(missingRequired, "required_fact_missing");
+  assert.equal(describeCheck(missingRequired).status, "fact_evaluation_failed");
+  assert.equal(describeCheck(missingRequired).reviewEligible, false);
   requiredSetup.setFacts(async (calls, context) => batch(calls, context, () => ({ ...fact(), value: "0x64" })));
   failClosed(await required.check(request()), "projection_failed");
   requiredSetup.setFacts(async (calls, context) => batch(calls, context, () => ({ ...fact(), source: "" })));
@@ -261,12 +276,130 @@ test("partial Unknown and sibling Fact fetch failure preserve decoded policy den
       if (unknown) {
         assert.equal(verdict.source, "evaluated");
         assert.ok(hasDiagnostic(verdict, "partial_decode"));
+        const presentation = describeCheck(verdict);
+        assert.equal(presentation.status, "partial_interpretation");
+        assert.equal(presentation.decision, "deny");
+        assert.equal(presentation.reviewEligible, false);
         assert.equal(setup.fetches.length, 0);
       } else {
         failClosed(verdict, "fact_fetch_failed");
+        const presentation = describeCheck(verdict);
+        assert.equal(presentation.status, "fact_evaluation_failed");
+        assert.equal(presentation.decision, "deny");
+        assert.equal(presentation.enforcement, verdict.enforcement);
+        assert.equal(presentation.reviewEligible, false);
+        assert.equal(presentation.signingAuthorized, false);
+        assert.ok(hasReason(verdict, "check-static-deny"), JSON.stringify(verdict));
       }
     }
   }
+});
+
+// Encode the supported Universal Router V3 exact-input command without an
+// extra ABI package. Offsets in bytes[] are relative to its element-head area.
+function rawSwapRequest(manifest) {
+  const word = (value) => BigInt(value).toString(16).padStart(64, "0");
+  const bytes = (hex) => word(hex.length / 2) + hex.padEnd(Math.ceil(hex.length / 64) * 64, "0");
+  const path = CONTRACT.slice(2) + "0001f4" + SECOND_CONTRACT.slice(2);
+  const step = SECOND_OWNER.slice(2).padStart(64, "0") + word(1000) + word(900)
+    + word(160) + word(1) + bytes(path);
+  const deadline = manifest.abi_fragment.abi.inputs.length === 3;
+  const headBytes = deadline ? 96 : 64;
+  const commands = bytes("00");
+  const inputs = word(1) + word(32) + bytes(step);
+  return {
+    kind: "transaction", chainId: "eip155:1", from: OWNER,
+    to: "0x66a9893cc07d91d95644aedd05d03f95e1dba8af", value: "0",
+    data: manifest.match.selector + word(headBytes) + word(headBytes + commands.length / 2)
+      + (deadline ? word(NOW / 1000 + 60) : "") + commands + inputs,
+  };
+}
+
+function supplySwapZeroObservations(value) {
+  if (!value || typeof value !== "object") return 0;
+  let count = 0;
+  if (value.params?.direction && value.venue) {
+    const live = (value) => ({
+      value, source: { kind: "user_supplied" }, synced_at: NOW / 1000 - 7,
+    });
+    value.params.slippage_bp = 0;
+    value.live_inputs = {
+      route: live({ paths: [] }), expected_amount_out: live("0x0"),
+      price_impact_bp: live(0), gas_estimate: live("0x0"),
+    };
+    count++;
+  }
+  for (const child of Object.values(value)) count += supplySwapZeroObservations(child);
+  return count;
+}
+
+test("raw positive-floor Swap reports missing policy inputs together with recipient deny, unlike supplied zero", options, async (t) => {
+  const recipientId = "swap-recipient-not-self-deny";
+  const recipient = JSON.parse(initialPolicy.payload).policies.find(({ id }) => id === recipientId);
+  assert.ok(recipient, "use the signed Day1 recipient policy, not a synthetic unconditional deny");
+  const when = recipient.policy.indexOf("when");
+  assert.ok(when > 0);
+  const { bundles } = JSON.parse(decoderSnapshot.artifact);
+  for (const name of ["execute-v2@1.0.0", "execute-v2-no-deadline@1.0.0"]) {
+    const manifest = bundles.find(({ id }) => id === `uniswap/universal-router/${name}`);
+    assert.ok(manifest, `the packaged decoder snapshot must include ${name}`);
+    const raw = rawSwapRequest(manifest);
+    for (const field of ["slippageBp", "expectedAmountOut", "priceImpactBp", "gasEstimate", "routeEstimatedOut"]) {
+      const id = `check-observed-${field}`;
+      const dependent = structuredClone(recipient);
+      dependent.id = id;
+      dependent.manifest.id = id;
+      dependent.policy = recipient.policy.slice(0, when).replaceAll(recipientId, id)
+        + `when { context.${field} == context.${field} };`;
+      for (const observed of [false, true]) {
+        const decoder = structuredClone(manifest);
+        if (observed) {
+          // Explicit local control observations, not data inferred from calldata.
+          // Never write this control into the selected product snapshot.
+          assert.ok(supplySwapZeroObservations(decoder.emit) > 0);
+        }
+        const setup = harness({ policy: signed([recipient, dependent]), bundles: [decoder] });
+        const core = await open(t, setup);
+        const verdict = await core.check(raw);
+        const label = `${name}/${field}/observed=${observed}: ${JSON.stringify(verdict)}`;
+        assert.equal(verdict.source, "evaluated", label);
+        assert.equal(verdict.decision, "deny", label);
+        assert.ok(hasReason(verdict, recipientId), label);
+        assert.equal(hasReason(verdict, id), observed, label);
+        assert.equal(hasDiagnostic(verdict, "invalid_request"), false, label);
+        const unmatched = verdict.diagnostics.filter(({ code }) => code === "no_matching_policy");
+        assert.deepEqual(unmatched.map(({ nodePath }) => nodePath), [[]], label);
+        const engineErrors = verdict.diagnostics.filter(({ code }) => code === "engine_error");
+        assert.deepEqual(engineErrors.map(({ nodePath }) => nodePath), observed ? [] : [[0]], label);
+        if (!observed) assert.ok(engineErrors[0].message.includes(field), label);
+        const presentation = describeCheck(verdict);
+        assert.equal(presentation.decision, "deny", label);
+        assert.equal(presentation.enforcement, verdict.enforcement, label);
+        assert.equal(presentation.reviewEligible, false, label);
+        assert.equal(presentation.signingAuthorized, false, label);
+        assert.equal(presentation.status, observed ? "policy_unmatched" : "evaluation_failed", label);
+        assert.equal(setup.fetches.length, 0, "these policies do not request RPC enrichment");
+        core.dispose();
+      }
+    }
+  }
+});
+
+test("consumer distinguishes an unmatched policy from a matched allow without inventing a Core deny", options, async (t) => {
+  const setup = harness({ policy: signed([balanceEntry()]) });
+  const core = await open(t, setup);
+  const verdict = await core.check(request("approve", 7n));
+  assert.equal(verdict.source, "evaluated");
+  assert.ok(hasDiagnostic(verdict, "no_matching_policy"), JSON.stringify(verdict));
+  const before = structuredClone(verdict);
+  const presentation = describeCheck(verdict);
+  assert.equal(presentation.status, "policy_unmatched");
+  assert.equal(presentation.policyUnmatched, true);
+  assert.equal(presentation.reviewEligible, false);
+  assert.equal(presentation.signingAuthorized, false);
+  assert.equal(presentation.decision, verdict.decision);
+  assert.deepEqual(verdict, before);
+  assert.equal(setup.fetches.length, 0);
 });
 
 test("Fact timeout, abort and disposal ignore late responses without cancelling an independent check", options, async (t) => {

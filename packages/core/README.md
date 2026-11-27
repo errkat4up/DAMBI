@@ -849,8 +849,11 @@ mode) and built Core, and does not build either automatically.
 listed SDK sources, without extension/server/Registry/legacy WASM sources or
 existing build output. It installs dependencies and builds the Native runner
 and SDK WASM there. The decoder check preserves the committed 799-bundle
-baseline, rebuilds the selected UR/Aave additions from five pinned originals,
-checks exact equality with the 804-bundle product and packages that result.
+baseline, rebuilds six pinned Universal Router, Aave and GIWA manifests,
+checks exact equality with the 805-bundle product and packages that result.
+The installed SDK recognizes the recorded GIWA testnet V2 single-hop ETH swap.
+With a signed scam preset, its plan requests pool history and token profile
+for the observed pool. The separate launchpad transaction is outside this coverage.
 It also generates three separate pool regression bundles for Native/WASM raw
 policy checks. This is selected-input reconstruction, not regeneration of the
 entire Registry corpus. It emits an actual tarball; the separate

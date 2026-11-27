@@ -8,7 +8,7 @@ use alloy_primitives::U256;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use policy_state::token::TokenKey;
 use policy_transition::action::{
-    amm::{AmmAction, AmmVenue},
+    amm::{AmmAction, AmmVenue, DeclaredSwapRoute},
     ActionBody,
 };
 use serde::{Deserialize, Serialize};
@@ -693,43 +693,31 @@ fn subject(node: &Node, support: &[Support]) -> Target {
     {
         return Target::Ignore;
     }
-    let route = &swap.live_inputs.route.value;
-    let quote = if matches!(&swap.params.token_in.key, TokenKey::Native { chain: c } if c == chain)
-    {
-        // Only the trusted Decoder may supply the pool-side wrapped token.
-        // Do not infer it from the first quote token or re-decode calldata here.
-        if route.aggregator.is_some()
-            || route.paths.len() != 1
-            || route.paths[0].share_bp != 10_000
-            || route.paths[0].hops.len() != 1
+    let observed_route = swap
+        .live_inputs
+        .route
+        .as_ref()
+        .map(|field| DeclaredSwapRoute::from(&field.value));
+    let route = observed_route
+        .as_ref()
+        .or(swap.live_inputs.declared_route.as_ref());
+    let native = matches!(&swap.params.token_in.key, TokenKey::Native { chain: c } if c == chain);
+    let quote_token = match route {
+        Some(DeclaredSwapRoute::Direct {
+            venue,
+            token_in,
+            token_out,
+        }) if venue.as_ref() == &swap.venue
+            && token_out == output
+            && (native || token_in == &swap.params.token_in) =>
         {
-            return Target::Unresolved;
+            token_in
         }
-        let hop = &route.paths[0].hops[0];
-        if hop.venue != swap.venue || &hop.token_out != output {
-            return Target::Unresolved;
-        }
-        let Some(quote) = address(&hop.token_in.key) else {
-            return Target::Unresolved;
-        };
-        quote
-    } else {
-        if route.aggregator.is_some()
-            || route.paths.len() > 1
-            || route.paths.first().is_some_and(|p| {
-                p.share_bp != 10_000
-                    || p.hops.len() != 1
-                    || p.hops[0].venue != swap.venue
-                    || p.hops[0].token_in != swap.params.token_in
-                    || &p.hops[0].token_out != output
-            })
-        {
-            return Target::Unresolved;
-        }
-        let Some(quote) = address(&swap.params.token_in.key) else {
-            return Target::Unresolved;
-        };
-        quote
+        None | Some(DeclaredSwapRoute::Empty) if !native => &swap.params.token_in,
+        _ => return Target::Unresolved,
+    };
+    let Some(quote) = address(&quote_token.key) else {
+        return Target::Unresolved;
     };
     if !support.quote_tokens.iter().any(|t| same_hex(t, &quote)) || token == quote {
         return Target::Unresolved;

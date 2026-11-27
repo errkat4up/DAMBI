@@ -49,6 +49,9 @@ pub enum V3BuildError {
         /// JSON-encoded args value the walker was inspecting.
         args: String,
     },
+    /// An explicit calldata route did not have paths or its direct path lacked hops.
+    #[error("invalid declared swap route: {0}")]
+    InvalidDeclaredRoute(&'static str),
     /// Final `from_value::<ActionBody>` did not match the target enum shape.
     #[error("serde from_value: {0}")]
     SerdeFromValue(#[from] serde_json::Error),
@@ -508,6 +511,11 @@ fn resolve_placeholder(ctx: &V3MapContext<'_>, raw: &str) -> Result<JsonValue, V
             };
             if let Some(v) = map.get(rest).cloned() {
                 Ok(v)
+            } else if rest == "slippage_bp" {
+                // A quote-relative tolerance cannot be inferred from calldata's
+                // output floor. Preserve a supplied zero above, but do not invent
+                // one when the deriver has not produced a value.
+                Ok(JsonValue::Null)
             } else if let Some(ty) = placeholder_type_lookup(rest) {
                 Ok(zero_value_for(ty))
             } else {
@@ -620,8 +628,9 @@ fn parse_segment<'a>(segment: &'a str, full_path: &str) -> Result<(&'a str, Vec<
 /// `<domain>.<action>` payload (this is the v3 opcode-stream convention).
 /// In that case the inline block is extracted before flattening and merged
 /// with `live_inputs_template`.
-/// An explicit `amm.swap` route `value` is preserved and type-checked; other
-/// nested live values still use their unobserved defaults.
+/// Swap live inputs require an explicit value and observation time. A source
+/// descriptor alone leaves the input absent. Other action families retain their
+/// existing legacy live-input representation.
 ///
 /// # Errors
 ///
@@ -640,6 +649,10 @@ pub fn build_action_body(
     let mut flat = flatten_body(&substituted)?;
 
     let (domain, action) = extract_tags(&flat);
+    let is_swap = matches!(
+        (domain.as_deref(), action.as_deref()),
+        (Some("amm"), Some("swap"))
+    );
 
     // Stage 2 — pick the live_inputs source. The explicit argument wins, then
     // the inline block from the body, then nothing. Variants without typed
@@ -660,28 +673,45 @@ pub fn build_action_body(
     // Permit2SignAllowance nonce). The catalog [`live_input_layout`] picks
     // the right shape per (domain, action).
     if let Some(live_template) = live_source {
-        let live_substituted = substitute_placeholders(ctx, &live_template)?;
+        // A swap source descriptor is a recipe, not an observation. Discard
+        // unobserved entries BEFORE substitution: dormant resolver/function
+        // references must not invalidate otherwise decodable signed intent.
+        // Explicit observations still undergo substitution and typed validation.
+        let live_substituted = if let (true, Some(fields)) = (is_swap, live_template.as_object()) {
+            let mut inputs = JsonMap::new();
+            for (name, payload) in fields {
+                if name == "route" && payload.get("synced_at").is_none() {
+                    if let Some(value) = payload.get("value") {
+                        inputs.insert("declared_route".into(), declared_swap_route(ctx, value)?);
+                    }
+                }
+                if name != "declared_route" {
+                    inputs.insert(
+                        name.clone(),
+                        substitute_placeholders(ctx, &swap_live_observation(payload))?,
+                    );
+                }
+            }
+            JsonValue::Object(inputs)
+        } else {
+            substitute_placeholders(ctx, &live_template)?
+        };
         if let Some(map) = live_substituted.as_object() {
             match layout {
                 LiveInputLayout::Nested => {
                     let mut live_obj = JsonMap::with_capacity(map.len());
                     for (field_name, src_payload) in map {
-                        // A trusted swap Decoder may explicitly describe the
-                        // calldata route (e.g. native ETH's pool-side WETH).
-                        // Do not seed other live values or infer missing paths.
-                        // Invalid explicit routes reach the typed serde check.
-                        let route_value =
-                            match (domain.as_deref(), action.as_deref(), field_name.as_str()) {
-                                (Some("amm"), Some("swap"), "route") => src_payload.get("value"),
-                                _ => None,
-                            };
+                        if is_swap {
+                            live_obj.insert(field_name.clone(), src_payload.clone());
+                            continue;
+                        }
                         let wrapped = wrap_live_field(
                             ctx,
                             domain.as_deref(),
                             action.as_deref(),
                             field_name,
                             src_payload,
-                            route_value,
+                            None,
                         );
                         live_obj.insert(field_name.clone(), wrapped);
                     }
@@ -979,6 +1009,66 @@ fn wrap_live_field(
         JsonValue::Number(ctx.submitted_at.as_unix().into()),
     );
     JsonValue::Object(out)
+}
+
+/// Retain only calldata identities for a static single-hop route. A decoder can
+/// include dormant pool-state or estimate lookups in the same route template.
+fn declared_swap_route(
+    ctx: &V3MapContext<'_>,
+    route: &JsonValue,
+) -> Result<JsonValue, V3BuildError> {
+    let other = serde_json::json!({"kind":"other"});
+    let paths = route
+        .get("paths")
+        .and_then(JsonValue::as_array)
+        .ok_or(V3BuildError::InvalidDeclaredRoute("paths must be an array"))?;
+    if route
+        .get("aggregator")
+        .is_some_and(|value| !value.is_null())
+    {
+        return Ok(other);
+    }
+    let path = match paths.as_slice() {
+        [] => return Ok(serde_json::json!({"kind":"empty"})),
+        [path] => path,
+        _ => return Ok(other),
+    };
+    let Some([hop]) = path
+        .get("hops")
+        .and_then(JsonValue::as_array)
+        .map(Vec::as_slice)
+    else {
+        return Ok(other);
+    };
+    if !substitute_placeholders(ctx, &path["share_bp"])
+        .is_ok_and(|value| value.as_u64() == Some(10_000))
+    {
+        return Ok(other);
+    }
+    let identity = serde_json::json!({"kind":"direct", "token_in":hop["token_in"], "token_out":hop["token_out"], "venue":hop["venue"]});
+    Ok(substitute_placeholders(ctx, &identity).unwrap_or(other))
+}
+
+/// Preserve observation provenance, including explicit zero values and epoch
+/// timestamps. The submission clock is deliberately not an argument.
+fn swap_live_observation(payload: &JsonValue) -> JsonValue {
+    let (Some(value), Some(synced_at)) = (payload.get("value"), payload.get("synced_at")) else {
+        return JsonValue::Null;
+    };
+    let mut observation = JsonMap::new();
+    observation.insert("value".into(), value.clone());
+    observation.insert("synced_at".into(), synced_at.clone());
+    for field in ["source", "confidence"] {
+        if let Some(value) = payload.get(field) {
+            observation.insert(field.into(), value.clone());
+        }
+    }
+    if let Some(ttl) = payload.get("ttl_s").or_else(|| payload.get("ttl")) {
+        observation.insert("ttl".into(), ttl.clone());
+    }
+    // Present but malformed observations reach typed deserialization rather
+    // than being silently replaced by absence or a default value.
+    JsonValue::Object(observation)
 }
 
 fn live_input_default_with_override(
@@ -1950,9 +2040,11 @@ mod tests {
         let action = build_action_body(&ctx, &body, Some(&live_inputs)).unwrap();
         match action {
             ActionBody::Amm(AmmAction::Swap(s)) => {
-                // Defaults applied to live_inputs values.
-                assert_eq!(s.live_inputs.expected_amount_out.value, U256::ZERO);
-                assert_eq!(s.live_inputs.price_impact_bp.value, 0);
+                assert_eq!(s.params.slippage_bp, Some(50));
+                assert_eq!(s.live_inputs.expected_amount_out, None);
+                assert_eq!(s.live_inputs.price_impact_bp, None);
+                assert_eq!(s.live_inputs.route, None);
+                assert_eq!(s.live_inputs.gas_estimate, None);
             }
             other => panic!("expected Amm(Swap), got {other:?}"),
         }
@@ -2167,14 +2259,226 @@ mod tests {
                 assert_eq!(actions.len(), 1);
                 match &actions[0] {
                     ActionBody::Amm(AmmAction::Swap(s)) => {
-                        // Default applied during live_input injection.
-                        assert_eq!(s.live_inputs.gas_estimate.value, U256::ZERO);
+                        // A gas source is not a gas observation.
+                        assert_eq!(s.live_inputs.gas_estimate, None);
                     }
                     other => panic!("expected Amm(Swap), got {other:?}"),
                 }
             }
             other => panic!("expected Multicall, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn swap_missing_slippage_is_not_an_explicit_zero() {
+        let args = json!({});
+        let mut ctx = mk_ctx(&args);
+        for root in ["resolved", "derived"] {
+            assert_eq!(
+                resolve_placeholder(&ctx, &format!("${root}.slippage_bp")).unwrap(),
+                JsonValue::Null
+            );
+        }
+        ctx.derived.insert("slippage_bp".into(), json!(0));
+        assert_eq!(
+            resolve_placeholder(&ctx, "$derived.slippage_bp").unwrap(),
+            json!(0)
+        );
+    }
+
+    #[test]
+    fn swap_observations_require_values_and_original_times_for_each_field() {
+        for (field, zero) in [
+            ("expected_amount_out", json!("0")),
+            ("price_impact_bp", json!(0)),
+            ("gas_estimate", json!("0")),
+            ("route", json!({"paths":[]})),
+        ] {
+            let descriptor = json!({"source":{"kind":"user_supplied"},"ttl_s":12});
+            assert_eq!(
+                swap_live_observation(&descriptor),
+                JsonValue::Null,
+                "{field}"
+            );
+            let mut value_without_time = descriptor.clone();
+            value_without_time["value"] = zero.clone();
+            assert_eq!(
+                swap_live_observation(&value_without_time),
+                JsonValue::Null,
+                "{field}"
+            );
+            let mut time_without_value = descriptor.clone();
+            time_without_value["synced_at"] = json!(123);
+            assert_eq!(
+                swap_live_observation(&time_without_value),
+                JsonValue::Null,
+                "{field}"
+            );
+            for time in [0, 123] {
+                let mut observed = value_without_time.clone();
+                observed["synced_at"] = json!(time);
+                let result = swap_live_observation(&observed);
+                assert_eq!(result["value"], zero, "{field}");
+                assert_eq!(result["synced_at"], json!(time), "{field}");
+                assert_eq!(result["ttl"], json!(12), "{field}");
+                assert_eq!(result["source"], descriptor["source"], "{field}");
+            }
+        }
+    }
+
+    #[test]
+    fn swap_dormant_sources_do_not_invalidate_signed_intent() {
+        let args = json!({});
+        let ctx = mk_ctx(&args);
+        let body = json!({
+            "domain": "amm",
+            "amm": {
+                "action": "swap",
+                "swap": {
+                    "venue": {
+                        "name": "uniswap_v3",
+                        "chain": "$chain",
+                        "pool": "$to",
+                        "fee_tier_bp": 500
+                    },
+                    "params": {
+                        "token_in": {
+                            "key": {
+                                "standard": "erc20",
+                                "chain": "$chain",
+                                "address": "$to"
+                            }
+                        },
+                        "direction": {
+                            "kind": "exact_input",
+                            "amount_in": "1",
+                            "min_amount_out": "0"
+                        },
+                        "recipient": "$tx.from",
+                        "slippage_bp": "$derived.slippage_bp"
+                    }
+                }
+            }
+        });
+        let baseline = build_action_body(&ctx, &body, None).unwrap();
+        for field in [
+            "route",
+            "expected_amount_out",
+            "price_impact_bp",
+            "gas_estimate",
+        ] {
+            for source in [
+                json!("$resolved.unobserved_test_source"),
+                json!({"$fn": "array_len", "$args": []}),
+            ] {
+                let live = json!({field: {"source": source, "ttl_s": 12}});
+                let action = build_action_body(&ctx, &body, Some(&live)).unwrap();
+                assert_eq!(action, baseline, "dormant {field}");
+
+                // Opcode bodies embed the same source descriptions inline.
+                let mut inline = body.clone();
+                inline["amm"]["swap"]["live_inputs"] = live;
+                assert_eq!(build_action_body(&ctx, &inline, None).unwrap(), baseline);
+            }
+        }
+        let ActionBody::Amm(AmmAction::Swap(swap)) = &baseline else {
+            panic!("expected Swap");
+        };
+        assert_eq!(swap.params.recipient, ctx.tx_from);
+        assert_eq!(swap.params.slippage_bp, None);
+        assert!(matches!(
+            swap.params.direction,
+            policy_transition::action::amm::SwapDirection::ExactInput {
+                min_amount_out, ..
+            } if min_amount_out == U256::ZERO
+        ));
+        assert_eq!(swap.live_inputs.route, None);
+        assert_eq!(swap.live_inputs.expected_amount_out, None);
+        assert_eq!(swap.live_inputs.price_impact_bp, None);
+        assert_eq!(swap.live_inputs.gas_estimate, None);
+
+        // Calldata can identify the hop even when price and pool state recipes are dormant.
+        let mut declared = json!({"route":{"value":{"paths":[{"share_bp":10000,"hops":[{
+            "venue":body["amm"]["swap"]["venue"], "token_in":body["amm"]["swap"]["params"]["token_in"],
+            "token_out":{"key":{"standard":"erc20","chain":"$chain","address":"$tx.from"}},
+            "pool_state":"$resolved.missing_snapshot", "estimated_out":"$derived.missing_quote"
+        }], "estimated_out":"$derived.missing_quote"}]}}});
+        let declared_action = build_action_body(&ctx, &body, Some(&declared)).unwrap();
+        let wire = serde_json::to_value(declared_action).unwrap();
+        assert_eq!(wire["live_inputs"]["declared_route"]["kind"], "direct");
+        assert!(wire["live_inputs"]["declared_route"]
+            .get("estimated_out")
+            .is_none());
+        assert!(wire["live_inputs"].get("route").is_none());
+        declared["route"]["value"]["paths"][0]["hops"][0]["venue"] =
+            json!("$resolved.missing_venue");
+        let unresolved =
+            serde_json::to_value(build_action_body(&ctx, &body, Some(&declared)).unwrap()).unwrap();
+        assert_eq!(unresolved["live_inputs"]["declared_route"]["kind"], "other");
+        assert_eq!(
+            unresolved["params"]["recipient"],
+            wire["params"]["recipient"]
+        );
+
+        // A real zero with its original epoch timestamp survives both passes.
+        let observed = json!({
+            "expected_amount_out": {
+                "value": "0",
+                "synced_at": 0,
+                "source": {"kind": "user_supplied"},
+                "ttl_s": 12
+            }
+        });
+        let action = build_action_body(&ctx, &body, Some(&observed)).unwrap();
+        let ActionBody::Amm(AmmAction::Swap(swap)) = action else {
+            panic!("expected Swap");
+        };
+        let observation = swap.live_inputs.expected_amount_out.unwrap();
+        assert_eq!(observation.value, U256::ZERO);
+        assert_eq!(observation.synced_at, Time::from_unix(0));
+
+        // Exercise the actual typed builder, not only the observation helper.
+        // Every optional field must distinguish absence from an observed zero
+        // (or an observed empty route), in both manifest layouts.
+        for (field, value, wire_value) in [
+            ("expected_amount_out", json!("0"), json!("0x0")),
+            ("price_impact_bp", json!(0), json!(0)),
+            ("gas_estimate", json!("0"), json!("0x0")),
+            ("route", json!({"paths": []}), json!({"paths": []})),
+        ] {
+            for time in [0, 123] {
+                let live = json!({field: {
+                    "value": value,
+                    "synced_at": time,
+                    "source": {"kind": "user_supplied"},
+                    "ttl_s": 12
+                }});
+                let external = build_action_body(&ctx, &body, Some(&live)).unwrap();
+                let mut inline = body.clone();
+                inline["amm"]["swap"]["live_inputs"] = live;
+                assert_eq!(build_action_body(&ctx, &inline, None).unwrap(), external);
+                let wire = serde_json::to_value(&external).unwrap();
+                let inputs = wire["live_inputs"].as_object().unwrap();
+                assert_eq!(inputs.len(), 1, "only {field} was observed");
+                assert_eq!(inputs[field]["value"], wire_value, "{field}");
+                assert_eq!(inputs[field]["synced_at"], json!(time), "{field}");
+                assert_eq!(inputs[field]["ttl"], json!(12), "{field}");
+                assert_eq!(
+                    inputs[field]["source"],
+                    json!({"kind": "user_supplied"}),
+                    "{field}"
+                );
+                assert_eq!(wire["params"]["direction"]["min_amount_out"], "0x0");
+            }
+        }
+
+        // Do not suppress errors in an explicitly supplied observation.
+        let mut invalid = observed;
+        invalid["expected_amount_out"]["source"] = json!("$resolved.unobserved_test_source");
+        assert!(matches!(
+            build_action_body(&ctx, &body, Some(&invalid)),
+            Err(V3BuildError::UnknownPlaceholder(_))
+        ));
     }
 
     // ── auxiliary tests (do not count toward the 11) ───────────────────────

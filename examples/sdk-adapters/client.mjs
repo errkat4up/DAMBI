@@ -2,6 +2,11 @@ import { createCore } from "@dambi/core";
 import { decoderSnapshot } from "@dambi/core/decoders";
 import { createEvmFactProvider, createPolicyApiSource } from "@dambi/core/adapters";
 
+/** @type {ReadonlyArray<import("@dambi/core").CoreDiagnosticCode>} */
+const requiredFactFailureCodes = [
+  "required_fact_missing", "projection_failed", "invalid_fact", "fact_plan_mismatch", "fact_fetch_failed", "timeout",
+];
+
 /**
  * @typedef {object} AdapterSettings
  * @property {Pick<import("@dambi/core/adapters").PolicyApiSourceOptions, "baseUrl" | "maxResponseBytes" | "headers">} policy
@@ -12,8 +17,46 @@ import { createEvmFactProvider, createPolicyApiSource } from "@dambi/core/adapte
  */
 
 /**
+ * Consumer presentation, not a replacement Core decision or enforcement rule.
+ * Keep the original verdict alongside this summary: an independent deny must
+ * remain visible even when another part of evaluation is incomplete.
+ *
+ * No automatic signing is authorized by this example. `reviewEligible` only
+ * identifies results eligible for the host's separate signing review.
+ * @param {Awaited<ReturnType<import("@dambi/core").DambiCore["check"]>>} verdict
+ */
+export function describeCheck(verdict) {
+  const codes = new Set((verdict?.diagnostics ?? []).map(({ code }) => code));
+  const requiredFactFailure = verdict?.source === "fail_closed"
+    && requiredFactFailureCodes.some((code) => codes.has(code));
+  const partial = codes.has("partial_decode");
+  const unsupported = codes.has("unsupported_request");
+  const unmatched = codes.has("no_matching_policy");
+  const failed = verdict?.source !== "evaluated" || codes.has("engine_error");
+  const status = requiredFactFailure ? "fact_evaluation_failed"
+    : failed ? "evaluation_failed"
+      : unsupported ? "unsupported_request"
+        : partial ? "partial_interpretation"
+          : unmatched ? "policy_unmatched"
+            : "evaluated";
+  return {
+    status,
+    decision: verdict?.decision,
+    source: verdict?.source,
+    enforcement: verdict?.enforcement,
+    partial,
+    policyUnmatched: unmatched,
+    reviewEligible: status === "evaluated" && verdict?.decision === "allow"
+      && codes.size === 0,
+    signingAuthorized: false,
+  };
+}
+
+/**
  * Both hosts use the installed package's public exports and owned WASM.
  * URLs, trusted public keys and deployment limits belong to the caller.
+ * Keep these annotations attached to the factory, not the presentation helper:
+ * independent TypeScript consumers must retain its public argument contract.
  * @param {AdapterSettings} settings
  * @param {import("@dambi/core").CallOptions} [options]
  * @returns {Promise<import("@dambi/core").DambiCore>}

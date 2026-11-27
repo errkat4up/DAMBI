@@ -1,8 +1,8 @@
 //! Real Registry manifests, pinned installation, raw calldata and Day1 policy.
 //!
-//! These cases cover calldata token/amount intent and V3 recipients, not market data:
-//! the current mapper still supplies fallback slippage/pool values and empty
-//! LiveField skeletons. Passing these tests does not validate those values or
+//! These cases cover calldata token/amount intent and V3 recipients, not market data.
+//! Missing swap slippage and live observations must remain absent; unresolved
+//! venue identities still require separate integration work. These tests do not
 //! claim complete Universal Router command/chain coverage.
 //! V4's swap recipient is the manifest's tx.from; final TAKE/SETTLE recipients
 //! and actual EVM execution are not covered by that case.
@@ -38,6 +38,18 @@ fn manifests() -> Vec<Value> {
 }
 
 fn session(artifact: &Artifact) -> CoreSession {
+    let policy = day1();
+    session_with_policy(
+        artifact,
+        &json!({
+            "payload":String::from_utf8(policy.payload).unwrap(),
+            "signature":policy.signature,
+            "keyId":policy.key_id.unwrap()
+        }),
+    )
+}
+
+fn session_with_policy(artifact: &Artifact, wire: &Value) -> CoreSession {
     let keys: Value =
         serde_json::from_str(include_str!("fixtures/policy-bundle/test-only-keys.json")).unwrap();
     let config = json!({
@@ -56,12 +68,6 @@ fn session(artifact: &Artifact) -> CoreSession {
             "planTtlMs":10000,"maxPendingPlans":8,"maxFactAgeMs":1000,
             "factTimeoutMs":1000,"policyTimeoutMs":1000
         }
-    });
-    let policy = day1();
-    let wire = json!({
-        "payload":String::from_utf8(policy.payload).unwrap(),
-        "signature":policy.signature,
-        "keyId":policy.key_id.unwrap()
     });
     CoreSession::new(&config.to_string(), &wire.to_string(), NOW).unwrap()
 }
@@ -194,6 +200,266 @@ fn both_execute_selectors_preserve_v3_swap_intent_and_day1_recipient_decisions()
             assert_eq!(root["actions"].as_array().unwrap().len(), 1);
             assert_swap(&root["actions"][0], recipient);
             assert_verdict(&mut session, &request, expected);
+        }
+    }
+}
+
+#[test]
+fn zero_output_floor_without_observations_preserves_independent_recipient_deny() {
+    let manifests = manifests();
+    let artifact = artifact(manifests.clone());
+    let store = SnapshotStore::new(config(), artifact.input(), day1().input(), NOW).unwrap();
+    let mut session = session(&artifact);
+    let mut path = TOKEN_IN.parse::<Address>().unwrap().as_slice().to_vec();
+    path.extend_from_slice(&[0x00, 0x01, 0xf4]);
+    path.extend_from_slice(TOKEN_OUT.parse::<Address>().unwrap().as_slice());
+
+    // Both selected execute selectors must preserve the ABI's literal zero.
+    // A missing quote must neither invalidate the request nor suppress the
+    // independently evaluable, signed recipient deny.
+    for manifest in &manifests {
+        let input = params(
+            "step(address,uint256,uint256,bytes,bool)",
+            &[
+                address(OTHER),
+                uint(1000, 256),
+                uint(0, 256),
+                DynSolValue::Bytes(path.clone()),
+                DynSolValue::Bool(true),
+            ],
+        );
+        let request = request(manifest, &[0x00], vec![input]);
+        let decoded = decoded(&store, &request);
+        assert_eq!(decoded["decoder_id"], manifest["id"]);
+        let root = &decoded["actions"][0]["body"];
+        assert_eq!(root["domain"], "multicall");
+        assert_eq!(root["actions"].as_array().unwrap().len(), 1);
+        let swap = &root["actions"][0];
+        assert_eq!(swap["domain"], "amm");
+        assert_eq!(swap["action"], "swap");
+        assert_eq!(swap["params"]["recipient"], OTHER);
+        assert_eq!(swap["params"]["direction"]["kind"], "exact_input");
+        assert_eq!(swap["params"]["direction"]["amount_in"], "0x3e8");
+        assert_eq!(swap["params"]["direction"]["min_amount_out"], "0x0");
+        assert!(swap["params"].get("slippage_bp").is_none());
+        let live = swap["live_inputs"].as_object().unwrap();
+        for field in [
+            "route",
+            "expected_amount_out",
+            "price_impact_bp",
+            "gas_estimate",
+        ] {
+            assert!(live.get(field).is_none(), "unobserved {field}: {swap}");
+        }
+        assert_verdict(&mut session, &request, "deny");
+    }
+}
+
+// These are local test policies, signed using the explicitly test-only key.
+// Keep the real recipient policy's action scope and trigger so a misspelled
+// action namespace cannot turn the missing-attribute case into a policy miss.
+fn observation_policy(field: &str) -> (Value, String) {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use p256::ecdsa::{signature::Signer, Signature, SigningKey};
+    use p256::pkcs8::DecodePrivateKey;
+
+    let keys: Value =
+        serde_json::from_str(include_str!("fixtures/policy-bundle/test-only-keys.json")).unwrap();
+    assert_eq!(keys["test_only"], true);
+    let mut payload: Value = serde_json::from_slice(&day1().payload).unwrap();
+    let recipient = payload["policies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["id"] == SWAP_POLICY)
+        .unwrap()
+        .clone();
+    let id = format!("check-observed-{field}");
+    let mut dependent = recipient.clone();
+    dependent["id"] = json!(id);
+    dependent["manifest"]["id"] = json!(id);
+    let original = recipient["policy"].as_str().unwrap();
+    let (head, _) = original.split_once("when").unwrap();
+    dependent["policy"] = json!(format!(
+        "{} when {{ context.{field} == context.{field} }};",
+        head.replace(SWAP_POLICY, &id)
+    ));
+    payload["policies"] = json!([recipient, dependent]);
+    let payload = serde_json::to_string(&payload).unwrap();
+    let pem = keys["policy"]["private_key_pkcs8_pem"].as_str().unwrap();
+    let encoded: String = pem
+        .lines()
+        .filter(|line| !line.starts_with("---"))
+        .collect();
+    let key = SigningKey::from_pkcs8_der(&STANDARD.decode(encoded).unwrap()).unwrap();
+    let signature: Signature = key.sign(payload.as_bytes());
+    (
+        json!({
+            "payload":payload,
+            "signature":STANDARD.encode(signature.to_bytes()),
+            "keyId":keys["policy"]["key_id"]
+        }),
+        id,
+    )
+}
+
+// Inject explicit observations only into the control fixture's swap templates.
+// The baseline manifest remains unchanged. This is not a claim that calldata
+// supplies market observations or a generated product snapshot modification.
+fn supply_zero_observations(value: &mut Value) -> usize {
+    use policy_state::live_field::{DataSource, LiveField};
+    use policy_state::primitives::Time;
+    use policy_transition::action::amm::{SwapLiveInputs, SwapRoute};
+
+    let mut count = 0;
+    match value {
+        Value::Object(object) => {
+            if object
+                .get("params")
+                .and_then(|p| p.get("direction"))
+                .is_some()
+                && object.contains_key("venue")
+            {
+                object.get_mut("params").unwrap()["slippage_bp"] = json!(0);
+                let time = Time::from_unix(NOW / 1000 - 7);
+                object.insert(
+                    "live_inputs".into(),
+                    serde_json::to_value(SwapLiveInputs {
+                        declared_route: None,
+                        route: Some(LiveField::new(
+                            SwapRoute {
+                                paths: vec![],
+                                aggregator: None,
+                            },
+                            DataSource::UserSupplied,
+                            time,
+                        )),
+                        expected_amount_out: Some(LiveField::new(
+                            U256::ZERO,
+                            DataSource::UserSupplied,
+                            time,
+                        )),
+                        price_impact_bp: Some(LiveField::new(0u32, DataSource::UserSupplied, time)),
+                        gas_estimate: Some(LiveField::new(
+                            U256::ZERO,
+                            DataSource::UserSupplied,
+                            time,
+                        )),
+                    })
+                    .unwrap(),
+                );
+                count += 1;
+            }
+            for child in object.values_mut() {
+                count += supply_zero_observations(child);
+            }
+        }
+        Value::Array(array) => {
+            for child in array {
+                count += supply_zero_observations(child);
+            }
+        }
+        _ => {}
+    }
+    count
+}
+
+#[test]
+fn positive_floor_missing_observation_policy_preserves_recipient_deny() {
+    let mut path = TOKEN_IN.parse::<Address>().unwrap().as_slice().to_vec();
+    path.extend_from_slice(&[0x00, 0x01, 0xf4]);
+    path.extend_from_slice(TOKEN_OUT.parse::<Address>().unwrap().as_slice());
+
+    for manifest in manifests() {
+        let input = params(
+            "step(address,uint256,uint256,bytes,bool)",
+            &[
+                address(OTHER),
+                uint(1000, 256),
+                uint(900, 256),
+                DynSolValue::Bytes(path.clone()),
+                DynSolValue::Bool(true),
+            ],
+        );
+        let request = request(&manifest, &[0x00], vec![input]);
+        for observed in [false, true] {
+            let mut selected = manifest.clone();
+            if observed {
+                assert!(supply_zero_observations(&mut selected["emit"]) > 0);
+            }
+            let artifact = artifact(vec![selected]);
+            let store =
+                SnapshotStore::new(config(), artifact.input(), day1().input(), NOW).unwrap();
+            let decoded = decoded(&store, &request);
+            let swap = &decoded["actions"][0]["body"]["actions"][0];
+            assert_swap(swap, OTHER);
+            if observed {
+                assert_eq!(swap["params"]["slippage_bp"], 0);
+                assert_eq!(swap["live_inputs"]["expected_amount_out"]["value"], "0x0");
+                assert_eq!(swap["live_inputs"]["price_impact_bp"]["value"], 0);
+                assert_eq!(swap["live_inputs"]["gas_estimate"]["value"], "0x0");
+                assert_eq!(swap["live_inputs"]["route"]["value"]["paths"], json!([]));
+            } else {
+                assert!(swap["params"].get("slippage_bp").is_none());
+                for field in [
+                    "route",
+                    "expected_amount_out",
+                    "price_impact_bp",
+                    "gas_estimate",
+                ] {
+                    assert!(swap["live_inputs"].get(field).is_none(), "{swap}");
+                }
+            }
+            // Separate policies avoid short-circuiting the first missing read
+            // and accidentally leaving the other four fields untested.
+            for field in [
+                "slippageBp",
+                "expectedAmountOut",
+                "priceImpactBp",
+                "gasEstimate",
+                "routeEstimatedOut",
+            ] {
+                let (wire, dependent_id) = observation_policy(field);
+                let mut session = session_with_policy(&artifact, &wire);
+                let plan = session.plan(&request.to_string(), NOW).unwrap();
+                assert!(plan["calls"].as_array().unwrap().is_empty());
+                let facts = json!({"planId":plan["planId"], "results":{}});
+                let verdict = session
+                    .evaluate(plan["planId"].as_str().unwrap(), &facts.to_string(), NOW)
+                    .unwrap();
+                assert_eq!(verdict["source"], "evaluated", "{field}: {verdict}");
+                assert_eq!(verdict["decision"], "deny", "{field}: {verdict}");
+                let reasons = verdict["reasons"].as_array().unwrap();
+                assert!(
+                    reasons.iter().any(|r| r["policyId"] == SWAP_POLICY),
+                    "{verdict}"
+                );
+                assert_eq!(
+                    reasons.iter().any(|r| r["policyId"] == dependent_id),
+                    observed,
+                    "{field}: {verdict}"
+                );
+                let diagnostics = verdict["diagnostics"].as_array().unwrap();
+                assert!(!diagnostics.iter().any(|d| d["code"] == "invalid_request"));
+                // The enclosing Batch has no policy; the child Swap matched both triggers.
+                assert!(diagnostics
+                    .iter()
+                    .any(|d| { d["code"] == "no_matching_policy" && d["nodePath"] == json!([]) }));
+                assert!(!diagnostics
+                    .iter()
+                    .any(|d| { d["code"] == "no_matching_policy" && d["nodePath"] == json!([0]) }));
+                assert_eq!(
+                    diagnostics.iter().any(|d| {
+                        d["code"] == "engine_error"
+                            && d["nodePath"] == json!([0])
+                            && d["message"]
+                                .as_str()
+                                .is_some_and(|message| message.contains(field))
+                    }),
+                    !observed,
+                    "missing attribute must remain diagnosable: {field}: {verdict}"
+                );
+            }
         }
     }
 }

@@ -33,7 +33,12 @@ use super::{
 impl Reducer for SwapAction {
     #[allow(clippy::too_many_lines)]
     fn apply(&self, state: &WalletState, ctx: &EvalContext) -> ReducerResult<StateDelta> {
-        let route = &self.live_inputs.route.value;
+        let route = &self
+            .live_inputs
+            .route
+            .as_ref()
+            .ok_or(ReducerError::MissingField("route"))?
+            .value;
 
         // Exact-output simulation uses the user-signed `max_amount_in` spend
         // cap until venue-specific inverse quotes are available.
@@ -321,10 +326,11 @@ mod tests {
 
     fn make_live_inputs(route: SwapRoute) -> SwapLiveInputs {
         SwapLiveInputs {
-            route: LiveField::new(route, DataSource::UserSupplied, now()),
-            expected_amount_out: LiveField::new(U256::ZERO, DataSource::UserSupplied, now()),
-            price_impact_bp: LiveField::new(0u32, DataSource::UserSupplied, now()),
-            gas_estimate: LiveField::new(U256::ZERO, DataSource::UserSupplied, now()),
+            declared_route: None,
+            route: Some(LiveField::new(route, DataSource::UserSupplied, now())),
+            expected_amount_out: Some(LiveField::new(U256::ZERO, DataSource::UserSupplied, now())),
+            price_impact_bp: Some(LiveField::new(0u32, DataSource::UserSupplied, now())),
+            gas_estimate: Some(LiveField::new(U256::ZERO, DataSource::UserSupplied, now())),
         }
     }
 
@@ -352,7 +358,7 @@ mod tests {
                     min_amount_out: min_out,
                 },
                 recipient: user(),
-                slippage_bp: 50,
+                slippage_bp: Some(50),
             },
             live_inputs: make_live_inputs(route),
         }
@@ -400,6 +406,67 @@ mod tests {
             }
         }
         assert!(saw_debit && saw_credit);
+    }
+
+    /// Calldata route identity is not a pool observation. Even a fully resolved
+    /// direct declaration cannot authorize balance effects without a live route.
+    #[test]
+    fn missing_and_declared_only_routes_require_an_observed_route() {
+        use crate::action::amm::DeclaredSwapRoute;
+
+        let state = state_with_pair(U256::from(1_000_000u64), U256::ZERO);
+        let mut swap = exact_in_swap(
+            U256::from(1_000u64),
+            U256::from(800u64),
+            usdc_ref(),
+            weth_ref(),
+            v2_venue(),
+            xy_pool(10_000, 10_000, 30),
+        );
+        let observed = swap.live_inputs.route.take().unwrap();
+        let direct = DeclaredSwapRoute::from(&observed.value);
+        assert!(matches!(&direct, DeclaredSwapRoute::Direct { .. }));
+        swap.live_inputs.expected_amount_out = None;
+        swap.live_inputs.price_impact_bp = None;
+        swap.live_inputs.gas_estimate = None;
+        swap.params.slippage_bp = None;
+
+        for declaration in [
+            None,
+            Some(DeclaredSwapRoute::Empty),
+            Some(direct),
+            Some(DeclaredSwapRoute::Other),
+        ] {
+            swap.live_inputs.declared_route = declaration;
+            let error = swap.apply(&state, &ctx()).unwrap_err();
+            assert!(
+                matches!(error, ReducerError::MissingField("route")),
+                "declared route must not substitute for an observation: {error:?}"
+            );
+            assert!(swap.live_inputs.route.is_none());
+        }
+
+        // Restore only the actual route observation. Unrelated absent estimates
+        // must not prevent the existing reserve-based balance calculation.
+        swap.live_inputs.route = Some(observed);
+        let delta = swap.apply(&state, &ctx()).unwrap();
+        assert_eq!(delta.token_changes.len(), 2);
+        match &delta.token_changes[0] {
+            TokenChange::BalanceDelta { key, delta } => {
+                assert_eq!(key, &usdc_ref().key);
+                assert!(delta.is_negative());
+                assert_eq!(delta.unsigned_abs().to_string(), "1000");
+            }
+            other => panic!("expected input debit, got {other:?}"),
+        }
+        match &delta.token_changes[1] {
+            TokenChange::BalanceDelta { key, delta } => {
+                assert_eq!(key, &weth_ref().key);
+                assert!(delta.is_positive());
+                assert_eq!(delta.unsigned_abs().to_string(), "906");
+            }
+            other => panic!("expected output credit, got {other:?}"),
+        }
     }
 
     // ----------------------------------------------------------------------
@@ -478,7 +545,7 @@ mod tests {
                     min_amount_out: U256::from(900u64),
                 },
                 recipient: user(),
-                slippage_bp: 50,
+                slippage_bp: Some(50),
             },
             live_inputs: make_live_inputs(route),
         };
@@ -550,7 +617,7 @@ mod tests {
                     min_amount_out: U256::ZERO,
                 },
                 recipient: user(),
-                slippage_bp: 50,
+                slippage_bp: Some(50),
             },
             live_inputs: make_live_inputs(route),
         };
@@ -595,7 +662,7 @@ mod tests {
                     amount_out: U256::from(500u64),
                 },
                 recipient: user(),
-                slippage_bp: 50,
+                slippage_bp: Some(50),
             },
             live_inputs: make_live_inputs(route),
         };
@@ -1026,7 +1093,7 @@ mod tests {
                     min_amount_out: min_out,
                 },
                 recipient: user(),
-                slippage_bp: 50,
+                slippage_bp: Some(50),
             },
             live_inputs: make_live_inputs(route),
         }
@@ -1146,7 +1213,7 @@ mod tests {
                     min_amount_out: U256::ZERO,
                 },
                 recipient: user(),
-                slippage_bp: 50,
+                slippage_bp: Some(50),
             },
             live_inputs: make_live_inputs(route),
         };

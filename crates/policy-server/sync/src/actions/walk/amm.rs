@@ -6,7 +6,8 @@ use serde_json::Value;
 
 use policy_state::Time;
 use policy_transition::action::amm::{
-    AddLiquidityAction, CollectFeesAction, RemoveLiquidityAction, SignIntentOrderAction, SwapAction,
+    AddLiquidityAction, CollectFeesAction, RemoveLiquidityAction, SignIntentOrderAction,
+    SwapLiveInputs,
 };
 use policy_transition::action::AmmAction;
 
@@ -22,7 +23,7 @@ pub(super) fn walk(
     sx: &mut WalkStats,
 ) {
     match aa {
-        AmmAction::Swap(s) => walk_swap(s, ix, now, st, sx),
+        AmmAction::Swap(s) => walk_swap(&s.live_inputs, ix, now, st, sx),
         AmmAction::AddLiquidity(a) => walk_add(a, ix, now, st, sx),
         AmmAction::RemoveLiquidity(r) => walk_remove(r, ix, now, st, sx),
         AmmAction::CollectFees(c) => walk_collect(c, ix, now, st, sx),
@@ -35,33 +36,25 @@ pub(super) fn walk(
     }
 }
 
-fn walk_swap(s: &SwapAction, ix: usize, now: Time, st: &mut Vec<StaleField>, sx: &mut WalkStats) {
-    let li = &s.live_inputs;
-    push_if_stale(st, sx, &li.route, now, ix, ActionSlot::AmmSwapRoute);
-    push_if_stale(
-        st,
-        sx,
-        &li.expected_amount_out,
-        now,
-        ix,
-        ActionSlot::AmmSwapExpectedAmountOut,
-    );
-    push_if_stale(
-        st,
-        sx,
-        &li.price_impact_bp,
-        now,
-        ix,
-        ActionSlot::AmmSwapPriceImpactBp,
-    );
-    push_if_stale(
-        st,
-        sx,
-        &li.gas_estimate,
-        now,
-        ix,
-        ActionSlot::AmmSwapGasEstimate,
-    );
+fn walk_swap(
+    li: &SwapLiveInputs,
+    ix: usize,
+    now: Time,
+    st: &mut Vec<StaleField>,
+    sx: &mut WalkStats,
+) {
+    if let Some(field) = &li.route {
+        push_if_stale(st, sx, field, now, ix, ActionSlot::AmmSwapRoute);
+    }
+    if let Some(field) = &li.expected_amount_out {
+        push_if_stale(st, sx, field, now, ix, ActionSlot::AmmSwapExpectedAmountOut);
+    }
+    if let Some(field) = &li.price_impact_bp {
+        push_if_stale(st, sx, field, now, ix, ActionSlot::AmmSwapPriceImpactBp);
+    }
+    if let Some(field) = &li.gas_estimate {
+        push_if_stale(st, sx, field, now, ix, ActionSlot::AmmSwapGasEstimate);
+    }
 }
 
 fn walk_add(
@@ -162,7 +155,7 @@ fn walk_sign_intent(
 
 pub(super) fn apply(aa: &mut AmmAction, slot: &ActionSlot, value: Value, now: Time) {
     match aa {
-        AmmAction::Swap(s) => apply_swap(s, slot, value, now),
+        AmmAction::Swap(s) => apply_swap(&mut s.live_inputs, slot, value, now),
         AmmAction::AddLiquidity(a) => apply_add(a, slot, value, now),
         AmmAction::RemoveLiquidity(r) => apply_remove(r, slot, value, now),
         AmmAction::CollectFees(c) => apply_collect(c, slot, value, now),
@@ -174,27 +167,31 @@ pub(super) fn apply(aa: &mut AmmAction, slot: &ActionSlot, value: Value, now: Ti
     }
 }
 
-fn apply_swap(s: &mut SwapAction, slot: &ActionSlot, value: Value, now: Time) {
-    let li = &mut s.live_inputs;
+fn apply_swap(li: &mut SwapLiveInputs, slot: &ActionSlot, value: Value, now: Time) {
     match slot {
         ActionSlot::AmmSwapRoute => {
-            if let Ok(v) = serde_json::from_value(value) {
-                set_field(&mut li.route, v, now);
+            if let (Some(field), Some(value)) = (&mut li.route, serde_json::from_value(value).ok())
+            {
+                set_field(field, value, now);
             }
         }
         ActionSlot::AmmSwapExpectedAmountOut => {
-            if let Some(u) = value_to_u256(&value) {
-                set_field(&mut li.expected_amount_out, u, now);
+            if let (Some(field), Some(value)) = (&mut li.expected_amount_out, value_to_u256(&value))
+            {
+                set_field(field, value, now);
             }
         }
         ActionSlot::AmmSwapPriceImpactBp => {
-            if let Some(n) = value.as_u64() {
-                set_field(&mut li.price_impact_bp, n as u32, now);
+            if let (Some(field), Some(value)) = (
+                &mut li.price_impact_bp,
+                value.as_u64().and_then(|v| u32::try_from(v).ok()),
+            ) {
+                set_field(field, value, now);
             }
         }
         ActionSlot::AmmSwapGasEstimate => {
-            if let Some(u) = value_to_u256(&value) {
-                set_field(&mut li.gas_estimate, u, now);
+            if let (Some(field), Some(value)) = (&mut li.gas_estimate, value_to_u256(&value)) {
+                set_field(field, value, now);
             }
         }
         _ => {}
@@ -258,5 +255,49 @@ fn apply_sign_intent(s: &mut SignIntentOrderAction, slot: &ActionSlot, value: Va
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use policy_state::{DataSource, Duration, LiveField};
+
+    #[test]
+    fn swap_refresh_tracks_only_observed_fields_and_preserves_real_zero() {
+        let now = Time::from_unix(100);
+        let mut inputs = SwapLiveInputs {
+            price_impact_bp: Some(
+                LiveField::new(0, DataSource::UserSupplied, Time::from_unix(1))
+                    .with_ttl(Duration::from_secs(10)),
+            ),
+            ..SwapLiveInputs::default()
+        };
+        let mut stale = Vec::new();
+        let mut stats = WalkStats::default();
+        walk_swap(&inputs, 0, now, &mut stale, &mut stats);
+        assert_eq!(
+            (stats.total_live_fields, stats.stale_count, stale.len()),
+            (1, 1, 1)
+        );
+
+        apply_swap(
+            &mut inputs,
+            &ActionSlot::AmmSwapPriceImpactBp,
+            Value::from(0),
+            now,
+        );
+        apply_swap(
+            &mut inputs,
+            &ActionSlot::AmmSwapGasEstimate,
+            Value::from(0),
+            now,
+        );
+        let observation = inputs
+            .price_impact_bp
+            .as_ref()
+            .expect("observed price impact");
+        assert_eq!((observation.value, observation.synced_at), (0, now));
+        assert!(inputs.gas_estimate.is_none());
     }
 }

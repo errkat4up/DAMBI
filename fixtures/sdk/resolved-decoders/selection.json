@@ -5,6 +5,7 @@
     "manifests/uniswap/universal-router/execute-v2-no-deadline@1.0.0.json",
     "manifests/aave/governance/core-redeemCancellationFee@1.0.0.json",
     "manifests/aave/governance/core-updateRepresentativesForChain@1.0.0.json",
-    "manifests/aave/umbrella/batch-claimRewardsPermit@1.0.0.json"
+    "manifests/aave/umbrella/batch-claimRewardsPermit@1.0.0.json",
+    "manifests/giwa/v2-router/swap-exact-eth-for-tokens@1.0.0.json"
   ]
 }

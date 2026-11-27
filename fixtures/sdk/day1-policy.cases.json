@@ -152,6 +152,7 @@
     { "id": "unknown-empty-calldata", "action": "unknown", "set": { "action.calldata": "0x" }, "expected": { "kind": "warn", "policy_id": "unknown-blind-sign-warning" } },
     { "id": "permit2-allowance", "action": "permit2", "expected": { "kind": "warn", "policy_id": "permit2-sign-allowance-confirm" } },
     { "id": "permit2-zero-allowance", "action": "permit2", "set": { "action.amount": "0x0" }, "expected": { "kind": "warn", "policy_id": "permit2-sign-allowance-confirm" } },
+    { "id": "swap-missing-live-inputs", "action": "swap", "set": { "action.params.recipient": "0x000000000000000000000000000000000000aaab" }, "omit": ["action.live_inputs"], "expected": { "kind": "fail", "policy_id": "swap-recipient-not-self-deny" } },
     { "id": "swap-other-recipient", "action": "swap", "set": { "action.params.recipient": "0x000000000000000000000000000000000000aaab" }, "expected": { "kind": "fail", "policy_id": "swap-recipient-not-self-deny" } },
     { "id": "swap-self-recipient", "action": "swap", "expected": { "kind": "pass" } },
     { "id": "swap-self-mixed-case-no-token-out", "action": "swap", "set": { "action.params.recipient": "0x000000000000000000000000000000000000AaAa" }, "omit": ["action.params.token_out"], "expected": { "kind": "pass" } }
@@ -164,7 +165,6 @@
     { "id": "permit2-missing-spender", "action": "permit2", "omit": ["action.spender"], "missing_field": "spender" },
     { "id": "permit2-missing-nonce", "action": "permit2", "omit": ["action.nonce"], "missing_field": "nonce" },
     { "id": "swap-missing-recipient", "action": "swap", "omit": ["action.params.recipient"], "missing_field": "recipient" },
-    { "id": "swap-missing-live-inputs", "action": "swap", "omit": ["action.live_inputs"], "missing_field": "live_inputs" },
     { "id": "missing-tx-from", "action": "swap", "omit": ["tx.from"], "missing_field": "from" },
     { "id": "missing-meta-submitter", "action": "approve", "omit": ["meta.submitter"], "missing_field": "submitter" }
   ]

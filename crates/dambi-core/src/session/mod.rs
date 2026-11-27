@@ -887,6 +887,16 @@ impl Report {
                         Some(&node.path),
                     );
                 }
+            } else if matched.policy_id == "__schemaless_eval_error__" {
+                self.diagnostic(
+                    "engine_error",
+                    matched
+                        .reason
+                        .as_deref()
+                        .unwrap_or("policy evaluation failed"),
+                    None,
+                    Some(&node.path),
+                );
             } else if matched.policy_id.starts_with("__engine::quarantine::") {
                 self.diagnostic(
                     "bundle_quarantined",

@@ -1,5 +1,5 @@
 {
-  "scope": "Native/WASM Core plus selected decoder generation: 799 committed baseline + UR/Aave originals, three regression pools and raw policy parity; full-corpus regeneration and final release consumers remain outside this gate.",
+  "scope": "Native/WASM Core plus selected decoder generation: 799 committed baseline + UR/Aave/GIWA originals, three regression pools and raw policy parity; full-corpus regeneration and final release consumers remain outside this gate.",
   "copies": [
     { "from": "scripts/sdk/isolated/Cargo.toml", "to": "Cargo.toml" },
     { "from": "scripts/sdk/isolated/package.json", "to": "package.json" },
@@ -26,6 +26,9 @@
     { "from": "policy-bundles/day1-safety" },
     { "from": "fixtures/sdk/resolved-decoders" },
     { "from": "fixtures/sdk/giwa-sf0/rpc-evidence.json" },
+    { "from": "fixtures/sdk/helpers/native-backend.mjs" },
+    { "from": "fixtures/sdk/giwa-sf0/product-decoder.test.mjs" },
+    { "from": "fixtures/sdk/giwa-sf0/product-decoder.cases.json" },
     { "from": "fixtures/sdk/giwa-sf0/decoders/swap-exact-eth-for-tokens.json" },
     { "from": "fixtures/sdk/pool-materialization/selection.json" },
     { "from": "fixtures/sdk/pool-materialization/templates" },
@@ -47,6 +50,8 @@
     { "from": "packages/core/tests/fixtures/aave.mjs" },
     { "from": "packages/core/tests/fixtures/pools.mjs" },
     { "from": "packages/core/tests/check.test.mjs" },
+    { "from": "examples/sdk-adapters/client.mjs" },
+    { "from": "examples/sdk-adapters/check-timing.mjs" },
     { "from": "packages/core/tests/scam-bundle.test.mjs" },
     { "from": "packages/core/tests/adapters" },
     { "from": "crates/dambi-core/Cargo.toml" },
@@ -54,6 +59,7 @@
     { "from": "crates/scam-filter/Cargo.toml" },
     { "from": "crates/scam-filter/src" },
     { "from": "crates/dambi-core/examples/session_runner.rs" },
+    { "from": "crates/dambi-core/examples/fixture_runner.rs" },
     { "from": "crates/dambi-core/tests/session.rs" },
     { "from": "crates/dambi-core/tests/support/snapshot.rs" },
     { "from": "crates/dambi-core/tests/fixtures/snapshot-approve.json" },

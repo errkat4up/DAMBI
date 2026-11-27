@@ -1,9 +1,9 @@
 {
   "name": "full",
   "schema_version": 1,
-  "digest": "0x807c56cdec2e1997c278f977ebbf4caf2eaebffc9082ef4f6520336787256093",
-  "bytes": 2564423,
-  "bundle_count": 804,
+  "digest": "0x22ab7abe059b938939de2072bc014b7081af5cf4f72ab30909681d71f8726b4a",
+  "bytes": 2566564,
+  "bundle_count": 805,
   "excluded_count": 30484,
   "excluded": {
     "index entry requires source context materialization": 30484

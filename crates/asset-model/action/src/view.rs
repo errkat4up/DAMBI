@@ -179,21 +179,30 @@ mod tests {
                     min_amount_out: U256::from(300_000_000_000_000_000u64),
                 },
                 recipient: addr("0x000000000000000000000000000000000000a01c"),
-                slippage_bp: 50,
+                slippage_bp: Some(50),
             },
             live_inputs: amm::SwapLiveInputs {
-                route: policy_state::LiveField::new(route, pool_source.clone(), now),
-                expected_amount_out: policy_state::LiveField::new(
+                declared_route: None,
+                route: Some(policy_state::LiveField::new(
+                    route,
+                    pool_source.clone(),
+                    now,
+                )),
+                expected_amount_out: Some(policy_state::LiveField::new(
                     U256::from(305_000_000_000_000_000u64),
                     pool_source.clone(),
                     now,
-                ),
-                price_impact_bp: policy_state::LiveField::new(12u32, pool_source.clone(), now),
-                gas_estimate: policy_state::LiveField::new(
+                )),
+                price_impact_bp: Some(policy_state::LiveField::new(
+                    12u32,
+                    pool_source.clone(),
+                    now,
+                )),
+                gas_estimate: Some(policy_state::LiveField::new(
                     U256::from(180_000u64),
                     pool_source,
                     now,
-                ),
+                )),
             },
         });
         let body = ActionBody::Amm(swap);

@@ -7,7 +7,9 @@ import { ScamDataError, type ScamDataFailure } from "../types/scam-error.js";
 import { copyJson, measureJson } from "../runtime/json.js";
 import { AdapterError } from "./errors.js";
 import { callSignal } from "./http.js";
-import { address } from "./scam-rpc-codec.js";
+import { address, type RpcLog } from "./scam-rpc-codec.js";
+import { decodePairCreated } from "./scam-profile-codec.js";
+import { verifyPoolCreation } from "./scam-pool-creation.js";
 import { buildPoolHistory, SCAM_DATA_BUILDER_VERSION, type PoolHistoryBuildLimits } from "./scam-pool-history.js";
 import { buildTokenProfile, type FactoryHistorySupport, type TokenAdminSupport, type TokenProfileBuildOptions } from "./scam-token-profile.js";
 import { createScamRpcSource, ScamRpcError, type ScamRpcBatch, type ScamRpcDiagnostic, type ScamRpcMetrics, type ScamRpcOptions } from "./scam-rpc.js";
@@ -27,6 +29,13 @@ export interface ScamProviderDiagnostic extends ScamRpcDiagnostic {
   readonly operation?: ScamProviderOperation;
 }
 export interface ScamProviderMetrics extends ScamRpcMetrics {
+  /** Sequential builder stages, including their awaited I/O. Not CPU-only or
+   * algorithm timings. Reference acquisition and final checks remain in durationMs. */
+  readonly stages: readonly {
+    readonly operation: "pool_identity" | "pool_history" | "token_profile";
+    readonly executions: number;
+    readonly durationMs: number;
+  }[];
   readonly outcome: "success" | "partial" | "failed";
   readonly reason?: ScamDataFailure;
   /** Sanitized diagnostic only; never changes the returned advisory reason. */
@@ -213,7 +222,10 @@ function ownGroups(input: readonly PlannedCall[], planId: string, config: Return
  */
 type MethodRawProvenance = Pick<MethodVerification, "timeSources" | "reuse" | "rawObservedAt">;
 
-function methodTimeSources(batch: ScamRpcBatch) {
+function methodTimeSources(batch: ScamRpcBatch, creationSubject?: Subject) {
+  // Keep original envelopes. In particular, do not manufacture removed:false
+  // from a normalized log: absence of that acquisition evidence is significant.
+  const creationLogs: RpcLog[] = [];
   const sources = new Set<VerificationTimeSource>(["header"]);
   let reuse: MethodVerification["reuse"] = "none";
   let fromMs = batch.observedAt, toMs = batch.observedAt;
@@ -221,6 +233,10 @@ function methodTimeSources(batch: ScamRpcBatch) {
     batch: Object.freeze({ ...batch,
       async logs(pool: Parameters<ScamRpcBatch["logs"]>[0], query: Parameters<ScamRpcBatch["logs"]>[1]) {
         const scan = await batch.logs(pool, query);
+        if (creationSubject) for (const log of scan.logs) {
+          if (log.address.toLowerCase() === creationSubject.factory.toLowerCase()
+              && decodePairCreated(log)?.pair === creationSubject.pool.toLowerCase()) creationLogs.push(log);
+        }
         if (scan.logs.some((log) => log.timestampMs !== undefined)) sources.add("rpc_log");
         if (scan.provenance) {
           reuse = "interval_cache";
@@ -230,6 +246,7 @@ function methodTimeSources(batch: ScamRpcBatch) {
         return scan;
       },
     } satisfies ScamRpcBatch),
+    creationLogs,
     snapshot: (): MethodRawProvenance => Object.freeze({ timeSources: Object.freeze([...sources]),
       reuse, rawObservedAt: Object.freeze({ fromMs, toMs }) }),
   };
@@ -261,6 +278,19 @@ export function createScamFactProvider(options: ScamFactProviderOptions): ScamFa
       let operation: ScamProviderOperation = "request", diagnostic: ScamProviderDiagnostic | undefined;
       let rawGroups = 0, preflightGroup: number | undefined, preflight: ScamRpcMetrics["preflight"];
       const now = (): number => { const time = config.now(); if (!integer(time)) throw new ScamRpcError("invalid_config"); return time; };
+      const stages = new Map<"pool_identity" | "pool_history" | "token_profile", { executions: number; durationMs: number }>();
+      const timed = async <T>(stage: "pool_identity" | "pool_history" | "token_profile", work: () => Promise<T>): Promise<T> => {
+        const metric = stages.get(stage) ?? { executions: 0, durationMs: 0 };
+        stages.set(stage, metric);
+        metric.executions++;
+        let begin: number | undefined;
+        try { begin = now(); } catch { /* Telemetry cannot change execution. */ }
+        try { return await work(); }
+        finally {
+          try { if (begin !== undefined) metric.durationMs += Math.max(0, now() - begin); }
+          catch { /* Telemetry cannot replace the original failure. */ }
+        }
+      };
       try {
         started = now();
         const planId = context?.planId, signal = callSignal(context);
@@ -292,15 +322,39 @@ export function createScamFactProvider(options: ScamFactProviderOptions): ScamFa
             // I/O after a failing target. The raw source bounds HTTP concurrency.
             for (let i = 0; i < members.length; i++) {
               operation = "pool_identity";
-              const target = members[i], pool = await batch.pool(i);
+              const target = members[i], pool = await timed("pool_identity", () => batch.pool(i));
               operation = "pool_history";
               const historyTimes = methodTimeSources(batch);
-              const history = await buildPoolHistory(historyTimes.batch, pool, target.history!.params, config.history);
+              const history = await timed("pool_history", () => buildPoolHistory(historyTimes.batch, pool, target.history!.params, config.history));
               provenance.set(target.history!.callId, historyTimes.snapshot());
               operation = "token_profile";
-              const profileTimes = methodTimeSources(batch);
-              const profile = await buildTokenProfile(profileTimes.batch, pool, target.profile!.params, { ...config.profile,
-                factorySupport: config.factories.get(pool.subject.factory), adminSupport: config.admins.get(pool.subject.token) });
+              const profileTimes = methodTimeSources(batch, pool.subject);
+              const profile = await timed("token_profile", async () => {
+                const value = await buildTokenProfile(profileTimes.batch, pool, target.profile!.params, { ...config.profile,
+                  factorySupport: config.factories.get(pool.subject.factory), adminSupport: config.admins.get(pool.subject.token) });
+                if (value.age.kind === "exact") {
+                  // Re-read through the same bounded batch, not from the event's
+                  // optional timestamp or the builder's claimed evidence header.
+                  // Publication still waits for the batch's canonical recheck.
+                  const claimed = value.age.evidence;
+                  const block = await batch.block(claimed.createdAt.number);
+                  const proof = verifyPoolCreation(pool.subject, { chainId: config.chainId, block }, {
+                    chainId: config.chainId,
+                    logs: profileTimes.creationLogs,
+                  });
+                  if (proof.kind !== "verified"
+                      || proof.poolCreatedMs !== claimed.createdAt.timestampMs
+                      || proof.evidence.createdAt.hash !== claimed.createdAt.hash.toLowerCase()
+                      || proof.evidence.transactionHash !== claimed.transactionHash.toLowerCase()
+                      || proof.evidence.logIndex !== claimed.logIndex) {
+                    // Do not publish a profile with a second, unverified creation
+                    // timestamp elsewhere in its algorithm input. No partial draft
+                    // escapes this failure and no capability is inferred here.
+                    throw new ScamDataError("data_missing");
+                  }
+                }
+                return value;
+              });
               provenance.set(target.profile!.callId, profileTimes.snapshot());
               operation = "result";
               for (const [callId, value] of [[target.history!.callId, history], [target.profile!.callId, profile]] as const) {
@@ -349,7 +403,8 @@ export function createScamFactProvider(options: ScamFactProviderOptions): ScamFa
         const metric: ScamProviderMetrics = Object.freeze({ ...totals, outcome, ...(reason && { reason }),
           ...(outcome === "failed" && diagnostic ? { failure: diagnostic } : {}),
           ...(preflight === undefined || preflightGroup === undefined ? {} : { preflight, preflightGroup }),
-          calls: callCount, targets, resultBytes, durationMs });
+          calls: callCount, targets, resultBytes, durationMs,
+          stages: Object.freeze([...stages].map(([operation, metric]) => Object.freeze({ operation, ...metric }))) });
         try { void Promise.resolve(config.onMetrics?.(metric)).catch(() => {}); } catch { /* Observer isolation. */ }
       }
   };

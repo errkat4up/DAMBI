@@ -3,7 +3,7 @@
   "status": "handoff_confirmed",
   "name": "core-bundle-b4",
   "path_base": "repository-root",
-  "description": "B4 adapter handoff for the existing packaged snapshot and verified request subset. The historical proposal filename is retained. This document is neither a runtime allowlist nor a generator input; artifact inclusion does not certify every request path.",
+  "description": "The original B4 decision is retained below. product_snapshot and verified_product_raw_paths describe the packaged decoder and its verified request subset through S1.",
   "decision": {
     "date": "2026-10-12",
     "basis_commit": "cb3d52b",
@@ -14,13 +14,13 @@
     "artifact_ref": "packages/core/decoder-snapshots/full/snapshot.json",
     "metadata_ref": "packages/core/decoder-snapshots/full/snapshot.meta.json",
     "package_export": "@dambi/core/decoders",
-    "expectedDigest": "0x807c56cdec2e1997c278f977ebbf4caf2eaebffc9082ef4f6520336787256093",
-    "bytes": 2564423,
-    "bundle_count": 804,
+    "expectedDigest": "0x22ab7abe059b938939de2072bc014b7081af5cf4f72ab30909681d71f8726b4a",
+    "bytes": 2566564,
+    "bundle_count": 805,
     "baseline_count": 799,
     "selected_additions_ref": "fixtures/sdk/resolved-decoders/selection.json",
     "generation_ref": "scripts/sdk/verify-decoder-generation.mjs",
-    "generation_scope": "Retain the committed 799-bundle baseline and rebuild five pinned UR/Aave originals to identical product bytes and metadata. Not regeneration of all 804 originals.",
+    "generation_scope": "Retain the 799-bundle baseline and rebuild six pinned Universal Router, Aave and GIWA inputs to reproduce the packaged bytes and metadata.",
     "trust_rule": "Pin the reviewed artifact digest in local configuration; do not adopt a remote artifact's claimed digest. maxDecoderBytes must accommodate the artifact's exact UTF-8 bytes.",
     "source_context_excluded_entries": 30484,
     "exclusion_note": "Index entries, not a count of unique pools or supported requests. No automatic Registry lookup, resolver or runtime bundle installation."
@@ -77,6 +77,22 @@
       "scope": "Reward order, restake preference, BatchHelper and caller beneficiary; empty/malformed cases.",
       "limits": [
         "User permit validity, actual rewards, restaking availability and execution are not verified"
+      ]
+    },
+    {
+      "name": "GIWA testnet V2 router swapExactETHForTokens",
+      "request_kind": "transaction",
+      "chain_id": "eip155:91342",
+      "target": "0x50d356c7793d41c8b1d2a668f880d3a87aace649",
+      "selectors": [
+        "0x7ff36ab5"
+      ],
+      "cases_ref": "fixtures/sdk/giwa-sf0/product-decoder.test.mjs",
+      "consumer_ref": "scripts/sdk/consumer-cases.mjs",
+      "scope": "The recorded single-hop swap resolves its pool, token and quote token. With a signed scam preset, the installed SDK plans pool history and token profile reads.",
+      "limits": [
+        "Support covers the recorded path and pool. Multi-hop routes and the recorded launchpad transaction are outside this scope.",
+        "Slippage, reserves, fees, price impact and execution estimates require separate evidence."
       ]
     }
   ],

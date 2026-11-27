@@ -4,7 +4,7 @@ import { createScamHistoryStore } from "../../dist/adapters/scam-history-store.j
 
 const hash = (n) => `0x${BigInt(n).toString(16).padStart(64, "0")}`;
 const block = (n) => ({ number: String(n), hash: hash(n), parentHash: hash(n - 1), timestampMs: n * 1_000 });
-const log = (n) => ({ address: `0x${"11".repeat(20)}`, blockNumber: String(n), blockHash: hash(n),
+const log = (n) => ({ removed: false, address: `0x${"11".repeat(20)}`, blockNumber: String(n), blockHash: hash(n),
   timestampMs: n * 1_000, transactionHash: hash(n + 1_000), transactionIndex: 0, logIndex: 0,
   topics: [hash(99)], data: "0x" });
 const entry = (key = "pool:topic:mode", overrides = {}) => ({ key, fromBlock: "10", toBlock: "20",
@@ -20,6 +20,7 @@ test("history store owns complete scans and keeps empty hits and clipped source 
   assert.equal(store.put(source, store.generation), true);
   source.logs[0].topics[0] = hash(100);
   source.logs[0].timestampMs = 123;
+  source.logs[0].removed = true;
   source.start.hash = hash(999);
   source.rawObservedAt.fromMs = 999;
   source.logs.push(log(18));
@@ -31,6 +32,7 @@ test("history store owns complete scans and keeps empty hits and clipped source 
   assert.equal(hit.entry.start.hash, hash(10));
   assert.equal(hit.entry.logs[0].topics[0], hash(99));
   assert.equal(hit.entry.logs[0].timestampMs, 12_000);
+  assert.equal(hit.entry.logs[0].removed, false);
   for (const value of [hit, hit.logs, hit.missing, hit.entry, hit.entry.start, hit.entry.end,
     hit.entry.logs, hit.entry.logs[0], hit.entry.logs[0].topics, hit.entry.rawObservedAt]) assert.equal(Object.isFrozen(value), true);
   assert.throws(() => { hit.logs[0].topics[0] = hash(101); }, TypeError);
@@ -39,6 +41,17 @@ test("history store owns complete scans and keeps empty hits and clipped source 
   assert.deepEqual(empty.logs, []);
   assert.deepEqual(empty.missing, [], "A successful empty scan is a hit, not missing coverage");
   assert.equal(get(store, "other-filter"), undefined);
+});
+
+test("history store skips intervals with missing or retracted log evidence", () => {
+  const store = createScamHistoryStore(options());
+  for (const removed of [true, undefined]) {
+    const item = entry();
+    if (removed === undefined) delete item.logs[0].removed;
+    else item.logs[0].removed = removed;
+    assert.equal(store.put(item, store.generation), false);
+    assert.equal(get(store), undefined);
+  }
 });
 
 test("history store computes inclusive intersections and at most two gaps without borrowing future scans", () => {
