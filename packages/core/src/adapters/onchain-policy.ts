@@ -43,6 +43,7 @@ const hex = (value: unknown): value is string =>
   typeof value === "string" && /^0x(?:[0-9a-fA-F]{2})*(?![\s\S])/.test(value);
 const hash = (value: unknown): value is string =>
   typeof value === "string" && /^0x[0-9a-fA-F]{64}(?![\s\S])/.test(value);
+const lowercaseHex = (value: string): `0x${string}` => `0x${value.slice(2).toLowerCase()}`;
 const word = (value: number | bigint): string => BigInt(value).toString(16).padStart(64, "0");
 const bytesHex = (bytes: Uint8Array): string => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 const utf8 = new TextEncoder();
@@ -103,7 +104,7 @@ function scopeCall(env: string, profile: string): string {
 interface RegistryRead {
   readonly sequence: number;
   readonly status: "active" | "revoked";
-  readonly digest: string;
+  readonly digest: `0x${string}`;
   readonly payload: string;
   readonly signature: string;
   readonly keyId: string;
@@ -162,7 +163,7 @@ function decodeRead(value: unknown): RegistryRead {
 
 interface Block {
   readonly number: bigint;
-  readonly hash: string;
+  readonly hash: `0x${string}`;
   readonly timestamp: number;
 }
 function block(value: unknown): Block {
@@ -171,7 +172,7 @@ function block(value: unknown): Block {
   const timestamp = decodeQuantity(value.timestamp);
   if (number > BigInt(Number.MAX_SAFE_INTEGER)
       || timestamp > BigInt(Math.floor(Number.MAX_SAFE_INTEGER / 1000))) return fail("INVALID_RESPONSE");
-  return { number, hash: value.hash.toLowerCase(), timestamp: Number(timestamp) };
+  return { number, hash: lowercaseHex(value.hash), timestamp: Number(timestamp) };
 }
 function sameBlock(a: Block, b: Block): boolean {
   return a.number === b.number && a.hash === b.hash && a.timestamp === b.timestamp;
@@ -182,7 +183,7 @@ function configure(input: OnchainPolicySourceOptions) {
     const options = { ...input };
     const chainNumber = parseEip155ChainId(options.chainId);
     if (chainNumber === undefined || chainNumber < 1n || chainNumber > BigInt(Number.MAX_SAFE_INTEGER)
-        || !/^0x[0-9a-fA-F]{40}(?![\s\S])/.test(options.registryAddress)
+        || typeof options.registryAddress !== "string" || !/^0x[0-9a-fA-F]{40}(?![\s\S])/.test(options.registryAddress)
         || /^0x0{40}$/.test(options.registryAddress) || !hex(options.expectedRuntimeCode)
         || options.expectedRuntimeCode === "0x"
         || !["staging", "production"].includes(options.env) || options.profile !== "default"
@@ -217,7 +218,7 @@ function configure(input: OnchainPolicySourceOptions) {
     if (typeof fetcher !== "function" || typeof nowMethod !== "function") throw new Error();
     return {
       ...options, rpcUrl: url.href, chainNumber, headers, fetcher,
-      registryAddress: options.registryAddress.toLowerCase(),
+      registryAddress: lowercaseHex(options.registryAddress),
       expectedRuntimeCode: options.expectedRuntimeCode.toLowerCase(),
       now: nowMethod.bind(options.clock),
     };
