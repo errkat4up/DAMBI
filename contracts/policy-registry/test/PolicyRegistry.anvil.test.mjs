@@ -208,6 +208,7 @@ test("real registry and fixed publisher: CAS, receipts, retries, revocation, rot
   await writeFile(retryPath, retryBytes);
   let retrySends = 0;
   let failedGas;
+  let failedHash;
   let failedReceipt;
   let replacementReceipt;
   const retrySubmit = async ({ chainId, ...tx }) => {
@@ -215,11 +216,20 @@ test("real registry and fixed publisher: CAS, receipts, retries, revocation, rot
     assert.equal(tx.data, tool.publicationData(retryClient, retryIntent));
     retrySends++;
     if (retrySends === 1) {
-      // Enough for intrinsic calldata gas, deliberately not enough to store a
-      // policy. This is an actual EVM failure, not a rejected RPC submission.
-      const intrinsic = [...Buffer.from(tx.data.slice(2), "hex")]
-        .reduce((gas, byte) => gas + (byte === 0 ? 4n : 16n), 21_000n);
-      failedGas = intrinsic + 1_000n;
+      // Estimate the successful publication without the publisher's padded gas
+      // limit. Half that estimate leaves room for calldata admission, but not
+      // the policy's storage writes. Intrinsic gas alone is insufficient on
+      // hardforks enforcing the EIP-7623 calldata floor.
+      const { gas: _gas, ...estimateRequest } = tx;
+      const successfulEstimate = BigInt(await rpc("eth_estimateGas", [estimateRequest]));
+      const tokens = [...Buffer.from(tx.data.slice(2), "hex")]
+        .reduce((total, byte) => total + (byte === 0 ? 1n : 4n), 0n);
+      const intrinsic = 21_000n + 4n * tokens;
+      const calldataFloor = 21_000n + 10n * tokens;
+      failedGas = successfulEstimate / 2n;
+      assert.ok(failedGas > intrinsic, "failure gas must exceed intrinsic gas");
+      assert.ok(failedGas > calldataFloor, "failure gas must exceed the EIP-7623 calldata floor");
+      assert.ok(failedGas < successfulEstimate, "failure gas must be below the successful publication estimate");
       tx.gas = "0x" + failedGas.toString(16);
     }
     return rpc("eth_sendTransaction", [tx]);
@@ -227,7 +237,17 @@ test("real registry and fixed publisher: CAS, receipts, retries, revocation, rot
   const retryOptions = {
     attempts: 1, pollMs: 0,
     async onSubmitted(hash) {
+      if (retrySends === 1) {
+        failedHash = hash;
+        assert.match(hash, /^0x[0-9a-fA-F]{64}$/);
+        assert.deepEqual(JSON.parse(await readFile(retryPath + ".txhash", "utf8")), {
+          hashes: [hash], submitting: false,
+        }, "submitted hash must be journaled before waiting for inclusion");
+      }
+      // A timeout here must fail the test, not masquerade as the product's
+      // rejection of a mined status=0 receipt.
       const included = await receipt(hash);
+      assert.equal(included.transactionHash, hash);
       if (retrySends === 1) {
         failedReceipt = included;
         assert.equal(included.status, "0x0");
@@ -239,12 +259,17 @@ test("real registry and fixed publisher: CAS, receipts, retries, revocation, rot
       await advanceFinalizedThrough(included);
     },
   };
-  await assert.rejects(tool.publishStoredIntent(retryClient, retryPath, retrySubmit, retryOptions), /receipt/);
+  const failedReceiptError = { message: "transaction receipt failed/mismatched" };
+  await assert.rejects(tool.publishStoredIntent(retryClient, retryPath, retrySubmit, retryOptions), failedReceiptError);
   assert.equal(retrySends, 1);
+  assert.ok(failedReceipt, "out-of-gas transaction must have been mined, not merely submitted");
+  assert.equal(failedReceipt.transactionHash, failedHash);
+  assert.equal(failedReceipt.status, "0x0");
+  assert.equal(BigInt(failedReceipt.gasUsed), failedGas);
   assert.equal((await retryClient.read()).status, 0);
   const failedJournal = await readFile(retryPath + ".txhash", "utf8");
   assert.deepEqual(JSON.parse(failedJournal), { hashes: [failedReceipt.transactionHash], submitting: false });
-  await assert.rejects(tool.publishStoredIntent(retryClient, retryPath, retrySubmit, retryOptions), /receipt/);
+  await assert.rejects(tool.publishStoredIntent(retryClient, retryPath, retrySubmit, retryOptions), failedReceiptError);
   assert.equal(retrySends, 1, "ordinary publish cannot authorize a failed-transaction retry");
 
   // Inject only a receipt lookup outage over the real local chain. No amount
