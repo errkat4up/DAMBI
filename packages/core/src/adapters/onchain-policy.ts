@@ -169,7 +169,8 @@ function block(value: unknown): Block {
   if (!record(value) || !hash(value.hash)) return fail("INVALID_RESPONSE");
   const number = decodeQuantity(value.number);
   const timestamp = decodeQuantity(value.timestamp);
-  if (timestamp > BigInt(Math.floor(Number.MAX_SAFE_INTEGER / 1000))) return fail("INVALID_RESPONSE");
+  if (number > BigInt(Number.MAX_SAFE_INTEGER)
+      || timestamp > BigInt(Math.floor(Number.MAX_SAFE_INTEGER / 1000))) return fail("INVALID_RESPONSE");
   return { number, hash: value.hash.toLowerCase(), timestamp: Number(timestamp) };
 }
 function sameBlock(a: Block, b: Block): boolean {
@@ -180,7 +181,8 @@ function configure(input: OnchainPolicySourceOptions) {
     if (!record(input)) throw new Error();
     const options = { ...input };
     const chainNumber = parseEip155ChainId(options.chainId);
-    if (chainNumber === undefined || !/^0x[0-9a-fA-F]{40}(?![\s\S])/.test(options.registryAddress)
+    if (chainNumber === undefined || chainNumber < 1n || chainNumber > BigInt(Number.MAX_SAFE_INTEGER)
+        || !/^0x[0-9a-fA-F]{40}(?![\s\S])/.test(options.registryAddress)
         || /^0x0{40}$/.test(options.registryAddress) || !hex(options.expectedRuntimeCode)
         || options.expectedRuntimeCode === "0x"
         || !["staging", "production"].includes(options.env) || options.profile !== "default"
@@ -311,12 +313,16 @@ export function createOnchainPolicySource(options: OnchainPolicySourceOptions): 
         if (finished >= expiresAtMs) return fail("STATE_EXPIRED");
         assertNotAborted(external);
         assertNotAborted(controller.signal);
-        // Fields from the F1 handoff. Keep seconds for blockTimestamp and Unix
-        // milliseconds for observedAtMs; do not replace either with refresh time.
+        // F1 RegistryObservation wire shape. BigInt values have been range
+        // checked before conversion. Forward the same read tuple's SHA-256
+        // digest with its original UTF-8 payload; Core verifies their binding.
+        // Keep seconds for blockTimestamp and Unix milliseconds for observedAtMs;
+        // neither clock is replaced with the latest refresh time.
         const registryState = {
-          chainId: config.chainId, registryAddress: config.registryAddress,
-          env: config.env, profile: config.profile, sequence: read.sequence, status: read.status,
-          blockNumber: reference.number.toString(10), blockHash: reference.hash,
+          chainId: Number(config.chainNumber), registryAddress: config.registryAddress,
+          env: config.env, profile: config.profile, version: read.sequence, status: read.status,
+          payloadDigest: read.digest, finality: config.finality,
+          blockNumber: Number(reference.number), blockHash: reference.hash,
           blockTimestamp: reference.timestamp, observedAtMs,
         };
         const result = { payload: read.payload, signature: read.signature, keyId: read.keyId, registryState };

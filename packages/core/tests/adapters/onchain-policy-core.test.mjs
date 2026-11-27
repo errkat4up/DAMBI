@@ -52,6 +52,14 @@ test("onchain transport cannot authorize an invalid P-256 payload in real Core",
   const candidate = await source.fetch();
   assert.equal(candidate.payload, `${payload} `);
   assert.equal(candidate.signature, signature);
+  assert.equal(candidate.registryState.chainId, 91342);
+  assert.equal(candidate.registryState.blockNumber, 100);
+  assert.equal(candidate.registryState.version, 42);
+  assert.equal(candidate.registryState.finality, "finalized");
+  assert.equal(candidate.registryState.payloadDigest,
+    `0x${createHash("sha256").update(candidate.payload, "utf8").digest("hex")}`);
+  // The tuple digest matches the changed bytes, but the original P-256
+  // signature does not. Transport metadata must not authorize those bytes.
   // F1 may reject the HTTP registry_ref/null mismatch before signature checking.
   // Either rejection is safe, but an adapter/network failure is not this test.
   let created;

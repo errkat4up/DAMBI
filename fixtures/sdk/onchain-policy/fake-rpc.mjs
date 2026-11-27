@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { createServer } from "node:http";
 
@@ -11,9 +12,11 @@ const word = (value) => BigInt(value).toString(16).padStart(64, "0");
 const tail = (bytes) => word(bytes.length) + bytes.toString("hex").padEnd(Math.ceil(bytes.length / 32) * 64, "0");
 
 // Independent encoder, not the adapter decoder. Synthetic RPC only: CODE is
-// not a deployed F4 registry, and digest is deliberately an opaque ABI fixture.
+// not a deployed F4 registry. Hash the exact UTF-8 payload by default; explicit
+// digest overrides support inconsistent-response regressions.
 export function encodeRead({ sequence = 42, status = 1, payload = " {\"sequence\":42}\n",
-  signature = Buffer.alloc(64, 7).toString("base64"), keyId = "test-only", digest = `0x${"ef".repeat(32)}` } = {}) {
+  signature = Buffer.alloc(64, 7).toString("base64"), keyId = "test-only",
+  digest = `0x${createHash("sha256").update(payload, "utf8").digest("hex")}` } = {}) {
   const p = tail(Buffer.from(payload));
   const s = tail(Buffer.from(signature, "base64"));
   const k = tail(Buffer.from(keyId));

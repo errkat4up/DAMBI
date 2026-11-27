@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { AdapterError, createOnchainPolicySource } from "@dambi/core/adapters";
 import { keccak256 } from "../../dist/adapters/onchain-policy.js";
@@ -20,6 +21,8 @@ test("configuration is explicit and copied before any request", async (t) => {
   const rpc = await fakeRpc(t);
   for (const invalid of [
     { finality: "latest" }, { finality: undefined }, { chainId: "91342" },
+    { chainId: "eip155:0" }, { chainId: "eip155:-1" },
+    { chainId: "eip155:9007199254740992" }, { chainId: 91342 },
     { expectedRuntimeCode: "0x" }, { registryAddress: "0x1234" },
     { rpcUrl: "http://remote.example" }, { rpcUrl: "https://user:secret@example.com" },
     { headers: { cookie: "secret" } }, { timeoutMs: 0 }, { timeoutMs: 60_001 },
@@ -45,9 +48,11 @@ test("one hash-bound tuple supplies active state and unchanged UTF-8/base64 body
   assert.equal(bundle.payload, payload);
   assert.equal(bundle.signature, signature);
   assert.deepEqual(bundle.registryState, {
-    chainId: "eip155:91342", registryAddress: "0x1111111111111111111111111111111111111111",
-    env: "staging", profile: "default", sequence: 42, status: "active",
-    blockNumber: "100", blockHash: HASH, blockTimestamp: NOW / 1000, observedAtMs: NOW,
+    chainId: 91342, registryAddress: "0x1111111111111111111111111111111111111111",
+    env: "staging", profile: "default", version: 42, status: "active",
+    payloadDigest: `0x${createHash("sha256").update(payload, "utf8").digest("hex")}`,
+    finality: "finalized",
+    blockNumber: 100, blockHash: HASH, blockTimestamp: NOW / 1000, observedAtMs: NOW,
   });
   assert.deepEqual(rpc.requests.map((r) => r.method), [
     "eth_chainId", "eth_getBlockByNumber", "eth_getCode", "eth_call", "eth_call",
@@ -72,10 +77,15 @@ test("new confirmed blocks refresh state without re-signing; replacement and rev
   assert.ok(advanced.registryState.observedAtMs > first.registryState.observedAtMs);
   rpc.advance();
   rpc.tuple = encodeRead({ sequence: 43, payload: '{"sequence":43}' });
-  assert.equal((await source.fetch()).registryState.sequence, 43);
+  assert.equal((await source.fetch()).registryState.version, 43);
   rpc.advance();
   rpc.tuple = encodeRead({ sequence: 43, status: 3, payload: '{"sequence":43}' });
-  assert.equal((await source.fetch()).registryState.status, "revoked");
+  const revoked = await source.fetch();
+  assert.equal(revoked.registryState.status, "revoked");
+  assert.equal(revoked.registryState.version, 43);
+  assert.equal(revoked.registryState.finality, "finalized");
+  assert.equal(revoked.registryState.payloadDigest,
+    `0x${createHash("sha256").update(revoked.payload, "utf8").digest("hex")}`);
   rpc.mode = "outage";
   await assert.rejects(source.fetch(), code("HTTP_ERROR"));
 });
@@ -93,6 +103,68 @@ test("chain/code mismatches and unsupported hash selectors never hide behind cac
   rpc.mode = "unsupported";
   await assert.rejects(source.fetch(), code("RPC_UNSUPPORTED"));
   assert.ok(rpc.requests.every((request) => !request.params.includes("latest")));
+});
+
+test("RegistryObservation preserves safe numeric boundaries and configured finality", async (t) => {
+  const rpc = await fakeRpc(t);
+  for (const finality of ["safe", "finalized"]) {
+    for (const number of [0, Number.MAX_SAFE_INTEGER]) {
+      rpc.block.number = `0x${BigInt(number).toString(16)}`;
+      rpc.chainId = "0x1fffffffffffff";
+      rpc.tuple = encodeRead({ sequence: Number.MAX_SAFE_INTEGER });
+      const source = createOnchainPolicySource(options(rpc, {
+        chainId: "eip155:9007199254740991", finality,
+      }));
+      const bundle = await source.fetch();
+      assert.equal(bundle.registryState.chainId, Number.MAX_SAFE_INTEGER);
+      assert.equal(bundle.registryState.blockNumber, number);
+      assert.equal(bundle.registryState.version, Number.MAX_SAFE_INTEGER);
+      assert.equal(bundle.registryState.finality, finality);
+      assert.equal(Object.hasOwn(bundle.registryState, "sequence"), false);
+      assert.equal(rpc.requests.at(-6).params[0], finality);
+    }
+  }
+});
+
+test("unsafe or negative RPC heights reject before publication, including the final recheck", async (t) => {
+  const rpc = await fakeRpc(t);
+  const source = createOnchainPolicySource(options(rpc));
+  await source.fetch();
+  for (const number of ["0x20000000000000", "-0x1"]) {
+    for (const recheckOnly of [false, true]) {
+      rpc.transform = (result, request) => request.method === "eth_getBlockByNumber"
+        && (!recheckOnly || request.params[0] === rpc.block.number)
+        ? { ...result, number } : result;
+      await assert.rejects(source.fetch(), code("INVALID_RESPONSE"));
+    }
+  }
+  rpc.transform = undefined;
+  rpc.chainId = "0x20000000000000";
+  await assert.rejects(source.fetch(), code("CHAIN_MISMATCH"));
+  rpc.chainId = "0x164ce";
+  assert.equal((await source.fetch()).registryState.observedAtMs, NOW);
+});
+
+test("the tuple digest is forwarded, not synthesized or replaced from another observation", async (t) => {
+  const rpc = await fakeRpc(t);
+  const payload = ' {"note":"원문", "n":1.00}\n';
+  const digest = `0x${"12".repeat(32)}`;
+  // Deliberately inconsistent: the transport must expose the registry claim
+  // unchanged so Core can reject its binding, not silently repair the claim.
+  rpc.tuple = encodeRead({ payload, digest });
+  const source = createOnchainPolicySource(options(rpc, { finality: "safe" }));
+  const first = await source.fetch();
+  assert.equal(first.payload, payload);
+  assert.equal(first.registryState.payloadDigest, digest);
+  assert.equal(first.registryState.finality, "safe");
+  rpc.tuple = encodeRead({ payload });
+  await assert.rejects(source.fetch(), code("REORG"));
+  rpc.advance();
+  const next = await source.fetch();
+  assert.equal(next.payload, payload);
+  assert.equal(next.registryState.payloadDigest,
+    `0x${createHash("sha256").update(payload, "utf8").digest("hex")}`);
+  assert.notEqual(next.registryState.blockHash, first.registryState.blockHash);
 });
 
 test("reorg, same-block mutation, unsafe versions and malformed ABI are not installed", async (t) => {
@@ -117,7 +189,7 @@ test("reorg, same-block mutation, unsafe versions and malformed ABI are not inst
   rpc.tuple = encodeRead({ sequence: 0, status: 0 });
   await assert.rejects(source.fetch(), code("POLICY_MISSING"));
   rpc.tuple = encodeRead({ sequence: 43 });
-  assert.equal((await source.fetch()).registryState.sequence, 43);
+  assert.equal((await source.fetch()).registryState.version, 43);
 });
 
 test("outages do not return cached state; restart and endpoint/auth replacement revalidate", async (t) => {

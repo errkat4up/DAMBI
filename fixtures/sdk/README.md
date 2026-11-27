@@ -2,6 +2,14 @@
 
 ## F5 — 동일 인정 블록 온체인 어댑터 진행 기록
 
+### F1 RegistryObservation 반환 형식 후속 수정
+
+- 작업: `t_18cd83b0` / 담당 D / branch 정보 미제공 / 제공 parent: `2a6748a92b6034f54821c89aa4221a7eb9784271` / 상태: 수정안 작성·검증 대기.
+- 변경 범위: 실제 어댑터 반환의 `chainId`·`blockNumber`를 범위 검증한 숫자로, `sequence`를 숫자 `version`으로 교정했다. 동일 hash-bound `read(bytes32,0)`의 `digest`를 `payloadDigest`로 전달하고 설정한 `finality`를 포함한다. 서명 원문, 초/ms 단위, 첫 관측 시각, 캐시 기한과 오류 의미는 유지한다. 별도 범용 port 계약은 추가하지 않았다.
+- 회귀: fake RPC의 기본 digest는 원문 UTF-8의 SHA-256으로 생성한다. 정확한 반환 구조, safe/finalized, 0·최대 안전 정수 경계, 초과 chain 설정·블록 응답·버전 거절, 최종 블록 재확인, digest 변경 reorg와 폐기 상태를 검사한다. 기존 실제 WASM 양성 대조 및 잘못된 서명 거절 assertion은 보존했다.
+- 검증: 이번 응답에서 시험·빌드·QA·독립 리뷰·커밋·푸시·체인 연결을 수행하지 않았다. 통과·실패 건수 없음. 재현은 Core README의 workspace-types 후 두 onchain-policy 시험 파일 실행 순서를 따른다.
+- 다음: 제공 리뷰의 F1 `17a7dfae43726e838284a714afd38b88a26c4300` 실제 엔진과 유효한 signed registry_ref 양성 대조·잘못된 서명·scope·폐기 교차검증을 별도로 수행해야 한다. 현재 baseline의 HTTP 양성 대조를 F1 온체인 양성 설치로 간주하지 않는다. 실제 로컬 체인 소비자 deny 및 F5 전체 수용은 별도 통합 대기다.
+
 ### QA 재후속 — 실행 가능한 타입 검사 선행 단계
 
 - 작업: `t_18cd83b0` / 담당 D / branch 정보 미제공 / 제공 parent·검토 SHA: `a89832ca00958fd1a5ff3ecdbb78369ca3673ac7` / 상태: 수정안 작성·검증 대기.
