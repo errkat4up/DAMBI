@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readProbeConfig, probeProviderOptions, factSummary, failureSummary,
-  preflightSummary, summarizeTrials } from "./scam-data-probe-session.mjs";
+  preflightSummary, stageSummary, summarizeTrials, SCAM_EXECUTION_BUDGET } from "./scam-data-probe-session.mjs";
 
 const IDENTITY = Object.freeze({ id: "dambi.scam.window-rules", version: "0.2.0", contractVersion: 2 });
 const PRESET = "sf6-readonly-demo";
@@ -21,9 +21,9 @@ const json = async (path) => JSON.parse(await readFile(path, "utf8"));
 const valid = (condition) => { if (!condition) throw new Error("Invalid local analysis probe configuration; values omitted."); };
 
 export function readAnalysisProbeConfig(env = {}) {
-  // Cumulative/R2 can request 48 hours: ~172800 blocks at a one-second cadence.
-  // The old data-only probe's 100000-block cache cannot retain that scan.
-  const config = readProbeConfig({ ...env, SCAM_CACHE_MAX_BLOCK_SPAN: env.SCAM_CACHE_MAX_BLOCK_SPAN ?? "200000" });
+  // The shared envelope retains a possible 48-hour scan at a one-second
+  // cadence without shortening the actual module's warm-up.
+  const config = readProbeConfig(env);
   let rules;
   try {
     rules = env.SCAM_RULES_JSON === undefined ? [
@@ -139,7 +139,7 @@ function metricsSummary(metrics) {
     if (Number.isFinite(metrics[key]) && metrics[key] >= 0) result[key] = metrics[key];
   }
   const failure = failureSummary(metrics.failure), preflight = preflightSummary(metrics.preflight);
-  return { ...result, ...(failure && { failure }), ...(preflight && { preflight }) };
+  return { ...result, stages: stageSummary(metrics.stages), ...(failure && { failure }), ...(preflight && { preflight }) };
 }
 
 function plannedRequest(calls, planId, config) {
@@ -163,6 +163,7 @@ export async function runAnalysisProbe(input, { createCore, createProvider, now 
     policySource: "local-test-only-fixture", requestedAlgorithm: IDENTITY,
     settings: { chainId: config.chainId, targets: config.subjects.length, repeats: config.repeats,
       timeoutMs: config.timeoutMs, requestedWarmupSec: config.warmupSec, rules: config.rules,
+      executionBudget: { ...SCAM_EXECUTION_BUDGET },
       verification: config.verification, historyCache: config.historyCache ?? null,
       factoryCapabilityEntries: config.factorySupport.length, adminCapabilityEntries: config.adminSupport.length },
     limitations: ["Diagnostic rule thresholds are uncalibrated. Quiet is not safety or sellability assurance.",
@@ -183,8 +184,10 @@ export async function runAnalysisProbe(input, { createCore, createProvider, now 
         factTimeoutMs: config.timeoutMs, policyTimeoutMs: config.timeoutMs },
       scam: { settings: { enabled: true, presetId: PRESET, overrides: [], additionalRules: [], locale: "ko" },
         trust: local.scamTrust, limits: { scamTimeoutMs: config.timeoutMs, scamEvalReserveMs: 200,
-          maxBundleBytes: 1_000_000, maxResultBytes: 16_000_000, maxCalls: 16, maxTargets: config.subjects.length,
-          maxRules: 16, maxLogs: 100_000, maxPoints: 20_000, maxAlgorithmWorkUnits: 100_000_000 } },
+          maxBundleBytes: 1_000_000, maxResultBytes: SCAM_EXECUTION_BUDGET.maxResultBytes,
+          maxCalls: SCAM_EXECUTION_BUDGET.maxCalls, maxTargets: config.subjects.length,
+          maxRules: 16, maxLogs: SCAM_EXECUTION_BUDGET.maxLogs, maxPoints: SCAM_EXECUTION_BUDGET.maxPoints,
+          maxAlgorithmWorkUnits: SCAM_EXECUTION_BUDGET.maxAlgorithmWorkUnits } },
       ports: { policy: { fetch: async () => local.policy, fetchScam: async () => local.scam },
         fact: { async fetch(calls, context) {
           const scam = calls.some((call) => call.method.startsWith("scam."));

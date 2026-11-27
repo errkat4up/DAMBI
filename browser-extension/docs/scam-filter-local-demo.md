@@ -72,7 +72,7 @@ const scamHostConfig = {
       ] },
       limits: {
         scamTimeoutMs: 2500, scamEvalReserveMs: 200, maxBundleBytes: 524288,
-        maxResultBytes: 16000000, maxCalls: 32, maxTargets: 8, maxRules: 16,
+        maxResultBytes: 16000000, maxCalls: 8, maxTargets: 4, maxRules: 16,
         maxLogs: 100000, maxPoints: 20000, maxAlgorithmWorkUnits: 1000000,
       },
     },
@@ -87,11 +87,11 @@ const scamHostConfig = {
         limits: { maxRequests: 512, maxResponseBytes: 8000000, maxTotalResponseBytes: 32000000,
           maxLogs: 100000, maxBlocksPerQuery: 10000, concurrency: 2, maxRetries: 1,
           minRequestIntervalMs: 100, retryDelayMs: 1000, maxRetryDelayMs: 8000 },
-        historyCache: { maxEntries: 8, maxBytes: 16000000, ttlMs: 120000, maxBlockSpan: 100000 },
+        historyCache: { maxEntries: 8, maxBytes: 16000000, ttlMs: 120000, maxBlockSpan: 200000 },
       },
       history: { maxPoints: 20000, maxLogs: 100000, maxBlockLookups: 512, blockTimeHintMs: input.blockTimeHintMs },
       profile: { maxEvents: 20000, maxLogs: 100000, maxBlockLookups: 512, blockTimeHintMs: input.blockTimeHintMs },
-      limits: { timeoutMs: 2500, maxCalls: 32, maxTargets: 8, maxRequestBytes: 100000, maxResultBytes: 16000000 },
+      limits: { timeoutMs: 2500, maxCalls: 8, maxTargets: 4, maxRequestBytes: 100000, maxResultBytes: 16000000 },
     },
   },
 };
@@ -137,6 +137,55 @@ await chrome.storage.local.set({ "scam-filter:host-config": savedScamHost });
 ```
 
 호스트 요청 예산 2.5초는 설정 읽기·초기화 대기·SDK check를 포함한다. SDK 결과 수락 시 절대 마감 시각도 검사하지만 동기 WASM 계산을 강제 선점하지는 못한다. 실제 알고리즘·최초 이력 조회·확장을 포함한 전체 2.5초 성능은 아직 검증되지 않았다. 초기화가 늦으면 해당 요청은 timeout이고 공유 초기화가 완료된 다음 요청에서 다시 확인할 수 있다.
+
+## S2a 재현 계약과 S2b 인계
+
+이 절은 실행 결과가 아니라 재현할 입력·예산·판정 경계다. 이 변경의 빌드·시험·독립 검토 및 공개 RPC 실측은 아직 확인되지 않았다. S2b 전체 성능 합격이나 S3 호스트 전환을 선언하지 않는다.
+
+### 생성 근거와 나이
+
+`scam-pool-creation.ts`와 단위 시험은 S2a-1 원본 `47f09567db2b5ab66f9f59ba3851cd79af0f99a2`를 재사용한다. factory ABI 일치와 배포 provenance는 별개다. 지원 근거에는 대상 chain ID, factory 주소, 배포 트랜잭션·블록·코드/ABI의 출처, 비재생성 가정을 사용하는 경우 그 별도 근거가 필요하다. 이번 변경은 그 근거를 새로 만들어 넣지 않는다. 기존 `factorySupport` 기본값은 여전히 비어 있다.
+
+provider의 exact 생성 결과는 해당 profile 수집에서 얻은 후보 사건과 같은 batch에서 독립 조회한 생성 헤더를 검증한 뒤에만 반환한다. 이벤트의 optional timestamp나 조회 시각으로 생성 시각을 대체하지 않는다. 검증 후에도 원래 batch의 최종 canonical 검사와 전체 결과 바이트 제한을 거친다. 나이는 현재 시계가 아니라 결과의 reference 시각과 생성 시각에 결속되어야 하며 lower-bound 근거와 exact 근거를 혼용하지 않는다.
+
+**남은 acquisition 제한:** 정규화된 `RpcLog`만 있고 원래 `removed:false`가 보존되지 않았다면 승인된 판별 함수의 계약을 만족하지 못한다. provider는 그 값을 추정하지 않고 exact draft 전체를 `data_missing`으로 거절한다. 이것은 complete 지원을 입증한 상태가 아니다. raw acquisition에서 removal 상태를 보존하는 인터페이스와 실제 생성 사건을 통한 provider 회귀 확인이 남아 있다. 이 제한을 capability 추가나 첫 Mint 시각으로 우회하지 않는다. 독립 검토에서는 이 경계와 factory 배포 provenance를 별도 확인해야 한다.
+
+### 공통 실행 envelope
+
+probe의 `SCAM_EXECUTION_BUDGET`과 위 호스트 예시는 대상 1~4개, 최대 8개의 history/profile 호출, 1,000,000 algorithm work units, 20,000 points, 100,000 logs, 전체 결과 16,000,000 bytes를 사용한다. probe의 과거 100,000,000 work units를 호스트로 복사하지 않는다. 작은 입력도 실제 R2 계산량에 따라 `resource_limit`일 수 있다. 이 한도들은 모든 조합의 완료를 보장하는 capacity가 아니다.
+
+기본 data probe 관측은 24시간 lookback + 24시간 warm-up이다. 실제 analysis probe는 Core가 발행한 `plannedHistories`의 구간·후보 해상도를 기록한다. 서명 번들의 룰·warm-up과 실제 모듈의 추가 관측 요구를 줄여 맞추지 않는다. history의 point 수는 bucket 수가 아니라 경계·변경점 수이며 두 후보가 있으면 둘 다 예산을 소비한다.
+
+캐시는 8 entries / 16,000,000 bytes / 120초로 유지하고 block-span만 200,000으로 맞춘다. 이는 1초 간격의 48시간 범위를 보관할 수 있는 범위 제한일 뿐, 로그가 많은 범위가 바이트 예산에 들어간다는 뜻은 아니다. 더 빠른 체인, expiry, eviction, Worker 재시작은 cache miss를 일으킨다. cache-enabled를 cache-hit로 기록하지 않는다. 재사용 여부와 원래 관측 시각은 Fact의 `verification`으로 확인한다.
+
+| 대상 수 N | 호출 수 | data probe reference 그룹 | 그룹별 RPC 상한을 모두 쓸 때 요청/수신 바이트 상한 | 전체 결과/캐시 바이트 |
+| --- | --- | --- | --- | --- |
+| 1 | 2 | 1 | 512 / 32,000,000 | 16,000,000 / 16,000,000 |
+| 2 | 4 | 2 | 1,024 / 64,000,000 | 동일 |
+| 3 | 6 | 3 | 1,536 / 96,000,000 | 동일 |
+| 4 | 8 | 4 | 2,048 / 128,000,000 | 동일 |
+
+이 표는 누적 상한이며 실측 비용이나 메모리 사용량이 아니다. 실제 Core plan의 그룹 공유는 다를 수 있다. 전체 fetch deadline은 N에 곱하지 않는다. response 한 개는 8,000,000 bytes, 동시성은 2, 그룹당 logs는 100,000, builder의 header lookup은 각각 512다. JSON 문자열·파싱 객체·정규화 points·WASM 복사·결과 직렬화가 겹치므로 이 바이트 제한의 합을 heap/RSS 상한이라고 부르지 않는다. S2b에서는 JS heap, WASM memory, 프로세스/Worker 메모리를 별도 기록해야 한다.
+
+`stages`는 실제 실행한 `pool_identity`, `pool_history`, `token_profile`의 실행 횟수와 누적 시간을 기록하며 실패한 단계도 포함한다. 단계 시간에는 해당 단계가 기다린 RPC가 포함된다. reference 취득, 최종 recheck, 결과 직렬화 등은 provider 전체 `durationMs`에 포함되지만 세 builder 단계에는 포함되지 않는다. raw RPC 요청·재시도·수신 bytes는 전체 합계로 보고하며 단계별 RPC 횟수라고 오인하지 않는다. preparation, SDK 초기화, SDK check는 별도 표본이다. SDK check에서 provider 시간을 뺀 잔여 시간을 순수 알고리즘 CPU 시간으로 이름 붙이지 않는다.
+
+### QA 재현과 판정
+
+로컬 회귀는 실제 builder/provider 시험과 production WASM analysis 시험을 사용한다. 생성 verifier 시험, provider 시험, data/analysis probe 시험을 현재 Core build에 대해 실행한다. host 예시의 숫자와 probe 옵션의 일치는 data probe 시험이 예시 configuration을 격리된 VM에서 구성하여 비교한다. 대상 1~4의 provider 시험은 작업량 회귀를 위한 synthetic 입력이며 서로 다른 실배포 4개를 검증했다는 증거가 아니다.
+
+- **완전:** 모든 요청 대상이 일치하고 실제 알고리즘의 모든 활성 룰이 완료되며 missing/unavailable, unknown age, 불완전 warm-up이 없어야 한다. 경고가 발생한 완전 결과도 완전일 수 있다.
+- **부분:** 반환된 이력에 gap, 관리자 이력 미지원, unknown age 또는 불완전 룰이 있다. 빠른 partial이나 fired-with-gaps를 성공 표본으로 이동하지 않는다.
+- **불가:** timeout, resource limit, reference/subject 불일치, reorg, 검증할 생성 근거 부재 등으로 유효한 결과를 반환하지 못했다. draft를 자르거나 이전 결과로 대체하지 않는다.
+
+공개 GIWA RPC 실측은 별도 수동 단계다. 최초 공급자는 GIWA 공개 endpoint이고 정책 RPC와 거래 데이터 RPC 설정은 독립이다. chain 1의 거래 데이터는 별도 Ethereum endpoint를 사용한다. 공급자를 교체하면 같은 chain ID, 필요한 과거 상태·로그·확정성 지원을 다시 확인한다. 429, 로그 범위 제한, archive 부재와 구현의 resource limit을 구분하여 기록한다. 비밀 헤더·URL을 보고서에 기록하지 않는다.
+
+### S2b 측정 전에 확정할 항목
+
+- 비교 목표: **2,500ms 유지**. host 시작은 `begin()` 진입(설정 읽기 전), 종료는 그 요청의 promise가 report/unavailable로 settle하는 시점이다. UI 렌더 완료·사용자 승인·체인 전송은 이 경계 밖이며 필요하면 별도 지표로 측정한다.
+- host 절대 deadline, SDK 예산, provider 예산을 독립 기록한다. preparation은 최대 60,000ms의 별도 작업이며 check latency 표본에 섞지 않는다. 동기 WASM은 타이머로 선점할 수 없으므로 늦게 완료된 응답도 timeout으로 기록한다.
+- 층화: N=1,2,3,4 각각 cold, 명시적 준비 후, Worker 재시작 후를 분리한다. 각 표본에 실제 target 수, planned 구간, rule/preset, RPC 공급자·제한, cache reuse, complete/partial/failed와 사유를 남긴다. timeout과 partial도 분모에 남긴다.
+- 현 probe의 1~20회 반복과 nearest-rank percentile은 진단용이다. 준비된 3회로 운영 p95를 선언하지 않는다. **운영 표본 수·표집 간격, timeout 허용률, 불완전 허용률은 제공된 F0 수치가 없어 미확정**이다. C/D와 독립 리뷰어가 실측 전에 기록·승인해야 하며, 미확정 상태에서 합격 판정을 내리지 않는다. S2a의 완전 결과 재현에서는 partial/failed를 완전으로 허용하지 않는다.
+- 이 변경은 해당 승인이나 측정을 수행했다는 기록이 아니다. 룰 임계, warm-up, 관측 구간, 2.5초 deadline을 완화하여 통과시키지 않는다.
 
 **DevTools: 비활성과 완전 제거**
 

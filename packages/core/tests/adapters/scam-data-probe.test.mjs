@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
+import { SCAM_EXECUTION_BUDGET, probeProviderOptions, stageSummary } from "../../../../scripts/sdk/scam-data-probe-session.mjs";
 import { readProbeConfig, probeCalls, runProbe, summarizeTrials } from "../../../../scripts/sdk/scam-data-probe.mjs";
 
 test("data probe keeps explicit bounded inputs and never assumes deployment capabilities", () => {
@@ -8,7 +11,7 @@ test("data probe keeps explicit bounded inputs and never assumes deployment capa
   assert.equal(config.timeoutMs, 2500);
   assert.equal(config.repeats, 1);
   assert.equal(config.lookbackSec, 86400);
-  assert.equal(config.warmupSec, 3600);
+  assert.equal(config.warmupSec, 86400);
   assert.equal(config.minRequestIntervalMs, 100);
   assert.equal(config.retryDelayMs, 1000);
   assert.equal(config.maxRetryDelayMs, 8000);
@@ -24,7 +27,7 @@ test("data probe keeps explicit bounded inputs and never assumes deployment capa
   assert.equal(unpaced.retryDelayMs, 0);
   assert.equal(unpaced.maxRetryDelayMs, 0);
   const prepared = readProbeConfig({ SCAM_HISTORY_CACHE: "1", SCAM_PREPARE_TIMEOUT_MS: "60000" });
-  assert.deepEqual(prepared.historyCache, { maxEntries: 8, maxBytes: 16_000_000, ttlMs: 120_000, maxBlockSpan: 100_000 });
+  assert.deepEqual(prepared.historyCache, { maxEntries: 8, maxBytes: 16_000_000, ttlMs: 120_000, maxBlockSpan: 200_000 });
   assert.equal(Object.isFrozen(prepared.historyCache), true);
   assert.equal(prepared.prepareTimeoutMs, 60_000);
   assert.equal(prepared.timeoutMs, 2500, "Preparation must not expand the fetch budget");
@@ -44,6 +47,59 @@ test("data probe keeps explicit bounded inputs and never assumes deployment capa
     assert.doesNotMatch(error.message, /SECRET|authorization|0xshort/);
     return true;
   });
+});
+
+test("S2a host example and probe execute with the same bounded envelope", () => {
+  const doc = readFileSync(new URL("../../../../browser-extension/docs/scam-filter-local-demo.md", import.meta.url), "utf8");
+  const script = doc.match(/```javascript\n(const input = \{[\s\S]*?)\n```/)[1];
+  // Evaluate configuration construction only. No storage call or network exists
+  // in this sandbox. JSON round-trip removes cross-realm object prototypes.
+  const host = JSON.parse(JSON.stringify(runInNewContext(`${script}\nscamHostConfig`, {})));
+  const config = readProbeConfig({ SCAM_HISTORY_CACHE: "1" });
+  const provider = probeProviderOptions(config);
+  const budget = SCAM_EXECUTION_BUDGET;
+  assert.equal(host.scam.config.limits.maxTargets, budget.maxTargets);
+  assert.equal(host.scam.config.limits.maxCalls, budget.maxCalls);
+  assert.equal(host.scam.config.limits.maxAlgorithmWorkUnits, budget.maxAlgorithmWorkUnits);
+  assert.equal(host.scam.config.limits.maxPoints, budget.maxPoints);
+  assert.equal(host.scam.config.limits.maxLogs, budget.maxLogs);
+  assert.equal(host.scam.config.limits.maxResultBytes, budget.maxResultBytes);
+  assert.equal(host.facts.scam.limits.maxTargets, budget.maxTargets);
+  assert.equal(host.facts.scam.limits.maxCalls, budget.maxCalls);
+  assert.deepEqual(host.facts.scam.rpc.limits, provider.rpc.limits);
+  assert.deepEqual(host.facts.scam.rpc.historyCache, provider.rpc.historyCache);
+  assert.equal(host.facts.scam.history.maxPoints, provider.history.maxPoints);
+  assert.equal(host.facts.scam.limits.maxResultBytes, provider.limits.maxResultBytes);
+  assert.equal(host.facts.scam.limits.timeoutMs, config.timeoutMs);
+  assert.equal(config.lookbackSec + config.warmupSec, 172800);
+});
+
+test("S2a supports one through four explicit targets and rejects a fifth before provider work", () => {
+  const base = readProbeConfig({}).subjects[0];
+  const targets = Array.from({ length: 5 }, (_, index) => ({
+    factory: base.factory, quoteToken: base.quoteToken, token: base.token,
+    pool: `0x${(index + 1).toString(16).padStart(40, "0")}`,
+  }));
+  for (const count of [1, 2, 3, 4]) {
+    const config = readProbeConfig({ SCAM_TARGETS_JSON: JSON.stringify(targets.slice(0, count)) });
+    const options = probeProviderOptions(config);
+    assert.equal(probeCalls(config, 0).length, count * 2);
+    assert.equal(options.limits.maxTargets, count);
+    assert.equal(options.limits.maxCalls, count * 2);
+    assert.equal(options.limits.timeoutMs, 2500);
+    assert.equal(options.limits.maxResultBytes, 16_000_000, "Result budget is shared, not multiplied by targets");
+    assert.equal(options.rpc.limits.maxRequests, 512, "Raw budget is per reference group");
+  }
+  assert.throws(() => readProbeConfig({ SCAM_TARGETS_JSON: JSON.stringify(targets) }));
+});
+
+test("stage telemetry is an allowlisted projection, not untrusted diagnostic data", () => {
+  const good = { operation: "pool_history", executions: 2, durationMs: 12 };
+  assert.deepEqual(stageSummary([{ ...good, endpoint: "SECRET" }]), [good]);
+  for (const bad of [null, {}, [good, good], [{ ...good, durationMs: Infinity }],
+    [{ ...good, executions: 0 }], [{ ...good, operation: "SECRET" }]]) {
+    assert.deepEqual(stageSummary(bad), []);
+  }
 });
 
 test("data probe creates one history/profile pair per explicit target and preserves both grids", () => {

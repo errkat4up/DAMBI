@@ -367,10 +367,45 @@ test("scam provider emits bounded success, partial and failure metrics without a
     assert.equal(metric.resultBytes > 0, expected !== "failed");
     if (expected !== "failed") assert.equal(metric.failure, undefined);
     assert.equal(Object.isFrozen(metric), true);
+    assert.ok(Object.isFrozen(metric.stages));
+    assert.deepEqual(metric.stages.map((stage) => stage.operation), ["pool_identity", "pool_history", "token_profile"]);
+    assert.ok(metric.stages.every((stage) => Object.isFrozen(stage)
+      && stage.executions === 1 && Number.isFinite(stage.durationMs) && stage.durationMs >= 0));
   }
   const rejectedObserver = setup({ onMetrics: async () => { throw new Error("async observer-only failure"); } });
   assert.equal((await rejectedObserver.create().fetch(calls(), context())).planId, context().planId);
   await new Promise((resolve) => setImmediate(resolve));
+});
+
+test("S2a stage costs aggregate actual target executions and reset on the next fetch", async () => {
+  for (const count of [1, 2, 3, 4]) {
+    const metrics = [];
+    const f = setup({ onMetrics: (metric) => metrics.push(metric) });
+    const provider = f.create();
+    const input = Array.from({ length: count }, (_, index) => calls({
+      prefix: `target-${index}`, group: `group-${index}`, actionPaths: [`actions[${index}]`],
+    })).flat();
+    const batch = await provider.fetch(input, context());
+    assert.equal(Object.keys(batch.results).length, count * 2);
+    assert.equal(metrics[0].targets, count);
+    assert.equal(metrics[0].calls, count * 2);
+    assert.equal(metrics[0].outcome, "success");
+    assert.equal(f.raw.calls.filter((call) => call.method === "eth_chainId").length, count);
+    assert.deepEqual(metrics[0].stages.map((stage) => stage.executions), [count, count, count]);
+    await provider.fetch(calls(), context());
+    assert.deepEqual(metrics[1].stages.map((stage) => stage.executions), [1, 1, 1]);
+  }
+});
+
+test("S2a failed stage retains its cost without publishing a draft", async () => {
+  const metrics = [];
+  const f = setup({ onMetrics: (metric) => metrics.push(metric) });
+  f.config.history.maxPoints = 1;
+  await assert.rejects(f.create().fetch(calls(), context()), failure("resource_limit"));
+  assert.equal(metrics[0].outcome, "failed");
+  assert.equal(metrics[0].resultBytes, 0);
+  assert.deepEqual(metrics[0].stages.map((stage) => stage.operation), ["pool_identity", "pool_history"]);
+  assert.deepEqual(metrics[0].stages.map((stage) => stage.executions), [1, 1]);
 });
 
 test("scam provider retains sanitized raw header diagnostics without changing data_missing or leaking them into a later success", async () => {
