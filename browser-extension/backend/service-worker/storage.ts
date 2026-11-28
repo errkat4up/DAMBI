@@ -69,51 +69,54 @@ export interface AuditEntry {
   decidedAtMs: number;
 }
 
-export async function pendingPut(req: PendingRequest): Promise<void> {
-  const stored =
-    ((
-      (await Browser.storage.session.get(PENDING_KEY)) as Record<
-        string,
-        unknown
-      >
-    )[PENDING_KEY] as Record<string, PendingRequest> | undefined) ?? {};
-  stored[req.requestId] = req;
-  await Browser.storage.session.set({ [PENDING_KEY]: stored });
+// Account locks can run concurrently. Each shared storage key needs its own
+// read-modify-write order; a write error belongs only to the failing caller.
+function serializeWrites() {
+  let tail = Promise.resolve();
+  return (write: () => Promise<void>): Promise<void> => {
+    const result = tail.then(write);
+    tail = result.catch(() => {});
+    return result;
+  };
+}
+
+const writePending = serializeWrites();
+const writeAudit = serializeWrites();
+
+async function readPending(): Promise<Record<string, PendingRequest>> {
+  const stored = await Browser.storage.session.get(PENDING_KEY);
+  return (stored[PENDING_KEY] as Record<string, PendingRequest> | undefined) ?? {};
+}
+
+export function pendingPut(req: PendingRequest): Promise<void> {
+  return writePending(async () => {
+    const stored = await readPending();
+    stored[req.requestId] = req;
+    await Browser.storage.session.set({ [PENDING_KEY]: stored });
+  });
 }
 
 export async function pendingGet(
   requestId: string,
 ): Promise<PendingRequest | undefined> {
-  const stored =
-    ((
-      (await Browser.storage.session.get(PENDING_KEY)) as Record<
-        string,
-        unknown
-      >
-    )[PENDING_KEY] as Record<string, PendingRequest> | undefined) ?? {};
-  return stored[requestId];
+  return (await readPending())[requestId];
 }
 
-export async function pendingDelete(requestId: string): Promise<void> {
-  const stored =
-    ((
-      (await Browser.storage.session.get(PENDING_KEY)) as Record<
-        string,
-        unknown
-      >
-    )[PENDING_KEY] as Record<string, PendingRequest> | undefined) ?? {};
-  delete stored[requestId];
-  await Browser.storage.session.set({ [PENDING_KEY]: stored });
+export function pendingDelete(requestId: string): Promise<void> {
+  return writePending(async () => {
+    const stored = await readPending();
+    delete stored[requestId];
+    await Browser.storage.session.set({ [PENDING_KEY]: stored });
+  });
 }
 
-export async function auditAppend(entry: AuditEntry): Promise<void> {
-  const log =
-    (((await Browser.storage.local.get(AUDIT_KEY)) as Record<string, unknown>)[
-      AUDIT_KEY
-    ] as AuditEntry[] | undefined) ?? [];
-  log.push(entry);
-  if (log.length > AUDIT_MAX) log.splice(0, log.length - AUDIT_MAX);
-  await Browser.storage.local.set({ [AUDIT_KEY]: log });
+export function auditAppend(entry: AuditEntry): Promise<void> {
+  return writeAudit(async () => {
+    const log = await auditRead();
+    log.push(entry);
+    if (log.length > AUDIT_MAX) log.splice(0, log.length - AUDIT_MAX);
+    await Browser.storage.local.set({ [AUDIT_KEY]: log });
+  });
 }
 
 export async function auditRead(): Promise<AuditEntry[]> {

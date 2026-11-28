@@ -49,7 +49,7 @@ describe("confirmation review controls", () => {
     const delayedRead = new Promise<Record<string, unknown>>((resolve) => { finishRead = resolve; });
     mocks.get.mockImplementation(async (requestedKey) => requestedKey === key
       ? delayedRead
-      : { "requests:pending-decisions": { "request-1": { status: "awaiting" } } });
+      : { "requests:decision:request-1": { status: "awaiting" } });
     await openConfirm("pass", true, true);
     expect(document.querySelector(".scam-status")?.textContent).toBe("검사 정보 불러오는 중");
     expect(document.querySelector(".btn-approve")?.textContent).toBe("Continue");
@@ -57,7 +57,7 @@ describe("confirmation review controls", () => {
     expect((document.querySelector(".btn-cancel") as HTMLButtonElement).disabled).toBe(false);
     (document.querySelector(".btn-cancel") as HTMLButtonElement).click();
     await vi.waitFor(() => expect(mocks.sendMessage).toHaveBeenCalledWith({ type: "dambi:verdict-decision", requestId: "request-1", ok: false }));
-    expect(mocks.set).toHaveBeenCalledWith({ "requests:pending-decisions": { "request-1": { status: "decided", ok: false } } });
+    expect(mocks.set).toHaveBeenCalledWith({ "requests:decision:request-1": { status: "decided", ok: false } });
     finishRead({});
     await vi.waitFor(() => expect(mocks.remove).toHaveBeenCalledWith(key));
   });

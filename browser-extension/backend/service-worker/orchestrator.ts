@@ -55,6 +55,7 @@ import type {
   VerdictDto,
 } from "./wasm-bridge.types";
 import {
+  confirmationDecisionKey,
   isTransaction,
   isTypedSignature,
   isUntypedSignature,
@@ -2072,8 +2073,6 @@ async function withTimeout<T>(
   return Promise.race([wrapped, timeoutPromise]);
 }
 
-const PENDING_DECISION_KEY = "requests:pending-decisions";
-
 /**
  * Open the verdict modal as a separate Chrome window. Caller is informational —
  * use this for Fail verdicts where the user has nothing to decide; the popup
@@ -2125,17 +2124,8 @@ async function openVerdictWindowAndAwait(
   backdoor?: BackdoorDisplay,
   windowRules?: WindowDisplay,
 ): Promise<UserDecision> {
-  const all =
-    ((
-      (await Browser.storage.session.get(PENDING_DECISION_KEY)) as Record<
-        string,
-        unknown
-      >
-    )[PENDING_DECISION_KEY] as
-      | Record<string, { verdict: VerdictDto; status: string; ok?: boolean }>
-      | undefined) ?? {};
-  all[requestId] = { verdict, status: "awaiting" };
-  await Browser.storage.session.set({ [PENDING_DECISION_KEY]: all });
+  const key = confirmationDecisionKey(requestId);
+  await Browser.storage.session.set({ [key]: { status: "awaiting" } });
 
   if (scam) await storeScamDisplay(requestId, scam);
   if (backdoor) await storeBackdoorDisplay(requestId, backdoor);
@@ -2151,6 +2141,7 @@ async function openVerdictWindowAndAwait(
       focused: true,
     });
   } catch {
+    await Browser.storage.session.remove(key).catch(() => {});
     return null;
   }
 
@@ -2168,6 +2159,7 @@ async function openVerdictWindowAndAwait(
       if (win.id !== undefined) {
         Browser.windows.remove(win.id).catch(() => {});
       }
+      void Browser.storage.session.remove(key).catch(() => {});
       resolve(choice);
     };
 
@@ -2198,9 +2190,8 @@ async function openVerdictWindowAndAwait(
     const pollDeadline = Date.now() + POLL_DEADLINE_MS;
     async function readChoice(): Promise<UserDecision | undefined> {
       try {
-        const stored = await Browser.storage.session.get(PENDING_DECISION_KEY);
-        const rec = (stored[PENDING_DECISION_KEY] as
-          Record<string, { status: string; ok?: boolean }> | undefined)?.[requestId];
+        const stored = await Browser.storage.session.get(key);
+        const rec = stored[key] as { status: string; ok?: boolean } | undefined;
         if (rec?.status === "dismissed") return null;
         if (rec?.status === "decided" && typeof rec.ok === "boolean") {
           return rec.ok ? "trusted" : "cancelled";

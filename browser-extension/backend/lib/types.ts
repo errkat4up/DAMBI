@@ -276,6 +276,9 @@ export interface Message {
   data: MessageData;
 }
 
+/** Persist each popup selection independently, including while another popup is open. */
+export const confirmationDecisionKey = (requestId: string): string => `requests:decision:${requestId}`;
+
 export type RejectionReason = "user_cancelled" | "policy_denied" | "unavailable";
 
 export interface MessageResponse {

@@ -1,4 +1,5 @@
 import Browser from "webextension-polyfill";
+import { confirmationDecisionKey } from "@lib/types";
 import { scamConfirmKey } from "@lib/scam-display";
 import { backdoorConfirmKey, readStoredBackdoorDisplay } from "@lib/backdoor-display";
 import { renderBackdoorCard } from "./backdoor-card";
@@ -79,7 +80,23 @@ try {
   details = null;
 }
 
-const PENDING_DECISION_KEY = "requests:pending-decisions";
+const decisionKey = confirmationDecisionKey(requestId);
+type StoredDecision = { status: string; ok?: boolean };
+
+async function persistChoice(status: "decided" | "dismissed", ok: boolean): Promise<void> {
+  const session = Browser.storage.session;
+  const entry = (await session.get(decisionKey))[decisionKey] as StoredDecision | undefined;
+  if (entry) {
+    if (entry.status === "awaiting") await session.set({ [decisionKey]: { status, ok } });
+    return;
+  }
+  // A window opened by an older worker can still answer its original request.
+  const legacyKey = "requests:pending-decisions";
+  const legacy = (await session.get(legacyKey))[legacyKey] as Record<string, StoredDecision> | undefined;
+  if (legacy?.[requestId]?.status === "awaiting") {
+    await session.set({ [legacyKey]: { ...legacy, [requestId]: { ...legacy[requestId], status, ok } } });
+  }
+}
 
 async function reply(ok: boolean): Promise<void> {
   // Two-channel reply for SW-restart durability:
@@ -88,14 +105,7 @@ async function reply(ok: boolean): Promise<void> {
   //  2. Persisted decision in chrome.storage.session — the SW poll loop
   //     reads this if the message arrives during a SW death window.
   try {
-    const all =
-      ((await Browser.storage.session.get(PENDING_DECISION_KEY))[
-        PENDING_DECISION_KEY
-      ] as Record<string, { status: string; ok?: boolean }> | undefined) ?? {};
-    if (all[requestId]) {
-      all[requestId] = { ...all[requestId], status: "decided", ok };
-      await Browser.storage.session.set({ [PENDING_DECISION_KEY]: all });
-    }
+    await persistChoice("decided", ok);
   } catch {
     /* best-effort */
   }
@@ -394,19 +404,7 @@ function render(): void {
 // Closing the window without a decision leaves the wallet request unapproved.
 window.addEventListener("beforeunload", () => {
   // Keep an explicit Cancel distinct from a window that simply disappeared.
-  void Browser.storage.session
-    .get(PENDING_DECISION_KEY)
-    .then((stored) => {
-      const all = (stored as Record<string, unknown>)[PENDING_DECISION_KEY] as
-        | Record<string, { status: string; ok?: boolean }>
-        | undefined;
-      if (all && all[requestId] && all[requestId].status === "awaiting") {
-        all[requestId] = { ...all[requestId], status: "dismissed", ok: false };
-        return Browser.storage.session.set({ [PENDING_DECISION_KEY]: all });
-      }
-      return undefined;
-    })
-    .catch(() => {});
+  void persistChoice("dismissed", false).catch(() => {});
 });
 
 render();
