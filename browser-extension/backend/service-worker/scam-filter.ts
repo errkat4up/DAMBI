@@ -4,10 +4,16 @@ import { decoderSnapshot } from "@dambi/core/decoders";
 import {
   createPolicyApiSource, createScamBundleApiSource, createEvmFactProvider, createScamFactProvider,
   type PolicyApiSourceOptions, type ScamBundleApiSourceOptions, type EvmFactProviderOptions,
-  type ScamFactProviderOptions, type ScamFactProvider,
+  type ScamFactProviderOptions, type ScamFactProvider, type ScamProviderMetrics,
 } from "@dambi/core/adapters";
 import { RequestType, type Message } from "@lib/types";
 import type { ScamDisplay } from "@lib/scam-display";
+
+// Only the development worker's own DevTools session can opt in to these
+// transient observations. A page or a stored host configuration cannot enable them.
+declare const DAMBI_STRIP_CONSOLE: boolean | undefined;
+const DEVELOPMENT_BUILD = typeof DAMBI_STRIP_CONSOLE !== "undefined" && !DAMBI_STRIP_CONSOLE;
+const qaTimingEnabled = () => Object.getOwnPropertyDescriptor(globalThis, "__dambiObserveScamTiming")?.value === true;
 
 export const SCAM_HOST_CONFIG_KEY = "scam-filter:host-config";
 /**
@@ -138,7 +144,12 @@ function requestForMessage(message: Message): CheckRequest {
 async function openHost(config: ScamHostConfig, signal: AbortSignal): Promise<HostRuntime> {
   const policy = createPolicyApiSource(config.policy.source);
   const scam = createScamBundleApiSource(config.scam.source);
-  const provider = createScamFactProvider({ ...config.facts.scam, policy: createEvmFactProvider(config.facts.policy) });
+  const provider = createScamFactProvider({
+    ...config.facts.scam, policy: createEvmFactProvider(config.facts.policy),
+    ...(DEVELOPMENT_BUILD ? { onMetrics(metric: ScamProviderMetrics) {
+      if (qaTimingEnabled()) console.debug("[Dambi] QA scam provider", metric);
+    } } : {}),
+  });
   const core = await createCore({ decoderSnapshot, enforcement: "advisory",
     trust: config.policy.trust, limits: config.policy.limits, scam: config.scam.config,
     ports: { policy: { fetch: (options) => policy.fetch(options), fetchScam: (options) => scam.fetchScam(options) }, fact: provider },
@@ -350,6 +361,12 @@ export function createScamHost(dependencies: HostDependencies) {
       // even when its promise microtask runs before the queued timer callback.
       if (obsolete()) return;
       finish(result.scam ? { version: 1, kind: "report", report: result.scam, holding: "unknown" } : unavailable("report_missing"));
+      if (DEVELOPMENT_BUILD && qaTimingEnabled()) {
+        // Pass the actual accepted result by reference. No serialization on the
+        // request path and no debugger pause during worker startup.
+        console.debug("[Dambi] QA scam result", owned.requestId, performance.timeOrigin, performance.now(),
+          result.source, result.decision, result.scam);
+      }
     })().catch((error: unknown) => {
       if (!obsolete()) finish(unavailable(error instanceof HostFailure ? error.reason : "host_error"));
     });
