@@ -11,7 +11,7 @@ function event() {
 function port(name) {
   return { name, onMessage: event(), onDisconnect: event(), replies: [], postMessage(data) { this.replies.push(structuredClone(data)); } };
 }
-function broker() {
+function broker({ workerAvailable = true } = {}) {
   const runtime = { id: "comparison", getURL: (f) => "chrome-extension://comparison/" + f, onMessage: event() };
   const ports = new Map(), workers = [];
   runtime.connect = ({ name }) => {
@@ -19,7 +19,7 @@ function broker() {
   };
   class Worker {
     messages = []; stopped = false;
-    constructor() { workers.push(this); }
+    constructor() { if (!workerAvailable) throw new Error("Worker unavailable"); workers.push(this); }
     postMessage(data) { this.messages.push(structuredClone(data)); }
     terminate() { this.stopped = true; }
     send(data) { this.onmessage({ data }); }
@@ -63,4 +63,11 @@ test("concurrent plan IDs have distinct ports; cancel and scope replacement disc
   assert.equal(d.replies.length, 0);
   workers[1].send({ id: "d", kind: "complete", batch: { newScope: true } });
   assert.deepEqual(d.replies.map(r => r.batch), [{ newScope: true }]);
+});
+
+test("synchronous worker startup failure releases the request to the ordinary provider", () => {
+  const { invite } = broker({ workerAvailable: false });
+  const p = invite("start");
+  p.onMessage.fire({ scope: "A", method: "fetch", planId: "p1" });
+  assert.deepEqual(p.replies, [{ kind: "lost" }]);
 });

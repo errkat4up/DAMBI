@@ -39,10 +39,14 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   port.onMessage.addListener((job) => {
     if (submitted) return;
     submitted = true;
-    worker = owner(job.scope);
-    jobs.set(id, { port });
-    try { worker.postMessage({ id, ...job }); }
-    catch { jobs.delete(id); port.postMessage({ kind: "lost" }); }
+    try {
+      worker = owner(job.scope);
+      jobs.set(id, { port });
+      worker.postMessage({ id, ...job });
+    } catch {
+      jobs.delete(id);
+      port.postMessage({ kind: "lost" });
+    }
   });
   reply({ accepted: true });
 });
