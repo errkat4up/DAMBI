@@ -3,9 +3,15 @@
 // After "ready", open a fresh test dApp tab and issue its ordinary unsigned test-wallet request.
 // Windowless outcomes lack this publication boundary. A worker that exits ends its capture.
 // Startup before the port, UI render and user choice are outside this measurement.
+// This worker-only connection cannot observe the content-script final receiver or
+// request start before worker activation. Those remain named missing stages, not
+// inferred no-window completions or cold samples. measureScamHostRequest provides
+// a separate ordinary unsigned-harness boundary where those signals are available;
+// it does not make this CDP capture a whole-host measurement. S2b remains pending.
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { collectScamHostTrials, observeScamHost } from "./scam-host-timing.mjs";
+export { measureScamHostRequest } from "./scam-host-timing.mjs";
 
 export async function probeScamHost(endpoint, extensionId, durationMs, onReady = () => {}) {
   const url = new URL(endpoint);
@@ -92,6 +98,7 @@ export async function probeScamHost(endpoint, extensionId, durationMs, onReady =
       timeout = setTimeout(() => resolve("duration_elapsed"), durationMs);
     })]);
     return { boundary: "worker_port_receive_to_review_publication", clock: "worker_performance_now",
+      missingStages: ["request_start_before_worker_activation", "request_matched_final_reply"],
       stoppedBecause, trials: capture.finish(stoppedBecause === "duration_elapsed" ? "publication_not_observed" : stoppedBecause) };
   } finally {
     clearTimeout(handshakeTimer);
