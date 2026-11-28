@@ -490,6 +490,26 @@ fn store_byte_limits_bound_the_actual_input_and_reject_zero_configuration() {
 }
 
 #[test]
+fn pinned_bundle_installation_still_limits_compact_bytes_independently_of_container_size() {
+    let limit = dambi_core::json::MAX_WASM_INPUT_JSON_LEN;
+    let mut bundle = approve_bundle();
+    bundle["_note"] = json!("");
+    let padding = limit - serde_json::to_vec(&bundle).unwrap().len();
+    for extra in [0, 1] {
+        bundle["_note"] = Value::String("x".repeat(padding + extra));
+        let artifact = artifact(vec![bundle.clone()]);
+        let mut config = config();
+        config.max_decoder_bytes = artifact.bytes.len();
+        let result = SnapshotStore::new(config, artifact.input(), day1().input(), NOW);
+        if extra == 0 {
+            assert_approve(&result.unwrap().current(NOW).unwrap(), CONTRACT, BUNDLE_ID);
+        } else {
+            expect_code(result, "LIMIT_EXCEEDED");
+        }
+    }
+}
+
+#[test]
 fn failed_multi_bundle_or_policy_initialization_cannot_leak_a_partial_registry() {
     let active = store();
     let old = active.current(NOW).unwrap();

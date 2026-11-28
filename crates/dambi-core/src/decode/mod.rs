@@ -306,7 +306,29 @@ impl DecoderRegistry {
                     format!("invalid bundle json: {error}"),
                 )
             })?;
+        self.install_value(bundle_value)
+    }
 
+    /// For a snapshot that already parsed the bundle. Preserve the existing
+    /// cap on compact JSON bytes, which can differ from its JCS byte length.
+    pub(crate) fn install_parsed(
+        &mut self,
+        bundle_value: serde_json::Value,
+    ) -> Result<DeclarativeInstallResultDto, EngineErrorDto> {
+        let compact = serde_json::to_string(&bundle_value).map_err(|error| {
+            EngineErrorDto::new(
+                "invalid_bundle_json",
+                format!("JSON serialization failed: {error}"),
+            )
+        })?;
+        check_input_size(&compact, "declarative_install_v3_json")?;
+        self.install_value(bundle_value)
+    }
+
+    fn install_value(
+        &mut self,
+        bundle_value: serde_json::Value,
+    ) -> Result<DeclarativeInstallResultDto, EngineErrorDto> {
         let bundle_id = bundle_value
             .get("id")
             .and_then(serde_json::Value::as_str)

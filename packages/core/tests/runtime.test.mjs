@@ -158,6 +158,8 @@ test("built Core loads its own WASM and agrees with Native on a decoded approve"
 test("packaged decoder snapshot installs and routes Registry tokens", async (t) => {
   const { decoderSnapshot, decoderSnapshotInfo } = await import("@dambi/core/decoders");
   const setup = harness();
+  setup.config.decoderSnapshot = { ...decoderSnapshot, artifact: "\ud800" };
+  await assert.rejects(createCore(setup.config), code("INVALID_DECODER_SNAPSHOT"));
   setup.config.decoderSnapshot = decoderSnapshot;
   setup.config.limits.maxDecoderBytes = decoderSnapshotInfo.bytes - 1;
   await assert.rejects(createCore(setup.config), code("LIMIT_EXCEEDED"));

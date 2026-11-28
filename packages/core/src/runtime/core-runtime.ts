@@ -105,7 +105,6 @@ function ownConfig(input: CoreConfig): OwnedConfig {
     }
     const nativeConfig = {
       decoderSnapshot: {
-        artifact,
         expectedDigest: field(decoder, "expectedDigest", true, "INVALID_CONFIG"),
       },
       trust: field(source, "trust", true, "INVALID_CONFIG"),
@@ -113,7 +112,13 @@ function ownConfig(input: CoreConfig): OwnedConfig {
       enforcement: field(source, "enforcement", true, "INVALID_CONFIG"),
       ...(scam === undefined ? {} : { scam }),
     };
-    const nativeJson = JSON.stringify(copyJson(nativeConfig, "INVALID_CONFIG", Number.MAX_SAFE_INTEGER));
+    const owned = copyJson(nativeConfig, "INVALID_CONFIG", Number.MAX_SAFE_INTEGER) as {
+      decoderSnapshot: { artifact?: string };
+    };
+    // The immutable artifact has already passed its exact UTF-8 and Unicode checks.
+    // Attach it after copying caller-owned data to avoid walking it a second time.
+    owned.decoderSnapshot.artifact = artifact;
+    const nativeJson = JSON.stringify(owned);
     const ports = record(field(source, "ports", true, "INVALID_CONFIG"), "INVALID_CONFIG");
     const policyPort = field(ports, "policy", true, "INVALID_CONFIG");
     const fetch = method(policyPort, "fetch");

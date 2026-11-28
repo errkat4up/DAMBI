@@ -99,7 +99,7 @@ pub(super) fn prepare_decoder(
             require_digest(&digest, expected_digest)?;
             let input = std::str::from_utf8(artifact)
                 .map_err(|_| invalid("$", "decoder artifact is not valid UTF-8"))?;
-            let container = strict_json::parse(input).map_err(|error| {
+            let mut container = strict_json::parse(input).map_err(|error| {
                 let kind = match error.kind {
                     PolicyParseErrorKind::InputTooLarge | PolicyParseErrorKind::DepthLimit => {
                         SnapshotErrorKind::LimitExceeded
@@ -108,18 +108,26 @@ pub(super) fn prepare_decoder(
                 };
                 SnapshotError::new(kind, format!("{}: {}", error.path, error.message))
             })?;
-            let container = object(&container, "$", &["schema_version", "bundles"])?;
-            if container.get("schema_version").and_then(Value::as_u64) != Some(1) {
+            let fields = object(&container, "$", &["schema_version", "bundles"])?;
+            if fields.get("schema_version").and_then(Value::as_u64) != Some(1) {
                 return Err(invalid("$/schema_version", "must be integer 1"));
             }
-            let bundles = array(required(container, "bundles", "$")?, "$/bundles")?;
+            let bundles = container
+                .get_mut("bundles")
+                .ok_or_else(|| invalid("$", "missing bundles"))?
+                .as_array_mut()
+                .ok_or_else(|| invalid("$/bundles", "must be an array"))?;
             if bundles.is_empty() {
                 return Err(invalid(
                     "$/bundles",
                     "must contain at least one full V3 bundle",
                 ));
             }
-            (bundles.to_vec(), digest, DecoderTrust::PinnedArtifact)
+            (
+                std::mem::take(bundles),
+                digest,
+                DecoderTrust::PinnedArtifact,
+            )
         }
         DecoderInput::SignedBundle {
             bundle,
@@ -149,17 +157,16 @@ pub(super) fn prepare_decoder(
     let mut routes = Routes::default();
     let mut bundle_ids = Vec::with_capacity(bundles.len());
     let mut bundle_digests = Vec::with_capacity(bundles.len());
-    for (index, bundle) in bundles.iter().enumerate() {
+    for (index, bundle) in bundles.into_iter().enumerate() {
         let path = format!("$/bundles/{index}");
-        let id = validate_bundle(bundle, &path, &mut routes)?;
+        let id = validate_bundle(&bundle, &path, &mut routes)?;
         if !seen_ids.insert(id.to_owned()) {
             return Err(invalid(&path, "duplicate bundle id"));
         }
-        let canonical = serde_json_canonicalizer::to_vec(bundle)
+        let canonical = serde_json_canonicalizer::to_vec(&bundle)
             .map_err(|error| invalid(&path, format!("JCS serialization failed: {error}")))?;
-        let serialized = serde_json::to_string(bundle)
-            .map_err(|error| invalid(&path, format!("JSON serialization failed: {error}")))?;
-        registry.install(&serialized).map_err(|error| {
+        bundle_ids.push(id.to_owned());
+        registry.install_parsed(bundle).map_err(|error| {
             let kind = if error.kind == "input_too_large" {
                 SnapshotErrorKind::LimitExceeded
             } else {
@@ -167,7 +174,6 @@ pub(super) fn prepare_decoder(
             };
             SnapshotError::new(kind, format!("{path}: {}", error.message))
         })?;
-        bundle_ids.push(id.to_owned());
         bundle_digests.push(sha256(&canonical));
     }
     Ok(VerifiedDecoderSnapshot {
