@@ -90,7 +90,6 @@ pub(super) fn prepare_decoder(
             "maxDecoderBytes must be positive",
         ));
     }
-    let mut packaged_slices = Vec::new();
     let (bundles, digest, trust) = match input {
         DecoderInput::Pinned {
             artifact,
@@ -108,14 +107,36 @@ pub(super) fn prepare_decoder(
             let input = std::str::from_utf8(artifact)
                 .map_err(|_| invalid("$", "decoder artifact is not valid UTF-8"))?;
             let packaged = (digest == PACKAGED_DECODER_DIGEST)
-                .then(|| parse_packaged(input))
+                .then(|| packaged_slices(input))
                 .flatten();
-            let bundles = if let Some((values, slices)) = packaged {
-                packaged_slices = slices;
-                values
-            } else {
-                parse_pinned(input)?
-            };
+            if let Some(slices) = packaged {
+                let mut registry = DecoderRegistry::default();
+                let mut bundle_ids = Vec::with_capacity(slices.len());
+                let mut bundle_digests = Vec::with_capacity(slices.len());
+                let mut ids = HashSet::new();
+                for (index, raw) in slices.into_iter().enumerate() {
+                    let id = registry
+                        .install_packaged(raw)
+                        .map_err(|error| install_error(&format!("$/bundles/{index}"), error))?
+                        .bundle_id;
+                    if !ids.insert(id.clone()) {
+                        return Err(invalid(
+                            &format!("$/bundles/{index}"),
+                            "duplicate bundle id",
+                        ));
+                    }
+                    bundle_ids.push(id);
+                    bundle_digests.push(sha256(raw.get().as_bytes()));
+                }
+                return Ok(VerifiedDecoderSnapshot {
+                    registry,
+                    digest,
+                    bundle_ids,
+                    bundle_digests,
+                    trust: DecoderTrust::PinnedArtifact,
+                });
+            }
+            let bundles = parse_pinned(input)?;
             (bundles, digest, DecoderTrust::PinnedArtifact)
         }
         DecoderInput::SignedBundle {
@@ -152,24 +173,13 @@ pub(super) fn prepare_decoder(
         if !seen_ids.insert(id.to_owned()) {
             return Err(invalid(&path, "duplicate bundle id"));
         }
-        let bundle_digest = match packaged_slices.get(index) {
-            Some(raw) => sha256(raw.get().as_bytes()),
-            None => {
-                let canonical = serde_json_canonicalizer::to_vec(&bundle).map_err(|error| {
-                    invalid(&path, format!("JCS serialization failed: {error}"))
-                })?;
-                sha256(&canonical)
-            }
-        };
+        let canonical = serde_json_canonicalizer::to_vec(&bundle)
+            .map_err(|error| invalid(&path, format!("JCS serialization failed: {error}")))?;
+        let bundle_digest = sha256(&canonical);
         bundle_ids.push(id.to_owned());
-        registry.install_parsed(bundle).map_err(|error| {
-            let kind = if error.kind == "input_too_large" {
-                SnapshotErrorKind::LimitExceeded
-            } else {
-                SnapshotErrorKind::InvalidDecoderSnapshot
-            };
-            SnapshotError::new(kind, format!("{path}: {}", error.message))
-        })?;
+        registry
+            .install_parsed(bundle)
+            .map_err(|error| install_error(&path, error))?;
         bundle_digests.push(bundle_digest);
     }
     Ok(VerifiedDecoderSnapshot {
@@ -179,6 +189,15 @@ pub(super) fn prepare_decoder(
         bundle_digests,
         trust,
     })
+}
+
+fn install_error(path: &str, error: crate::json::EngineErrorDto) -> SnapshotError {
+    let kind = if error.kind == "input_too_large" {
+        SnapshotErrorKind::LimitExceeded
+    } else {
+        SnapshotErrorKind::InvalidDecoderSnapshot
+    };
+    SnapshotError::new(kind, format!("{path}: {}", error.message))
 }
 
 fn parse_pinned(input: &str) -> Result<Vec<Value>, SnapshotError> {
@@ -209,9 +228,10 @@ fn parse_pinned(input: &str) -> Result<Vec<Value>, SnapshotError> {
     Ok(std::mem::take(bundles))
 }
 
-// Only the exact certified corpus may use ordinary serde and the original
-// child bytes as JCS. A parse mismatch returns to the strict path.
-fn parse_packaged(input: &str) -> Option<(Vec<Value>, Vec<&RawValue>)> {
+// A single certificate covers strict values, ordered original JCS bytes,
+// schema/ABI/templates, size limits and the three complete route indices.
+// A container mismatch returns to the full installation path.
+fn packaged_slices(input: &str) -> Option<Vec<&RawValue>> {
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Container<'a> {
@@ -223,13 +243,7 @@ fn parse_packaged(input: &str) -> Option<(Vec<Value>, Vec<&RawValue>)> {
     if container.schema_version != 1 || container.bundles.is_empty() {
         return None;
     }
-    let values = container
-        .bundles
-        .iter()
-        .map(|raw| serde_json::from_str(raw.get()))
-        .collect::<Result<_, _>>()
-        .ok()?;
-    Some((values, container.bundles))
+    Some(container.bundles)
 }
 
 fn sha256(bytes: &[u8]) -> String {
@@ -1187,17 +1201,33 @@ fn certify_packaged_decoder() {
     )
     .unwrap();
     let strict = parse_pinned(&input).unwrap();
-    let (values, raw) = parse_packaged(&input).unwrap();
+    let raw = packaged_slices(&input).unwrap();
     assert_eq!(strict.len(), raw.len());
-    assert_eq!(strict, values);
-    for (value, slice) in strict.iter().zip(raw) {
+    let mut baseline = DecoderRegistry::default();
+    let mut lazy = DecoderRegistry::default();
+    let mut routes = Routes::default();
+    let mut ids = HashSet::new();
+    for (index, (value, slice)) in strict.into_iter().zip(raw).enumerate() {
+        assert_eq!(value, serde_json::from_str::<Value>(slice.get()).unwrap());
         assert_eq!(
-            serde_json_canonicalizer::to_vec(value).unwrap(),
+            serde_json::to_vec(&value).unwrap(),
+            slice.get().as_bytes(),
+            "packaged compact byte bound"
+        );
+        assert_eq!(
+            serde_json_canonicalizer::to_vec(&value).unwrap(),
             slice.get().as_bytes(),
             "packaged bundle {} is not stored as its native JCS",
             value["id"]
         );
+        let id = validate_bundle(&value, &format!("$/bundles/{index}"), &mut routes).unwrap();
+        assert!(ids.insert(id.to_string()));
+        assert_eq!(
+            baseline.install_parsed(value).unwrap().bundle_id,
+            lazy.install_packaged(slice).unwrap().bundle_id
+        );
     }
+    lazy.assert_packaged_registry_parity(&baseline);
     let actual = sha256(input.as_bytes());
     if regenerate {
         std::fs::write(

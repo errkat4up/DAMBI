@@ -250,6 +250,30 @@ struct TypedDataBridgeKey {
 //   `emit.strategy`) and trusts the action_builder + serde_json::from_value
 //   to surface schema errors at route time.
 
+// Every route is installed immediately. Only the exact native-certified corpus
+// defers parsing its owned manifest bytes until a real lookup needs the body.
+enum StoredManifest {
+    Parsed(serde_json::Value),
+    Packaged {
+        raw: Box<serde_json::value::RawValue>,
+        parsed: std::sync::OnceLock<Result<serde_json::Value, String>>,
+    },
+}
+impl StoredManifest {
+    fn get(&self) -> Result<&serde_json::Value, String> {
+        match self {
+            Self::Parsed(value) => Ok(value),
+            Self::Packaged { raw, parsed } => parsed
+                .get_or_init(|| {
+                    serde_json::from_str(raw.get())
+                        .map_err(|error| format!("invalid certified manifest: {error}"))
+                })
+                .as_ref()
+                .map_err(Clone::clone),
+        }
+    }
+}
+
 /// Instance-owned decoder manifests and routing indices.
 ///
 /// Installation preserves the legacy last-write-wins routing contract. Failed
@@ -263,11 +287,11 @@ pub struct DecoderRegistry {
     /// dual-schema (`chain_to_addresses` / `chain_ids × to`) split is
     /// invisible here.
     bridge: HashMap<BridgeKey, String>,
-    /// `bundle_id` → raw manifest JSON. Stored as `serde_json::Value` (not
+    /// `bundle_id` → manifest JSON, parsed eagerly or on first use (not
     /// the strongly-typed `AdapterFunctionBundle`) because the v3 templates
     /// (`emit.body`, `emit.live_inputs`, `emit.per_opcode_body`) are not
     /// modelled in `EmitRule` — the action_builder consumes them as-is.
-    bundles: HashMap<String, serde_json::Value>,
+    bundles: HashMap<String, StoredManifest>,
     /// `(chain_id, verifying_contract_lower, primary_type)` → `bundle_id`.
     /// Parallel off-chain EIP-712 routing table. Populated by
     /// [`DecoderRegistry::install`] only for manifests carrying a
@@ -284,6 +308,24 @@ pub struct DecoderRegistry {
 }
 
 impl DecoderRegistry {
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn assert_packaged_registry_parity(&self, strict: &Self) {
+        assert_eq!(self.bridge, strict.bridge);
+        assert_eq!(self.typed_data_bridge, strict.typed_data_bridge);
+        assert_eq!(self.selector_bridge, strict.selector_bridge);
+        assert_eq!(self.bundles.len(), strict.bundles.len());
+        for (id, other) in &strict.bundles {
+            let stored = &self.bundles[id];
+            let StoredManifest::Packaged { parsed, .. } = stored else {
+                panic!("expected deferred")
+            };
+            assert!(parsed.get().is_none());
+            assert_eq!(stored.get().unwrap(), other.get().unwrap());
+            assert!(parsed.get().is_some());
+            assert!(std::ptr::eq(stored.get().unwrap(), stored.get().unwrap()));
+        }
+    }
+
     /// Remove all installed manifests and routing keys from this instance.
     pub fn clear(&mut self) {
         *self = Self::default();
@@ -343,6 +385,62 @@ impl DecoderRegistry {
         let match_value = bundle_value.get("match").ok_or_else(|| {
             EngineErrorDto::new("invalid_match", "bundle.match missing".to_string())
         })?;
+        self.register_routes(&bundle_id, match_value)?;
+        Ok(self.store_manifest(bundle_id, StoredManifest::Parsed(bundle_value)))
+    }
+
+    // Called only after the outer package bytes match the certified full digest.
+    // The native release gate checks these exact raw bytes against strict JSON,
+    // compact-size semantics, validation and all three routing indices.
+    pub(crate) fn install_packaged(
+        &mut self,
+        raw: &serde_json::value::RawValue,
+    ) -> Result<DeclarativeInstallResultDto, EngineErrorDto> {
+        use serde::Deserialize;
+        #[derive(Deserialize)]
+        struct Header {
+            id: String,
+            #[serde(rename = "match")]
+            matcher: serde_json::Value,
+        }
+        check_input_size(raw.get(), "declarative_install_v3_json")?;
+        let header: Header = serde_json::from_str(raw.get())
+            .map_err(|e| EngineErrorDto::new("invalid_bundle_json", format!("{e}")))?;
+        self.register_routes(&header.id, &header.matcher)?;
+        let body = StoredManifest::Packaged {
+            raw: raw.to_owned(),
+            parsed: std::sync::OnceLock::new(),
+        };
+        Ok(self.store_manifest(header.id, body))
+    }
+
+    fn bundle_by_id(
+        &self,
+        id: Option<&String>,
+    ) -> Result<Option<(String, serde_json::Value)>, String> {
+        let Some(id) = id else { return Ok(None) };
+        self.bundles
+            .get(id)
+            .map(|stored| stored.get().map(|v| (id.to_owned(), v.clone())))
+            .transpose()
+    }
+
+    fn store_manifest(
+        &mut self,
+        bundle_id: String,
+        manifest: StoredManifest,
+    ) -> DeclarativeInstallResultDto {
+        self.bundles.insert(bundle_id.clone(), manifest);
+        DeclarativeInstallResultDto {
+            decoder_id: bundle_id.clone(),
+            bundle_id,
+        }
+    }
+    fn register_routes(
+        &mut self,
+        bundle_id: &str,
+        match_value: &serde_json::Value,
+    ) -> Result<(), EngineErrorDto> {
         let bundle_match: BundleMatch =
             serde_json::from_value(match_value.clone()).map_err(|error| {
                 EngineErrorDto::new(
@@ -407,7 +505,7 @@ impl DecoderRegistry {
                     to: to.to_ascii_lowercase(),
                     selector: selector.clone(),
                 };
-                state.bridge.insert(key, bundle_id.clone());
+                state.bridge.insert(key, bundle_id.to_owned());
             }
             if let Some((ref vc, ref pt, ref wt)) = typed_data_route {
                 for (chain_id, _to) in bundle_match.entries() {
@@ -417,7 +515,7 @@ impl DecoderRegistry {
                         primary_type: pt.clone(),
                         witness_type: wt.clone(),
                     };
-                    state.typed_data_bridge.insert(key, bundle_id.clone());
+                    state.typed_data_bridge.insert(key, bundle_id.to_owned());
                 }
             }
             // Address-agnostic (selector-only) tier — standard NFT
@@ -433,16 +531,11 @@ impl DecoderRegistry {
                         chain_id,
                         selector: selector.clone(),
                     };
-                    state.selector_bridge.insert(key, bundle_id.clone());
+                    state.selector_bridge.insert(key, bundle_id.to_owned());
                 }
             }
-            state.bundles.insert(bundle_id.clone(), bundle_value);
         }
-
-        Ok(DeclarativeInstallResultDto {
-            decoder_id: bundle_id.clone(),
-            bundle_id,
-        })
+        Ok(())
     }
 
     /// v3 orchestrator entry emitting the PDF FSM `Action` tree.
@@ -536,16 +629,8 @@ impl DecoderRegistry {
             witness_type: input.witness_type.clone(),
         };
 
-        let (bundle_id, bundle_value) = {
-                let state = self;
-                state.typed_data_bridge.get(&key).and_then(|bundle_id| {
-                    state
-                        .bundles
-                        .get(bundle_id)
-                        .cloned()
-                        .map(|b| (bundle_id.clone(), b))
-                })
-            }
+        let (bundle_id, bundle_value) = self.bundle_by_id(self.typed_data_bridge.get(&key))
+            .map_err(|e| EngineErrorDto::new("invalid_bundle_json",e))?
             .ok_or_else(|| {
                 EngineErrorDto::new(
                     "no_typed_data_mapper",
@@ -744,12 +829,8 @@ impl DecoderRegistry {
             primary_type: input.primary_type.clone(),
             witness_type: input.witness_type.clone(),
         };
-        let (bundle_id, bundle_value) = {
-                let state = self;
-                state.typed_data_bridge.get(&key).and_then(|bundle_id| {
-                    state.bundles.get(bundle_id).cloned().map(|bundle| (bundle_id.clone(), bundle))
-                })
-            }
+        let (bundle_id, bundle_value) = self.bundle_by_id(self.typed_data_bridge.get(&key))
+            .map_err(|e| TypedDataError::new("invalid_bundle_json",e,None))?
             .ok_or_else(|| TypedDataError::new(
                 "no_typed_data_mapper",
                 "no installed typed-data mapper for this routing key; detailed validation not performed",
@@ -987,13 +1068,9 @@ impl DecoderRegistry {
                     selector: lookup_selector.clone(),
                 })
             });
-            bundle_id.and_then(|bundle_id| {
-                state
-                    .bundles
-                    .get(bundle_id)
-                    .cloned()
-                    .map(|b| (bundle_id.clone(), b))
-            })
+            state
+                .bundle_by_id(bundle_id)
+                .map_err(|e| EngineErrorDto::new("invalid_bundle_json", e))?
         }
         .ok_or_else(|| {
             EngineErrorDto::new(
