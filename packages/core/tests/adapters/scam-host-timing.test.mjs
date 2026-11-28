@@ -67,3 +67,44 @@ test("remote debug transports are refused before retrieving browser targets", as
     await assert.rejects(probeScamHost(endpoint, "a".repeat(32), 100), /loopback/);
   }
 });
+
+test("a worker inspector termination ends pending trials before the debug socket closes", async t => {
+  const id = "a".repeat(32);
+  const worker = { type: "service_worker", url: "chrome-extension://" + id + "/js/background.js",
+    webSocketDebuggerUrl: "ws://127.0.0.1:9222/devtools/page/worker" };
+  t.mock.method(globalThis, "fetch", async () => ({ ok: true, json: async () => [worker] }));
+  const original = Object.getOwnPropertyDescriptor(globalThis, "WebSocket");
+  t.after(() => {
+    if (original) Object.defineProperty(globalThis, "WebSocket", original);
+    else delete globalThis.WebSocket;
+  });
+  let socket;
+  class DebugSocket extends EventTarget {
+    static OPEN = 1;
+    readyState = 1;
+    commands = [];
+    constructor() {
+      super();
+      socket = this;
+      queueMicrotask(() => this.dispatchEvent(new Event("open")));
+    }
+    emit(message) { this.onmessage({ data: JSON.stringify(message) }); }
+    send(raw) {
+      const { id, method, params } = JSON.parse(raw);
+      this.commands.push(method);
+      if (method === "Runtime.addBinding") this.binding = params.name;
+      this.emit({ id, result: method === "Runtime.evaluate" ? { result: { objectId: "observer" } } : {} });
+    }
+    close() { this.dispatchEvent(new Event("close")); }
+  }
+  Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: DebugSocket });
+  for (const method of ["Inspector.targetCrashed", "Inspector.detached"]) {
+    const result = await probeScamHost("http://127.0.0.1:9222", id, 30, () => {
+      socket.emit({ method: "Runtime.bindingCalled", params: { name: socket.binding, payload: '{"event":"start","id":1}' } });
+      socket.emit({ method });
+    });
+    assert.equal(result.stoppedBecause, "worker_disconnected");
+    assert.deepEqual(result.trials, [{ id: 1, outcome: "missing", reason: "worker_disconnected" }]);
+    assert.deepEqual(socket.commands, ["Runtime.enable", "Runtime.addBinding", "Runtime.evaluate"]);
+  }
+});

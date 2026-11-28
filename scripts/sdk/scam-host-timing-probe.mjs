@@ -29,18 +29,28 @@ export async function probeScamHost(endpoint, extensionId, durationMs, onReady =
   const binding = "__dambiS2b" + randomUUID().replaceAll("-", "");
   let sequence = 0;
   let timeout;
+  let workerDisconnected = false;
+  let disconnect;
   const stopped = new Promise(resolve => {
-    socket.addEventListener("close", () => {
+    disconnect = () => {
+      workerDisconnected = true;
       for (const request of pending.values()) {
         clearTimeout(request.timer);
         request.reject(Error("Worker disconnected."));
       }
       pending.clear();
       resolve("worker_disconnected");
-    }, { once: true });
+    };
+    socket.addEventListener("close", disconnect, { once: true });
   });
   socket.onmessage = ({ data }) => {
+    if (workerDisconnected) return;
     const msg = JSON.parse(data);
+    // A terminated MV3 worker can retain its debugger socket until much later.
+    if (msg.method === "Inspector.targetCrashed" || msg.method === "Inspector.detached") {
+      disconnect();
+      return;
+    }
     if (msg.method === "Runtime.bindingCalled" && msg.params.name === binding) {
       try { capture.accept(JSON.parse(msg.params.payload)); } catch { /* Ignore invalid binding messages. */ }
     } else if (pending.has(msg.id)) {
@@ -52,7 +62,7 @@ export async function probeScamHost(endpoint, extensionId, durationMs, onReady =
     }
   };
   function send(method, params) {
-    if (socket.readyState !== WebSocket.OPEN) return Promise.reject(Error("Worker disconnected."));
+    if (workerDisconnected || socket.readyState !== WebSocket.OPEN) return Promise.reject(Error("Worker disconnected."));
     const id = ++sequence;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -86,7 +96,7 @@ export async function probeScamHost(endpoint, extensionId, durationMs, onReady =
   } finally {
     clearTimeout(handshakeTimer);
     clearTimeout(timeout);
-    if (observer && socket.readyState === WebSocket.OPEN) {
+    if (observer && !workerDisconnected && socket.readyState === WebSocket.OPEN) {
       await send("Runtime.callFunctionOn", { objectId: observer, functionDeclaration: "function () { this(); }" })
         .finally(() => send("Runtime.removeBinding", { name: binding }))
         .catch(() => { /* A worker can terminate during cleanup. */ });
