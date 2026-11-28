@@ -95,12 +95,14 @@ describe("registry-api HTTP server", () => {
     const url = await start(reader);
     const immutable = await fetch(`${url}/v1/scam-bundle?env=staging&sequence=0`);
     expect(immutable.status).toBe(200);
+    expect(immutable.headers.get("access-control-expose-headers")).toBe("ETag");
     expect(await immutable.text()).toBe(staging);
     expect(immutable.headers.get("cache-control")).toBe(baseConfig.immutableCacheControlValue);
     const notModified = await fetch(`${url}/v1/scam-bundle?env=staging&sequence=0`, {
       headers: { "if-none-match": immutable.headers.get("etag")! },
     });
     expect(notModified.status).toBe(304);
+    expect(notModified.headers.get("access-control-expose-headers")).toBe("ETag");
     expect(await notModified.text()).toBe("");
     const latest = await fetch(`${url}/v1/scam-bundle?env=staging`);
     expect(await latest.text()).toBe(staging);

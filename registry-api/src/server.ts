@@ -708,22 +708,19 @@ function sendCacheValue(
     ? input.config.immutableCacheControlValue
     : input.config.cacheControlValue;
   const etag = computeEtag(value.body);
+  const headers = {
+    ...CORS_HEADERS,
+    "access-control-expose-headers": "ETag",
+    "cache-control": cacheControl,
+    etag,
+  };
   const ifNoneMatch = input.request.headers["if-none-match"];
   if (typeof ifNoneMatch === "string" && ifNoneMatch === etag) {
-    input.response.writeHead(304, {
-      ...CORS_HEADERS,
-      "cache-control": cacheControl,
-      etag,
-    });
+    input.response.writeHead(304, headers);
     input.response.end();
     return;
   }
-  input.response.writeHead(200, {
-    ...CORS_HEADERS,
-    "content-type": value.contentType,
-    "cache-control": cacheControl,
-    etag,
-  });
+  input.response.writeHead(200, { ...headers, "content-type": value.contentType });
   input.response.end(value.body);
 }
 
