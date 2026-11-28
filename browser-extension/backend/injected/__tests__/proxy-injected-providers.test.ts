@@ -1509,6 +1509,57 @@ describe("inpage provider proxy", () => {
     expect(signaturePolicy(1).chainId).toBe(91342);
   });
 
+  describe.each(["JSON-RPC", "metamask_batch", "wallet_sendCalls"] as const)("%s batch approvals", (format) => {
+    it.each(["user cancellation", "wallet chain change"] as const)(
+      "releases every accepted request ID on %s without calling the wallet",
+      async (ending) => {
+        await import("../proxy-injected-providers");
+        let changeChain!: (value: string) => void;
+        const walletRequest = vi.fn(async (_request: TestRequest) => "wallet result");
+        const walletSend = vi.fn((_payload: unknown) => "wallet result");
+        window.ethereum = {
+          chainId: "0x1", request: walletRequest, send: walletSend,
+          on: (event, fn) => { if (event === "chainChanged") changeChain = fn; },
+        };
+        const transactions = ["0x0", "0x1", "0x2"].map((value) => ({
+          from: SIGNER, to: ADDRESS_MESSAGE, value, data: "0x",
+        }));
+        const batch = transactions.map((tx, index) => ({
+          jsonrpc: "2.0", id: index + 1, method: "eth_sendTransaction", params: [tx],
+        }));
+        if (ending === "user cancellation") {
+          streamState.responses.push(true, true, { data: false, rejection: "user_cancelled" });
+        } else {
+          streamState.beforeVerdict = () => {
+            if (policyWrites().length === transactions.length) changeChain("0x164ce");
+          };
+        }
+        const invoke = () => {
+          if (format === "JSON-RPC") return window.ethereum!.send!(batch);
+          const params = format === "metamask_batch"
+            ? [batch]
+            : [{ chainId: "0x1", from: SIGNER, calls: transactions.map(({ to, value, data }) => ({ to, value, data })) }];
+          return window.ethereum!.request!({ method: format, params });
+        };
+        await expect(invoke()).rejects.toMatchObject({
+          code: 4001,
+          message: ending === "user cancellation"
+            ? "Dambi: transaction rejected by user" : "Dambi: transaction blocked: policy evaluation unavailable",
+        });
+        expect(walletSend).not.toHaveBeenCalled();
+        expect(walletRequest).not.toHaveBeenCalled();
+        const policies = policyWrites();
+        expect(policies).toHaveLength(transactions.length);
+        const approved = ending === "user cancellation" ? policies.slice(0, -1) : policies;
+        const discarded = streamWrites().flatMap(({ data }) => {
+          const control = data as { type?: string; originalRequestId?: string };
+          return control.type === "discard-forwarded" ? [control.originalRequestId] : [];
+        });
+        expect(discarded.sort()).toEqual(approved.map(({ requestId }) => requestId).sort());
+      },
+    );
+  });
+
   it("preserves an allowed ordinary batch and its per-leg methods with one warm chain read", async () => {
     await import("../proxy-injected-providers");
     const originalRequest = vi.fn(async (request: TestRequest) => request.method === "eth_chainId" ? "0x164ce" : "sent");

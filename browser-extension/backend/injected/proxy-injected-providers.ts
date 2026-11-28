@@ -88,25 +88,41 @@ const REJECT_SIG = ethErrors.provider.userRejectedRequest(
   "Dambi: signature blocked: policy evaluation unavailable",
 );
 
-// Throw at the individual decision site so batch legs and concurrent requests
-// keep their own reason and action kind; never store a process-wide last reason.
+// A top-level wallet invocation shares one chain observation and one list of
+// approved calls, including nested batch members. Concurrent invocations get
+// separate scopes; the IDs only retire duplicate-observation fingerprints.
+interface WalletApprovalScope {
+  provider: Eip1193Provider;
+  approved: string[];
+  chain?: {
+    id: number | undefined;
+    revision: number | undefined;
+    action: "transaction" | "signature";
+  };
+}
+
+function assertApprovalChain({ provider, chain }: WalletApprovalScope): void {
+  if (chain && (chain.id !== knownChainId(provider) || chain.revision !== chainIdRevisions.get(provider))) {
+    unavailableChain(chain.action);
+  }
+}
+
 async function confirmWalletAction(
-  provider: Eip1193Provider,
+  scope: WalletApprovalScope,
   data: Extract<MessageData, { type: RequestType.TRANSACTION | RequestType.TYPED_SIGNATURE | RequestType.UNTYPED_SIGNATURE }>,
 ): Promise<boolean> {
-  const revision = chainIdRevisions.get(provider);
-  const initialChain = knownChainId(provider);
-  const decision = await sendRequestAndAwaitDecision(stream, verdictReceiver, data);
+  const { provider } = scope;
   const action = data.type === RequestType.TRANSACTION ? "transaction" : "signature";
+  const currentChain = knownChainId(provider);
+  scope.chain ??= { id: currentChain, revision: chainIdRevisions.get(provider), action };
+  assertApprovalChain(scope);
+  // EIP-5792 may name a target chain explicitly; its enclosing invocation
+  // still pins the observed provider revision across all confirmations.
+  if (data.method !== "wallet_sendCalls" && currentChain !== data.chainId) unavailableChain(action);
+  const decision = await sendRequestAndAwaitDecision(stream, verdictReceiver, data);
   if (decision.data === true) {
-    const currentChain = knownChainId(provider);
-    if (revision !== chainIdRevisions.get(provider) || currentChain !== initialChain
-        || (data.method !== "wallet_sendCalls" && currentChain !== data.chainId)) {
-      sendToStreamAndDisregard(stream, {
-        type: "discard-forwarded", hostname: location.hostname, originalRequestId: decision.requestId,
-      });
-      return unavailableChain(action);
-    }
+    scope.approved.push(decision.requestId);
+    assertApprovalChain(scope);
     return true;
   }
   const detail = decision.rejection === "user_cancelled"
@@ -243,12 +259,13 @@ async function readConnectedAccount(
 }
 
 async function checkTransaction(
-  provider: Eip1193Provider,
+  scope: WalletApprovalScope,
   params: unknown[],
   method: string,
   chainIdOverride?: number,
   readRequest?: ProviderRequest,
 ): Promise<boolean> {
+  const { provider } = scope;
   const [transaction] = params;
   const tx = asRecord(transaction);
   if (!tx) return false;
@@ -274,14 +291,15 @@ async function checkTransaction(
     transaction: policyTransaction,
   } as Extract<MessageData, { type: RequestType.TRANSACTION }>;
 
-  return confirmWalletAction(provider, data);
+  return confirmWalletAction(scope, data);
 }
 
 async function checkWalletSendCalls(
-  provider: Eip1193Provider,
+  scope: WalletApprovalScope,
   params: unknown[],
   readRequest?: ProviderRequest,
 ): Promise<boolean> {
+  const { provider } = scope;
   const envelope = asRecord(params[0]);
   if (!envelope) return false;
   const calls = Array.isArray(envelope.calls) ? envelope.calls : null;
@@ -310,7 +328,7 @@ async function checkWalletSendCalls(
       from: walletFrom,
     };
     const isCallAllowed = await checkTransaction(
-      provider,
+      scope,
       [transaction],
       "wallet_sendCalls",
       chainId,
@@ -323,16 +341,17 @@ async function checkWalletSendCalls(
 }
 
 async function checkTypedSignature(
-  provider: Eip1193Provider,
+  scope: WalletApprovalScope,
   params: unknown[],
   method: string,
   readRequest?: ProviderRequest,
 ): Promise<boolean> {
+  const { provider } = scope;
   const { address, message: typedData } = signatureFields(method, params);
   if (typedData === undefined || typedData === null) return true;
   const chainId = await readChainId(provider, readRequest, "signature");
 
-  return confirmWalletAction(provider, {
+  return confirmWalletAction(scope, {
     type: RequestType.TYPED_SIGNATURE,
     // Keep the zero-address routing fallback, but do not publish complete
     // correlation metadata for a fabricated signer. Absent method remains the
@@ -346,16 +365,17 @@ async function checkTypedSignature(
 }
 
 async function checkUntypedSignature(
-  provider: Eip1193Provider,
+  scope: WalletApprovalScope,
   params: unknown[],
   method: string,
   readRequest?: ProviderRequest,
 ): Promise<boolean> {
+  const { provider } = scope;
   const { address, message } = signatureFields(method, params);
   if (message === undefined || message === null) return true;
   const chainId = await readChainId(provider, readRequest, "signature");
 
-  return confirmWalletAction(provider, {
+  return confirmWalletAction(scope, {
     type: RequestType.UNTYPED_SIGNATURE,
     method,
     ...(address ? { address } : {}),
@@ -377,13 +397,13 @@ function metaMaskBatchRequests(params: unknown[]): JsonRpcRequest[] {
 }
 
 async function checkMetaMaskBatch(
-  provider: Eip1193Provider,
+  scope: WalletApprovalScope,
   params: unknown[],
   readRequest?: ProviderRequest,
 ): Promise<void> {
   for (const request of metaMaskBatchRequests(params)) {
     await ensureAllowed(
-      provider,
+      scope,
       request.method,
       paramsArray(request.params),
       readRequest,
@@ -392,7 +412,7 @@ async function checkMetaMaskBatch(
 }
 
 async function ensureAllowed(
-  provider: Eip1193Provider,
+  scope: WalletApprovalScope,
   method: string | undefined,
   params: unknown[],
   readRequest?: ProviderRequest,
@@ -401,7 +421,7 @@ async function ensureAllowed(
     // N8: sign-without-broadcast still requires transaction evaluation, but
     // retain its actual method rather than claiming it was a send.
     const isOk = await checkTransaction(
-      provider,
+      scope,
       params,
       method,
       undefined,
@@ -412,24 +432,24 @@ async function ensureAllowed(
   }
 
   if (method === "wallet_sendCalls") {
-    const isOk = await checkWalletSendCalls(provider, params, readRequest);
+    const isOk = await checkWalletSendCalls(scope, params, readRequest);
     if (!isOk) throw REJECT_TX;
     return;
   }
 
   if (method === "metamask_batch") {
-    await checkMetaMaskBatch(provider, params, readRequest);
+    await checkMetaMaskBatch(scope, params, readRequest);
     return;
   }
 
   if (method && TYPED_SIGNATURE_METHODS.has(method)) {
-    const isOk = await checkTypedSignature(provider, params, method, readRequest);
+    const isOk = await checkTypedSignature(scope, params, method, readRequest);
     if (!isOk) throw REJECT_SIG;
     return;
   }
 
   if (method && UNTYPED_SIGNATURE_METHODS.has(method)) {
-    const isOk = await checkUntypedSignature(provider, params, method, readRequest);
+    const isOk = await checkUntypedSignature(scope, params, method, readRequest);
     if (!isOk) throw REJECT_SIG;
     return;
   }
@@ -740,189 +760,87 @@ function proxyEthereumProvider(provider: Eip1193Provider | undefined): boolean {
       : undefined;
   installChainIdListener(provider);
 
-  const proxiedRequest = new Proxy(originalRequest, {
-    apply: async (target, _thisArg, args) => {
-      if (Array.isArray(args[0])) {
-        // N4: EIP-1193 `request` takes a single object, but some non-standard
-        // wallets honour a JSON-RPC batch ARRAY here too. An array has no
-        // top-level `.method`, so the gate below would forward it ungated —
-        // gate each leg first (any deny throws, rejecting the request), then
-        // forward intact. (gateBatchArray is closed over from below.)
-        await gateBatchArray(args[0] as unknown[]);
-        return Reflect.apply(target, provider, args);
+  // Validate immediately before calling the native wallet, with no await
+  // between the final chain check and delivery. A rejected native call has
+  // already been handed off and can still produce an observation.
+  const wallet = provider;
+  async function gateAndForward(payload: unknown, forward: () => unknown) {
+    const scope: WalletApprovalScope = { provider: wallet, approved: [] };
+    try {
+      for (const item of Array.isArray(payload) ? payload : [payload]) {
+        const request = asRecord(item) as JsonRpcRequest | undefined;
+        if (request) {
+          await ensureAllowed(scope, request.method, paramsArray(request.params), originalRequest);
+        }
       }
-      const request = (args[0] ?? {}) as JsonRpcRequest;
-      const method = request.method;
-      const params = paramsArray(request.params);
+      assertApprovalChain(scope);
+    } catch (error) {
+      for (const requestId of scope.approved) {
+        try {
+          sendToStreamAndDisregard(stream, {
+            type: "discard-forwarded", hostname: location.hostname, originalRequestId: requestId,
+          });
+        } catch {
+          // A disconnected bridge cannot deliver cleanup. Its bounded cache
+          // expires; retain the actual per-request refusal for the dApp.
+        }
+      }
+      throw error;
+    }
+    return forward();
+  }
 
-      await ensureAllowed(provider, method, params, originalRequest);
-      // Always forward with the original `provider` as the receiver, not the
-      // dApp-supplied `thisArg`. EIP-6963 / wagmi-style callers can hand us
-      // a `thisArg` that isn't the provider object MetaMask's stateful
-      // `request` implementation expects (it reads `this._rpcRequest`,
-      // `this._metamask`, …). When MetaMask gets the wrong `this` it
-      // silently no-ops — no error, no popup. This was tolerable for
-      // `eth_sendTransaction` (the dApp's call shape happened to align)
-      // but breaks `wallet_sendCalls`, which arrives via a different stack.
-      return forwardProviderResult(provider, method, params, () =>
-        Reflect.apply(target, provider, args),
-      );
+  const proxiedRequest = new Proxy(originalRequest, {
+    apply: (target, _thisArg, args) => {
+      const payload = args[0];
+      if (Array.isArray(payload)) return gateAndForward(payload, () => Reflect.apply(target, wallet, args));
+      const request = (payload ?? {}) as JsonRpcRequest;
+      return gateAndForward(request, () => forwardProviderResult(
+        wallet, request.method, paramsArray(request.params), () => Reflect.apply(target, wallet, args),
+      ));
     },
   });
 
-  // For all three legacy entry points (request / sendAsync / send), forward
-  // with the original `provider` as the receiver, not the dApp-supplied
-  // `thisArg`. See the comment on `proxiedRequest` above for the rationale —
-  // MetaMask's native methods are stateful and silently no-op when called
-  // with the wrong `this`.
-  // N4: a legacy `send`/`sendAsync` JSON-RPC BATCH is an ARRAY of requests with
-  // no top-level `.method`, so the per-method gate would see `undefined` and
-  // forward the whole array ungated. Gate each element first; any deny throws.
-  const gateBatchArray = async (batch: unknown[]): Promise<void> => {
-    for (const item of batch) {
-      const record = asRecord(item);
-      if (!record) continue;
-      await ensureAllowed(
-        provider,
-        record.method as string | undefined,
-        paramsArray(record.params),
-        originalRequest,
-      );
+  // Legacy callbacks and promise-based calls share the same gate. Preserve the
+  // receiver expected by stateful injected wallets and keep batch arrays intact.
+  const forwardLegacy = (target: (...args: unknown[]) => unknown, args: unknown[]) => {
+    const [payload, callback] = args;
+    const batch = Array.isArray(payload);
+    const request = (batch ? {} : payload ?? {}) as JsonRpcRequest;
+    const params = paramsArray(request.params);
+    if (typeof callback === "function") {
+      const respond = callback as JsonRpcCallback;
+      const forwarded = batch ? args : [
+        request, wrapProviderCallback(wallet, request.method, params, respond), ...args.slice(2),
+      ];
+      void gateAndForward(payload, () => {
+        Reflect.apply(target, wallet, forwarded);
+      }).catch((error) => rejectJsonRpc(respond, request, error));
+      return undefined;
     }
+    if (!batch && !request.method) return Reflect.apply(target, wallet, args);
+    return gateAndForward(payload, () => {
+      const invoke = () => Reflect.apply(target, wallet, args);
+      return batch ? invoke() : forwardProviderResult(wallet, request.method, params, invoke);
+    });
   };
 
-  const proxiedSendAsync =
-    typeof originalSendAsync === "function"
-      ? new Proxy(originalSendAsync, {
-          apply: (target, _thisArg, args) => {
-            const request = (args[0] ?? {}) as JsonRpcRequest;
-            const callback = args[1] as JsonRpcCallback | undefined;
-            const method = request.method;
-            const params = paramsArray(request.params);
+  const proxiedSendAsync = typeof originalSendAsync === "function"
+    ? new Proxy(originalSendAsync, { apply: (target, _thisArg, args) => forwardLegacy(target, args) })
+    : undefined;
 
-            if (Array.isArray(args[0])) {
-              // N4: JSON-RPC batch array — gate each leg, then forward intact.
-              const batch = args[0] as unknown[];
-              if (typeof callback === "function") {
-                void (async () => {
-                  try {
-                    await gateBatchArray(batch);
-                    Reflect.apply(target, provider, args);
-                  } catch (error) {
-                    rejectJsonRpc(callback, {} as JsonRpcRequest, error);
-                  }
-                })();
-                return undefined;
-              }
-              return (async () => {
-                await gateBatchArray(batch);
-                return Reflect.apply(target, provider, args);
-              })();
-            }
-
-            if (typeof callback !== "function") {
-              if (!method) return Reflect.apply(target, provider, args);
-              return (async () => {
-                await ensureAllowed(provider, method, params, originalRequest);
-                return forwardProviderResult(provider, method, params, () =>
-                  Reflect.apply(target, provider, args),
-                );
-              })();
-            }
-
-            void (async () => {
-              try {
-                await ensureAllowed(provider, method, params, originalRequest);
-                Reflect.apply(target, provider, [
-                  request,
-                  wrapProviderCallback(provider, method, params, callback),
-                  ...args.slice(2),
-                ]);
-              } catch (error) {
-                rejectJsonRpc(callback, request, error);
-              }
-            })();
-            return undefined;
-          },
-        })
-      : undefined;
-
-  const proxiedSend =
-    typeof originalSend === "function"
-      ? new Proxy(originalSend, {
-          apply: (target, _thisArg, args) => {
-            const [payloadOrMethod, callbackOrParams] = args;
-            if (typeof payloadOrMethod === "string") {
-              return provider.request?.({
-                method: payloadOrMethod,
-                params: callbackOrParams,
-              });
-            }
-
-            if (Array.isArray(payloadOrMethod)) {
-              // N4: JSON-RPC batch array — gate each leg, then forward intact.
-              const batch = payloadOrMethod as unknown[];
-              if (typeof callbackOrParams === "function") {
-                const cb = callbackOrParams as JsonRpcCallback;
-                void (async () => {
-                  try {
-                    await gateBatchArray(batch);
-                    Reflect.apply(target, provider, args);
-                  } catch (error) {
-                    rejectJsonRpc(cb, {} as JsonRpcRequest, error);
-                  }
-                })();
-                return undefined;
-              }
-              return (async () => {
-                await gateBatchArray(batch);
-                return Reflect.apply(target, provider, args);
-              })();
-            }
-
-            const request = (payloadOrMethod ?? {}) as JsonRpcRequest;
-            const method = request.method;
-            const params = paramsArray(request.params);
-
-            if (typeof callbackOrParams !== "function") {
-              if (!method) return Reflect.apply(target, provider, args);
-              return (async () => {
-                await ensureAllowed(provider, method, params, originalRequest);
-                return forwardProviderResult(provider, method, params, () =>
-                  Reflect.apply(target, provider, args),
-                );
-              })();
-            }
-
-            if (typeof provider.sendAsync === "function") {
-              return provider.sendAsync(request, callbackOrParams);
-            }
-
-            void (async () => {
-              try {
-                await ensureAllowed(provider, method, params, originalRequest);
-                Reflect.apply(target, provider, [
-                  request,
-                  wrapProviderCallback(
-                    provider,
-                    method,
-                    params,
-                    callbackOrParams as JsonRpcCallback,
-                  ),
-                  ...args.slice(2),
-                ]);
-              } catch (error) {
-                rejectJsonRpc(
-                  callbackOrParams as JsonRpcCallback,
-                  request,
-                  error,
-                );
-              }
-            })();
-            return undefined;
-          },
-        })
-      : undefined;
+  const proxiedSend = typeof originalSend === "function"
+    ? new Proxy(originalSend, {
+        apply: (target, _thisArg, args) => {
+          const [payload, callbackOrParams] = args;
+          if (typeof payload === "string") return wallet.request?.({ method: payload, params: callbackOrParams });
+          if (!Array.isArray(payload) && typeof callbackOrParams === "function" && typeof wallet.sendAsync === "function") {
+            return wallet.sendAsync(payload, callbackOrParams);
+          }
+          return forwardLegacy(target, args);
+        },
+      })
+    : undefined;
 
   // Tag wrapped functions so subsequent poll passes can detect mutation.
   (proxiedRequest as WithMarker<typeof proxiedRequest>)[WRAP_MARKER] = true;

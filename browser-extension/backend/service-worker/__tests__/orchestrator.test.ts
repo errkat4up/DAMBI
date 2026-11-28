@@ -304,7 +304,7 @@ vi.mock("../venue/resolve-order-symbol", () => ({
 }));
 
 import { decideMessage, decideWalletRequest, inferActor } from "../orchestrator";
-import { resetForwarded } from "../forwarded-requests";
+import { discardForwarded, resetForwarded } from "../forwarded-requests";
 
 function txMessage(requestId = "req-1"): Message {
   return {
@@ -705,6 +705,22 @@ describe("orchestrator", () => {
       expect(mocks.browser.windows.create).not.toHaveBeenCalled();
       expect(onRiskyVerdict).not.toHaveBeenCalled();
       expect(mocks.auditAppend).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ bypassed: true, verdict: "pass" }));
+    });
+
+    it("audits a later wallet observation after an approved batch leg is withdrawn", async () => {
+      const leg = txMessage("batch-first-leg");
+      passes();
+      expect(await decideWalletRequest(leg, PAGE)).toMatchObject({ ok: true });
+      discardForwarded(PAGE, leg.requestId);
+
+      const later = bypassCopy(leg, "separate-wallet-request");
+      passes();
+      expect(await decideWalletRequest(later, PAGE)).toMatchObject({ verdict: { kind: "pass" } });
+      expect(mocks.auditAppend).toHaveBeenCalledTimes(2);
+      expect(mocks.auditAppend).toHaveBeenLastCalledWith(expect.objectContaining({
+        requestId: later.requestId, verdict: "pass", bypassed: true,
+      }));
+      expect(mocks.browser.windows.create).not.toHaveBeenCalled();
     });
 
     it("the same request sent twice is decided twice, and each copy is matched once", async () => {
