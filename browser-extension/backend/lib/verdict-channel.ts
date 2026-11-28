@@ -21,7 +21,7 @@
  * one timing assumption is the residual; it holds for a `document_start` content
  * script under the standard content-script/page execution ordering.)
  */
-import type { StreamResponse } from "./types";
+import type { MessageResponse, StreamResponse } from "./types";
 
 export interface AwaitVerdictOptions {
   /** Budget before the first verdict / `awaiting-user` arrives. */
@@ -39,6 +39,10 @@ export interface VerdictReceiver {
    * transferred. `awaiting-user` re-arms the deadline to `phase2Ms`.
    */
   awaitVerdict(requestId: string, opts: AwaitVerdictOptions): Promise<boolean>;
+}
+
+export interface DecisionVerdictReceiver extends VerdictReceiver {
+  awaitDecision(requestId: string, opts: AwaitVerdictOptions): Promise<MessageResponse>;
 }
 
 export interface VerdictSender {
@@ -60,19 +64,32 @@ function isAwaitingUser(msg: unknown): boolean {
   );
 }
 
-function verdictBool(msg: unknown): boolean {
-  return (
-    !!msg &&
-    typeof msg === "object" &&
-    (msg as { data?: unknown }).data === true
-  );
+/** Normalize only a request-matched response from a trusted transport. */
+export function normalizeDecision(msg: unknown, requestId: string): MessageResponse {
+  const unavailable: MessageResponse = { requestId, data: false, rejection: "unavailable" };
+  if (!msg || typeof msg !== "object" || Array.isArray(msg)) return unavailable;
+  const response = msg as { requestId?: unknown; data?: unknown; rejection?: unknown };
+  if (response.requestId !== requestId) return unavailable;
+  // A reason on an allow is a malformed response, not an approval.
+  if (response.data === true && response.rejection === undefined) {
+    return { requestId, data: true };
+  }
+  if (response.data === false && (
+    response.rejection === "user_cancelled" ||
+    response.rejection === "policy_denied" ||
+    response.rejection === "unavailable"
+  )) {
+    return { requestId, data: false, rejection: response.rejection };
+  }
+  // A legacy false does not tell us whether policy, user or transport denied it.
+  return unavailable;
 }
 
 /**
  * MAIN-world receiver. Captures the first authenticated port transferred under
  * `initKey` and resolves verdicts over it. See module docs for the threat model.
  */
-export function createVerdictReceiver(initKey: string): VerdictReceiver {
+export function createVerdictReceiver(initKey: string): DecisionVerdictReceiver {
   let port: MessagePort | null = null;
   const pending = new Map<string, (msg: StreamResponse) => void>();
 
@@ -98,12 +115,13 @@ export function createVerdictReceiver(initKey: string): VerdictReceiver {
   };
   window.addEventListener("message", onWindowMessage);
 
-  return {
-    awaitVerdict(requestId, { phase1Ms, phase2Ms, onAwaitingUser }) {
-      return new Promise<boolean>((resolve) => {
+  const awaitDecision: DecisionVerdictReceiver["awaitDecision"] = (
+    requestId, { phase1Ms, phase2Ms, onAwaitingUser },
+  ) => {
+      return new Promise<MessageResponse>((resolve) => {
         let settled = false;
         let timer: ReturnType<typeof setTimeout>;
-        const finish = (value: boolean): void => {
+        const finish = (value: MessageResponse): void => {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
@@ -112,7 +130,7 @@ export function createVerdictReceiver(initKey: string): VerdictReceiver {
         };
         const arm = (ms: number): void => {
           clearTimeout(timer);
-          timer = setTimeout(() => finish(false), ms);
+          timer = setTimeout(() => finish(normalizeDecision(undefined, requestId)), ms);
         };
         pending.set(requestId, (msg) => {
           if (isAwaitingUser(msg)) {
@@ -120,10 +138,15 @@ export function createVerdictReceiver(initKey: string): VerdictReceiver {
             onAwaitingUser?.();
             return;
           }
-          finish(verdictBool(msg));
+          finish(normalizeDecision(msg, requestId));
         });
         arm(phase1Ms);
       });
+  };
+  return {
+    awaitDecision,
+    async awaitVerdict(requestId, opts) {
+      return (await awaitDecision(requestId, opts)).data === true;
     },
   };
 }

@@ -1,7 +1,7 @@
 import { WindowPostMessageStream } from "@metamask/post-message-stream";
 import Browser from "webextension-polyfill";
 import { Identifier } from "@lib/identifier";
-import { sendToPortAndAwaitResponse } from "@lib/messages";
+import { sendToPortAndAwaitDecision } from "@lib/messages";
 import { createVerdictSender } from "@lib/verdict-channel";
 import type { Message, StreamResponse } from "@lib/types";
 
@@ -42,8 +42,8 @@ stream.on("data", async (message: Message) => {
   } catch (err) {
     // Fail-CLOSED: if we cannot reach the service worker (extension reloaded,
     // SW terminated mid-call, etc.) we have no evaluation result, so we must
-    // not approve. The timeout path in `sendToPortAndAwaitResponse` already
-    // resolves `false`; this branch must match. Pairing the deny with a
+    // not approve. The timeout path in `sendToPortAndAwaitDecision` already
+    // resolves an unavailable denial; this branch must match. Pairing the deny with a
     // loud console.error so the user can see why their tx didn't go through
     // and knows to reload the tab.
     console.error(
@@ -51,19 +51,24 @@ stream.on("data", async (message: Message) => {
         "transaction blocked. Reload this tab to restore policy evaluation.",
       err,
     );
-    verdictSender.send({ requestId: message.requestId, data: false });
+    verdictSender.send({ requestId: message.requestId, data: false, rejection: "unavailable" });
     return;
   }
   const data: Message["data"] = {
     ...message.data,
     hostname: location.hostname,
   };
-  port.onMessage.addListener((msg: any) => {
-    if (msg?.kind === "awaiting-user" && msg.requestId === message.requestId) {
+  const decision = await sendToPortAndAwaitDecision(port, data, {
+    // Keep the SW confirmation scope and the MAIN-world waiter on the same ID.
+    requestId: message.requestId,
+    onAwaitingUser: () => {
       verdictSender.send({ requestId: message.requestId, kind: "awaiting-user" });
-    }
+    },
   });
-  const ok = await sendToPortAndAwaitResponse(port, data);
-  verdictSender.send({ requestId: message.requestId, data: ok });
-  port.disconnect();
+  verdictSender.send(decision);
+  try {
+    port.disconnect();
+  } catch {
+    // The transport may already have disconnected while we were waiting.
+  }
 });

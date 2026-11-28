@@ -270,9 +270,13 @@ export interface Message {
   data: MessageData;
 }
 
+export type RejectionReason = "user_cancelled" | "policy_denied" | "unavailable";
+
 export interface MessageResponse {
   requestId: string;
   data: boolean;
+  /** Only meaningful for data:false; legacy responses may omit it. */
+  rejection?: RejectionReason;
 }
 
 export interface AwaitingUserMessage {

@@ -1,8 +1,103 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import type Browser from "webextension-polyfill";
 
 import { createVerdictReceiver } from "../verdict-channel";
+import { sendToPortAndAwaitDecision, sendToPortAndAwaitResponse } from "../messages";
+import { RequestType } from "../types";
 
 const KEY = "dambi-test-verdict-port";
+
+function runtimePort() {
+  const messages = new Set<(message: any) => void>();
+  const disconnects = new Set<() => void>();
+  const postMessage = vi.fn();
+  const port = {
+    postMessage,
+    onMessage: {
+      addListener: (fn: (message: any) => void) => messages.add(fn),
+      removeListener: (fn: (message: any) => void) => messages.delete(fn),
+    },
+    onDisconnect: {
+      addListener: (fn: () => void) => disconnects.add(fn),
+      removeListener: (fn: () => void) => disconnects.delete(fn),
+    },
+  } as unknown as Browser.Runtime.Port;
+  return {
+    port, postMessage, messages, disconnects,
+    emit: (message: unknown) => messages.forEach((fn) => fn(message)),
+    disconnect: () => disconnects.forEach((fn) => fn()),
+  };
+}
+
+const payload = {
+  type: RequestType.UNTYPED_SIGNATURE,
+  hostname: "app.example",
+  message: "sign me",
+} as const;
+
+describe("runtime decision hop", () => {
+  it("preserves the original confirmation ID and forwards only its awaiting-user and decision", async () => {
+    const hop = runtimePort();
+    const r = createVerdictReceiver(KEY);
+    const ch = new MessageChannel();
+    dispatchPortInit(ch.port2);
+    let awaiting = 0;
+    const result = r.awaitDecision("original", {
+      phase1Ms: 100, phase2Ms: 500,
+      onAwaitingUser: () => { awaiting++; },
+    });
+    const decision = sendToPortAndAwaitDecision(hop.port, payload, {
+      requestId: "original",
+      onAwaitingUser: () => ch.port1.postMessage({ requestId: "original", kind: "awaiting-user" }),
+    });
+    expect(hop.postMessage).toHaveBeenCalledWith({ requestId: "original", data: payload });
+    hop.emit(null);
+    hop.emit({ requestId: "other", kind: "awaiting-user" });
+    hop.emit({ requestId: "other", data: true });
+    hop.emit({ requestId: "original", kind: "awaiting-user" });
+    await vi.waitFor(() => expect(awaiting).toBe(1));
+    hop.emit({ requestId: "original", data: false, rejection: "user_cancelled" });
+    ch.port1.postMessage(await decision);
+    expect(await result).toEqual({ requestId: "original", data: false, rejection: "user_cancelled" });
+    expect(hop.messages.size).toBe(0);
+    expect(hop.disconnects.size).toBe(0);
+    ch.port1.close();
+    ch.port2.close();
+  });
+
+  it("retains boolean callers and fails closed on malformed data", async () => {
+    for (const data of [true, false, "true", 1, null]) {
+      const hop = runtimePort();
+      const pending = sendToPortAndAwaitResponse(hop.port, payload);
+      const { requestId } = hop.postMessage.mock.calls[0][0];
+      hop.emit({ requestId, data });
+      expect(await pending).toBe(data === true);
+    }
+  });
+
+  it("reports transport failure and both deadlines as unavailable, cleaning up listeners", async () => {
+    vi.useFakeTimers();
+    try {
+      for (const failure of ["write", "disconnect", "timeout", "user-timeout"]) {
+        const hop = runtimePort();
+        if (failure === "write") hop.postMessage.mockImplementation(() => { throw new Error("disconnected"); });
+        const pending = sendToPortAndAwaitDecision(hop.port, payload, { requestId: failure });
+        if (failure === "disconnect") hop.disconnect();
+        if (failure === "user-timeout") {
+          hop.emit({ requestId: failure, kind: "awaiting-user" });
+          await vi.advanceTimersByTimeAsync(300_000);
+        } else if (failure === "timeout") {
+          await vi.advanceTimersByTimeAsync(10_000);
+        }
+        expect(await pending).toEqual({ requestId: failure, data: false, rejection: "unavailable" });
+        expect(hop.messages.size).toBe(0);
+        expect(hop.disconnects.size).toBe(0);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 /**
  * Simulate the ISOLATED content script transferring its reader port to the
@@ -19,6 +114,43 @@ function dispatchPortInit(port: MessagePort, key = KEY): void {
 }
 
 describe("verdict-channel receiver (C1 — page cannot forge a verdict)", () => {
+  it.each([
+    [{ data: true }, { data: true }],
+    [{ data: false }, { data: false, rejection: "unavailable" }],
+    [{ data: false, rejection: "user_cancelled" }, { data: false, rejection: "user_cancelled" }],
+    [{ data: false, rejection: "policy_denied" }, { data: false, rejection: "policy_denied" }],
+    [{ data: false, rejection: "unavailable" }, { data: false, rejection: "unavailable" }],
+    [{ data: false, rejection: "other" }, { data: false, rejection: "unavailable" }],
+    [{ data: false, rejection: {} }, { data: false, rejection: "unavailable" }],
+    [{ data: "true", rejection: "user_cancelled" }, { data: false, rejection: "unavailable" }],
+    [{ data: 1 }, { data: false, rejection: "unavailable" }],
+    [{ data: true, rejection: "user_cancelled" }, { data: false, rejection: "unavailable" }],
+  ])("normalizes authenticated decision %j", async (wire, expected) => {
+    const r = createVerdictReceiver(KEY);
+    const ch = new MessageChannel();
+    dispatchPortInit(ch.port2);
+    const pending = r.awaitDecision("rich", { phase1Ms: 500, phase2Ms: 1000 });
+    ch.port1.postMessage({ requestId: "rich", ...wire });
+    expect(await pending).toEqual({ requestId: "rich", ...expected });
+    ch.port1.close();
+    ch.port2.close();
+  });
+
+  it("reports unavailable without a port and does not borrow another request's cancellation", async () => {
+    const r = createVerdictReceiver(KEY);
+    expect(await r.awaitDecision("no-port", { phase1Ms: 20, phase2Ms: 40 }))
+      .toEqual({ requestId: "no-port", data: false, rejection: "unavailable" });
+    const ch = new MessageChannel();
+    dispatchPortInit(ch.port2);
+    const a = r.awaitDecision("A", { phase1Ms: 100, phase2Ms: 200 });
+    const b = r.awaitDecision("B", { phase1Ms: 100, phase2Ms: 200 });
+    ch.port1.postMessage({ requestId: "A", data: false, rejection: "user_cancelled" });
+    ch.port1.postMessage({ requestId: "B", data: false, rejection: "policy_denied" });
+    expect(await a).toEqual({ requestId: "A", data: false, rejection: "user_cancelled" });
+    expect(await b).toEqual({ requestId: "B", data: false, rejection: "policy_denied" });
+    ch.port1.close();
+    ch.port2.close();
+  });
   it("fail-closes (false) when no authenticated port is ever transferred", async () => {
     const r = createVerdictReceiver(KEY);
     const v = await r.awaitVerdict("rid", { phase1Ms: 20, phase2Ms: 40 });

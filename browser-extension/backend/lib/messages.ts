@@ -1,8 +1,9 @@
 import type { WindowPostMessageStream } from "@metamask/post-message-stream";
 import objectHash from "object-hash";
 import type Browser from "webextension-polyfill";
-import type { AwaitingUserMessage, MessageData, StreamResponse } from "./types";
-import type { VerdictReceiver } from "./verdict-channel";
+import type { AwaitingUserMessage, MessageData, MessageResponse, StreamResponse } from "./types";
+import { normalizeDecision } from "./verdict-channel";
+import type { DecisionVerdictReceiver, VerdictReceiver } from "./verdict-channel";
 
 // Phase-1 covers the SW round-trip from the moment we write to the stream
 // to the moment the SW posts back a verdict. The cold-path budget includes
@@ -125,41 +126,75 @@ export function sendRequestAndAwaitVerdict(
   });
 }
 
-export function sendToPortAndAwaitResponse(
+/** Rich wallet decision; boolean-only callers keep their existing helpers. */
+export async function sendRequestAndAwaitDecision(
+  stream: WindowPostMessageStream,
+  receiver: DecisionVerdictReceiver,
+  data: MessageData,
+): Promise<MessageResponse> {
+  const requestId = generateRequestId(data);
+  try {
+    stream.write({ requestId, data });
+    return await receiver.awaitDecision(requestId, {
+      phase1Ms: PHASE1_MS,
+      phase2Ms: PHASE2_MS,
+    });
+  } catch {
+    return normalizeDecision(undefined, requestId);
+  }
+}
+
+export async function sendToPortAndAwaitResponse(
   port: Browser.Runtime.Port,
   data: MessageData,
 ): Promise<boolean> {
-  const requestId = generateRequestId(data);
+  return (await sendToPortAndAwaitDecision(port, data)).data === true;
+}
 
-  return new Promise<boolean>((resolve) => {
+export function sendToPortAndAwaitDecision(
+  port: Browser.Runtime.Port,
+  data: MessageData,
+  options: { requestId?: string; onAwaitingUser?: () => void } = {},
+): Promise<MessageResponse> {
+  const requestId = options.requestId ?? generateRequestId(data);
+
+  return new Promise<MessageResponse>((resolve) => {
     let settled = false;
     let timer: ReturnType<typeof setTimeout>;
 
-    const finish = (value: boolean) => {
+    const finish = (value: MessageResponse) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       port.onMessage.removeListener(onMessage);
+      port.onDisconnect?.removeListener(onDisconnect);
       resolve(value);
     };
+    const onDisconnect = () => finish(normalizeDecision(undefined, requestId));
 
     const armTimer = (ms: number) => {
       clearTimeout(timer);
-      timer = setTimeout(() => finish(false), ms);
+      timer = setTimeout(onDisconnect, ms);
     };
 
     const onMessage = (response: StreamResponse) => {
-      if (response.requestId !== requestId) return;
+      if (!response || typeof response !== "object" || response.requestId !== requestId) return;
       if (isAwaitingUser(response)) {
         armTimer(PHASE2_MS);
+        options.onAwaitingUser?.();
         return;
       }
-      finish(response.data);
+      finish(normalizeDecision(response, requestId));
     };
 
     port.onMessage.addListener(onMessage);
+    port.onDisconnect?.addListener(onDisconnect);
     armTimer(PHASE1_MS);
-    port.postMessage({ requestId, data });
+    try {
+      port.postMessage({ requestId, data });
+    } catch {
+      onDisconnect();
+    }
   });
 }
 

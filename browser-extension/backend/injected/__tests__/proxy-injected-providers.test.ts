@@ -4,7 +4,7 @@ import { Identifier } from "@lib/identifier";
 
 const streamState = vi.hoisted(() => ({
   instances: [] as MockStream[],
-  responses: [] as boolean[],
+  responses: [] as (boolean | { data: unknown; rejection?: unknown })[],
   // C1: verdicts now travel over an authenticated MessageChannel, not the
   // stream. The harness simulates the ISOLATED bridge: it transfers a port to
   // the MAIN-world receiver (created at module import) and posts verdicts over
@@ -62,7 +62,10 @@ class MockStream {
     const port = ensureVerdictPort();
     streamState.beforeVerdict?.(message);
     queueMicrotask(() => {
-      port.postMessage({ requestId: message.requestId, data });
+      port.postMessage({
+        requestId: message.requestId,
+        ...(typeof data === "boolean" ? { data } : data),
+      });
     });
     return true;
   }
@@ -102,6 +105,44 @@ describe("inpage provider proxy", () => {
     streamState.beforeVerdict = null;
     vi.stubGlobal("location", { hostname: "app.example" });
     delete (window as any).ethereum;
+  });
+
+  it.each([
+    ["eth_sendTransaction", "transaction"],
+    ["eth_signTransaction", "transaction"],
+    ["eth_signTypedData_v4", "signature"],
+    ["personal_sign", "signature"],
+    ["eth_sign", "signature"],
+  ])("propagates request-scoped rejection text for %s without forwarding", async (method, action) => {
+    await import("../proxy-injected-providers");
+    const originalRequest = vi.fn(async () => "sent");
+    (window as any).ethereum = { chainId: "0x1", request: originalRequest };
+    const address = "0x1111111111111111111111111111111111111111";
+    const params = action === "transaction"
+      ? [{ from: address, to: address, data: "0x" }]
+      : method === "eth_signTypedData_v4"
+        ? [address, { domain: { chainId: 1 }, message: { ok: true } }]
+        : method === "eth_sign" ? [address, "sign me"] : ["sign me", address];
+    for (const [response, detail] of [
+      [{ data: false, rejection: "user_cancelled" }, "rejected by user"],
+      [{ data: false, rejection: "policy_denied" }, "blocked by policy"],
+      [{ data: false, rejection: "unavailable" }, "blocked: policy evaluation unavailable"],
+      [false, "blocked: policy evaluation unavailable"],
+      [{ data: false, rejection: "invalid" }, "blocked: policy evaluation unavailable"],
+      [{ data: "true" }, "blocked: policy evaluation unavailable"],
+    ] as const) {
+      streamState.responses.push(response);
+      await expect((window as any).ethereum.request({ method, params })).rejects.toMatchObject({
+        code: 4001,
+        message: `Dambi: ${action} ${detail}`,
+      });
+    }
+    expect(originalRequest).not.toHaveBeenCalled();
+    expect(policyWrites()).toHaveLength(6);
+    // A later explicit allow must not inherit any earlier rejection.
+    streamState.responses.push(true);
+    await expect((window as any).ethereum.request({ method, params })).resolves.toBe("sent");
+    expect(originalRequest).toHaveBeenCalledTimes(1);
   });
 
   it("wraps a provider assigned to window.ethereum before the first request", async () => {
@@ -875,7 +916,7 @@ describe("inpage provider proxy", () => {
   });
 
   it("checks metamask_batch inner wallet actions before forwarding the batch", async () => {
-    streamState.responses.push(true, false);
+    streamState.responses.push(true, { data: false, rejection: "user_cancelled" });
     const originalRequest = vi.fn(
       async (_request: { method?: string }) => "sent",
     );
@@ -915,7 +956,7 @@ describe("inpage provider proxy", () => {
           ],
         ],
       }),
-    ).rejects.toMatchObject({ code: 4001 });
+    ).rejects.toMatchObject({ code: 4001, message: "Dambi: signature rejected by user" });
 
     expect(
       originalRequest.mock.calls.filter(
@@ -936,7 +977,7 @@ describe("inpage provider proxy", () => {
   });
 
   it("gates every wallet_sendCalls call as a transaction and blocks on any denial", async () => {
-    streamState.responses.push(true, false);
+    streamState.responses.push(true, { data: false, rejection: "policy_denied" });
     const originalRequest = vi.fn(
       async (_request: { method?: string }) => "sent",
     );
@@ -970,7 +1011,7 @@ describe("inpage provider proxy", () => {
           },
         ],
       }),
-    ).rejects.toMatchObject({ code: 4001 });
+    ).rejects.toMatchObject({ code: 4001, message: "Dambi: transaction blocked by policy" });
 
     expect(
       originalRequest.mock.calls.filter(

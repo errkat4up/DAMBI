@@ -2,7 +2,7 @@ import { WindowPostMessageStream } from "@metamask/post-message-stream";
 import { ethErrors } from "eth-rpc-errors";
 import { Identifier, PROVIDER_MARKER } from "@lib/identifier";
 import {
-  sendRequestAndAwaitVerdict,
+  sendRequestAndAwaitDecision,
   sendToStreamAndDisregard,
 } from "@lib/messages";
 import { createVerdictReceiver } from "@lib/verdict-channel";
@@ -86,6 +86,24 @@ const REJECT_TX = ethErrors.provider.userRejectedRequest(
 const REJECT_SIG = ethErrors.provider.userRejectedRequest(
   "Dambi: signature blocked by policy",
 );
+
+// Throw at the individual decision site so batch legs and concurrent requests
+// keep their own reason and action kind; never store a process-wide last reason.
+async function sendRequestAndAwaitVerdict(
+  requestStream: WindowPostMessageStream,
+  receiver: typeof verdictReceiver,
+  data: MessageData,
+): Promise<boolean> {
+  const decision = await sendRequestAndAwaitDecision(requestStream, receiver, data);
+  if (decision.data === true) return true;
+  const action = data.type === RequestType.TRANSACTION ? "transaction" : "signature";
+  const detail = decision.rejection === "user_cancelled"
+    ? "rejected by user"
+    : decision.rejection === "policy_denied"
+      ? "blocked by policy"
+      : "blocked: policy evaluation unavailable";
+  throw ethErrors.provider.userRejectedRequest(`Dambi: ${action} ${detail}`);
+}
 
 const TYPED_SIGNATURE_METHODS = new Set([
   "eth_signTypedData",
