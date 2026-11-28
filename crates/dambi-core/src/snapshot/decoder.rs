@@ -7,6 +7,8 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 
+use serde::Deserialize;
+use serde_json::value::RawValue;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
@@ -14,6 +16,11 @@ use crate::bundle::{strict_json, PolicyParseErrorKind, TrustedKeys};
 use crate::decode::DecoderRegistry;
 
 use super::{DecoderInput, SnapshotError, SnapshotErrorKind};
+
+// SHA-256 of the exact package corpus whose raw bundle slices passed the
+// native strict-JSON / JCS equivalence gate below. The caller's own pin is
+// checked independently. An empty certificate disables this optimization.
+include!("packaged_decoder_digest.rs");
 
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 // Bound expansion work as well as input bytes: legacy chain_ids × to is a
@@ -83,6 +90,7 @@ pub(super) fn prepare_decoder(
             "maxDecoderBytes must be positive",
         ));
     }
+    let mut packaged_slices = Vec::new();
     let (bundles, digest, trust) = match input {
         DecoderInput::Pinned {
             artifact,
@@ -99,35 +107,16 @@ pub(super) fn prepare_decoder(
             require_digest(&digest, expected_digest)?;
             let input = std::str::from_utf8(artifact)
                 .map_err(|_| invalid("$", "decoder artifact is not valid UTF-8"))?;
-            let mut container = strict_json::parse(input).map_err(|error| {
-                let kind = match error.kind {
-                    PolicyParseErrorKind::InputTooLarge | PolicyParseErrorKind::DepthLimit => {
-                        SnapshotErrorKind::LimitExceeded
-                    }
-                    _ => SnapshotErrorKind::InvalidDecoderSnapshot,
-                };
-                SnapshotError::new(kind, format!("{}: {}", error.path, error.message))
-            })?;
-            let fields = object(&container, "$", &["schema_version", "bundles"])?;
-            if fields.get("schema_version").and_then(Value::as_u64) != Some(1) {
-                return Err(invalid("$/schema_version", "must be integer 1"));
-            }
-            let bundles = container
-                .get_mut("bundles")
-                .ok_or_else(|| invalid("$", "missing bundles"))?
-                .as_array_mut()
-                .ok_or_else(|| invalid("$/bundles", "must be an array"))?;
-            if bundles.is_empty() {
-                return Err(invalid(
-                    "$/bundles",
-                    "must contain at least one full V3 bundle",
-                ));
-            }
-            (
-                std::mem::take(bundles),
-                digest,
-                DecoderTrust::PinnedArtifact,
-            )
+            let packaged = (digest == PACKAGED_DECODER_DIGEST)
+                .then(|| parse_packaged(input))
+                .flatten();
+            let bundles = if let Some((values, slices)) = packaged {
+                packaged_slices = slices;
+                values
+            } else {
+                parse_pinned(input)?
+            };
+            (bundles, digest, DecoderTrust::PinnedArtifact)
         }
         DecoderInput::SignedBundle {
             bundle,
@@ -163,8 +152,15 @@ pub(super) fn prepare_decoder(
         if !seen_ids.insert(id.to_owned()) {
             return Err(invalid(&path, "duplicate bundle id"));
         }
-        let canonical = serde_json_canonicalizer::to_vec(&bundle)
-            .map_err(|error| invalid(&path, format!("JCS serialization failed: {error}")))?;
+        let bundle_digest = match packaged_slices.get(index) {
+            Some(raw) => sha256(raw.get().as_bytes()),
+            None => {
+                let canonical = serde_json_canonicalizer::to_vec(&bundle).map_err(|error| {
+                    invalid(&path, format!("JCS serialization failed: {error}"))
+                })?;
+                sha256(&canonical)
+            }
+        };
         bundle_ids.push(id.to_owned());
         registry.install_parsed(bundle).map_err(|error| {
             let kind = if error.kind == "input_too_large" {
@@ -174,7 +170,7 @@ pub(super) fn prepare_decoder(
             };
             SnapshotError::new(kind, format!("{path}: {}", error.message))
         })?;
-        bundle_digests.push(sha256(&canonical));
+        bundle_digests.push(bundle_digest);
     }
     Ok(VerifiedDecoderSnapshot {
         registry,
@@ -183,6 +179,57 @@ pub(super) fn prepare_decoder(
         bundle_digests,
         trust,
     })
+}
+
+fn parse_pinned(input: &str) -> Result<Vec<Value>, SnapshotError> {
+    let mut container = strict_json::parse(input).map_err(|error| {
+        let kind = match error.kind {
+            PolicyParseErrorKind::InputTooLarge | PolicyParseErrorKind::DepthLimit => {
+                SnapshotErrorKind::LimitExceeded
+            }
+            _ => SnapshotErrorKind::InvalidDecoderSnapshot,
+        };
+        SnapshotError::new(kind, format!("{}: {}", error.path, error.message))
+    })?;
+    let fields = object(&container, "$", &["schema_version", "bundles"])?;
+    if fields.get("schema_version").and_then(Value::as_u64) != Some(1) {
+        return Err(invalid("$/schema_version", "must be integer 1"));
+    }
+    let bundles = container
+        .get_mut("bundles")
+        .ok_or_else(|| invalid("$", "missing bundles"))?
+        .as_array_mut()
+        .ok_or_else(|| invalid("$/bundles", "must be an array"))?;
+    if bundles.is_empty() {
+        return Err(invalid(
+            "$/bundles",
+            "must contain at least one full V3 bundle",
+        ));
+    }
+    Ok(std::mem::take(bundles))
+}
+
+// Only the exact certified corpus may use ordinary serde and the original
+// child bytes as JCS. A parse mismatch returns to the strict path.
+fn parse_packaged(input: &str) -> Option<(Vec<Value>, Vec<&RawValue>)> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Container<'a> {
+        schema_version: u64,
+        #[serde(borrow)]
+        bundles: Vec<&'a RawValue>,
+    }
+    let container: Container = serde_json::from_str(input).ok()?;
+    if container.schema_version != 1 || container.bundles.is_empty() {
+        return None;
+    }
+    let values = container
+        .bundles
+        .iter()
+        .map(|raw| serde_json::from_str(raw.get()))
+        .collect::<Result<_, _>>()
+        .ok()?;
+    Some((values, container.bundles))
 }
 
 fn sha256(bytes: &[u8]) -> String {
@@ -1121,4 +1168,47 @@ fn validate_requires(value: &Value, strategy: &str, path: &str) -> Result<(), Sn
     // Adapter/host capabilities describe request-time inputs. Their declared
     // shape is checked here; this type does not promise those inputs exist.
     Ok(())
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[test]
+fn certify_packaged_decoder() {
+    // The SDK isolated build runs this native test before compiling WASM.
+    // To replace the pin after changing the committed package, run
+    // DAMBI_REGENERATE_DECODER_PIN=1 cargo test -p dambi-core --lib certify_packaged_decoder
+    // An uncertifiable new corpus can ship on the strict path with an empty pin.
+    let regenerate = std::env::var("DAMBI_REGENERATE_DECODER_PIN").as_deref() == Ok("1");
+    if !regenerate && PACKAGED_DECODER_DIGEST.is_empty() {
+        return;
+    }
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let input = std::fs::read_to_string(
+        root.join("../../packages/core/decoder-snapshots/full/snapshot.json"),
+    )
+    .unwrap();
+    let strict = parse_pinned(&input).unwrap();
+    let (values, raw) = parse_packaged(&input).unwrap();
+    assert_eq!(strict.len(), raw.len());
+    assert_eq!(strict, values);
+    for (value, slice) in strict.iter().zip(raw) {
+        assert_eq!(
+            serde_json_canonicalizer::to_vec(value).unwrap(),
+            slice.get().as_bytes(),
+            "packaged bundle {} is not stored as its native JCS",
+            value["id"]
+        );
+    }
+    let actual = sha256(input.as_bytes());
+    if regenerate {
+        std::fs::write(
+            root.join("src/snapshot/packaged_decoder_digest.rs"),
+            format!("// Generated by the native certify_packaged_decoder test.\nconst PACKAGED_DECODER_DIGEST: &str = {actual:?};\n"),
+        )
+        .unwrap();
+    } else {
+        assert_eq!(
+            actual, PACKAGED_DECODER_DIGEST,
+            "recertify the new package or clear the pin to use the strict decoder"
+        );
+    }
 }

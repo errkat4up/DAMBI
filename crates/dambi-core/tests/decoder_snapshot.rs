@@ -635,3 +635,49 @@ fn external_bundle_requires_decoder_role_signature_and_requested_jcs_digest() {
         );
     }
 }
+
+#[test]
+fn packaged_and_strict_installs_preserve_all_ordered_ids_and_jcs_digests() {
+    let bytes = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/core/decoder-snapshots/full/snapshot.json"),
+    )
+    .unwrap();
+    let packaged = artifact_bytes(bytes);
+    let mut other = packaged.bytes.clone();
+    other.push(b'\n');
+    let strict = artifact_bytes(other);
+    let mut limits = config();
+    limits.max_decoder_bytes = strict.bytes.len();
+    expect_code(
+        SnapshotStore::new(
+            limits.clone(),
+            DecoderInput::Pinned {
+                artifact: &strict.bytes,
+                expected_digest: &packaged.digest,
+            },
+            day1().input(),
+            NOW,
+        ),
+        "DECODER_INTEGRITY_MISMATCH",
+    );
+    let fast = SnapshotStore::new(limits.clone(), packaged.input(), day1().input(), NOW).unwrap();
+    let reference =
+        SnapshotStore::new(limits.clone(), strict.input(), day1().input(), NOW).unwrap();
+    let fast = fast.current(NOW).unwrap();
+    let reference = reference.current(NOW).unwrap();
+    assert_ne!(fast.decoder().digest(), reference.decoder().digest());
+    assert_eq!(
+        fast.decoder().bundle_ids(),
+        reference.decoder().bundle_ids()
+    );
+    assert_eq!(
+        fast.decoder().bundle_digests(),
+        reference.decoder().bundle_digests()
+    );
+    limits.max_decoder_bytes = packaged.bytes.len() - 1;
+    expect_code(
+        SnapshotStore::new(limits, packaged.input(), day1().input(), NOW),
+        "LIMIT_EXCEEDED",
+    );
+}
