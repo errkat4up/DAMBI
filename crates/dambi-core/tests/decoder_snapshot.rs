@@ -645,7 +645,13 @@ fn packaged_and_strict_installs_preserve_all_ordered_ids_and_jcs_digests() {
     .unwrap();
     let packaged = artifact_bytes(bytes);
     let mut other = packaged.bytes.clone();
-    other.push(b'\n');
+    // Change the first bundle's raw bytes without changing its JCS identity.
+    let bundles = other.iter().position(|&byte| byte == b'[').unwrap();
+    let first_bundle = other[bundles..]
+        .iter()
+        .position(|&byte| byte == b'{')
+        .unwrap();
+    other.insert(bundles + first_bundle + 1, b' ');
     let strict = artifact_bytes(other);
     let mut limits = config();
     limits.max_decoder_bytes = strict.bytes.len();
