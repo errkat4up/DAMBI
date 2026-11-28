@@ -159,6 +159,53 @@ test("missing publication, ambiguous IDs, mismatched records and worker loss nev
   assert.deepEqual(fresh.finish("publication_not_observed"), []);
 });
 
+test("reused IDs after terminal publications stay duplicate without changing first or unrelated outcomes", t => {
+  const unavailable = { kind: "unavailable", reason: "timeout" };
+  const invalid = { ...warning, version: 2 };
+  for (const [display, first] of [
+    [warning, { id: 1, outcome: "result", kind: "report", status: "warn", reportedTargets: 1, durationMs: 10 }],
+    [unavailable, { id: 1, outcome: "result", kind: "unavailable", timedOut: true, durationMs: 10 }],
+    [invalid, { id: 1, outcome: "missing", reason: "invalid_publication" }],
+  ]) {
+    const capture = collectScamHostTrials(), events = [];
+    const w = worker({ accept(row) { events.push(row); capture.accept(row); } });
+    t.after(w.stop);
+    w.start("reused", 10);
+    w.publish("reused", 20, display);
+    assert.deepEqual(capture.finish("publication_not_observed"), [first]);
+    w.start("fresh", 30);
+
+    const duplicates = [];
+    for (const [index, replay] of [warning, unavailable, invalid].entries()) {
+      const id = index + 3, at = 40 + index * 10;
+      w.start("reused", at);
+      const duplicate = { id, outcome: "missing", reason: "duplicate_request_id" };
+      duplicates.push(duplicate);
+      assert.deepEqual(capture.finish("publication_not_observed").at(-1), duplicate,
+        "Every reused start is terminal immediately, before any replay");
+      const beforeReplay = events.length;
+      w.publish("reused", at + 5, replay);
+      assert.equal(events.length, beforeReplay, "Replayed publications emit no new terminal outcome");
+    }
+
+    w.publish("fresh", 80, warning);
+    assert.deepEqual(capture.finish("publication_not_observed"), [
+      first,
+      { id: 2, outcome: "result", kind: "report", status: "warn", reportedTargets: 1, durationMs: 50 },
+      ...duplicates,
+    ]);
+    const { outcome, ...fields } = first;
+    assert.deepEqual(events.filter(row => row.id === 1), [
+      { event: "start", id: 1 }, { event: outcome, ...fields },
+    ], "The observer itself never revises the first terminal outcome");
+    w.stop();
+    const beforeStoppedTraffic = events.length;
+    w.start("reused", 90);
+    w.publish("reused", 100, warning);
+    assert.equal(events.length, beforeStoppedTraffic);
+  }
+});
+
 test("remote debug transports are refused before retrieving browser targets", async () => {
   for (const endpoint of ["https://example.com", "http://example.com:9222", "http://user@127.0.0.1:9222"]) {
     await assert.rejects(probeScamHost(endpoint, "a".repeat(32), 100), /loopback/);

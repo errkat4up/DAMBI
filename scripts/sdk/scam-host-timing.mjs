@@ -44,7 +44,9 @@ export function observeScamHost(scope, publish) {
       const requestId = key.slice(prefix.length);
       const trial = active.get(requestId);
       if (!trial?.id) continue;
-      active.delete(requestId);
+      // Retain the sentinel until disposal: a later publication cannot identify
+      // which occurrence of a reused request ID it belongs to.
+      active.set(requestId, {});
       const record = change.newValue;
       const display = record.display;
       const report = display?.report;
