@@ -113,6 +113,9 @@ const TYPED_SIGNATURE_METHODS = new Set([
 const UNTYPED_SIGNATURE_METHODS = new Set(["eth_sign", "personal_sign"]);
 
 const chainIdCache = new WeakMap<object, number>();
+// An event supersedes both the provider field and reads started before it.
+// Keep the revision even for invalid events: unknown must invalidate old facts.
+const chainIdRevisions = new WeakMap<object, number>();
 const chainIdListeners = new WeakSet<object>();
 const wrappedProviders = new WeakSet<object>();
 const unwrappableProviders = new WeakSet<object>();
@@ -137,16 +140,23 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function looksLikeAddress(value: unknown): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(String(value));
+function looksLikeAddress(value: unknown): value is `0x${string}` {
+  return typeof value === "string" && /^0x[0-9a-fA-F]{40}$/.test(value);
 }
 
 function parseChainId(value: unknown): number | undefined {
-  const parsed =
-    typeof value === "string" && value.startsWith("0x")
-      ? Number.parseInt(value, 16)
-      : Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  if (
+    typeof value !== "number" &&
+    !(typeof value === "string" && /^(?:0x[0-9a-fA-F]+|[0-9]+)$/.test(value))
+  ) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function unavailableChain(action: "transaction" | "signature"): never {
+  throw ethErrors.provider.userRejectedRequest(
+    `Dambi: ${action} blocked: policy evaluation unavailable`,
+  );
 }
 
 function rememberChainId(
@@ -155,6 +165,7 @@ function rememberChainId(
 ): number | undefined {
   const parsed = parseChainId(value);
   if (parsed !== undefined) chainIdCache.set(provider, parsed);
+  else chainIdCache.delete(provider);
   return parsed;
 }
 
@@ -163,6 +174,7 @@ function installChainIdListener(provider: Eip1193Provider): void {
     return;
   try {
     provider.on("chainChanged", (chainId) => {
+      chainIdRevisions.set(provider, (chainIdRevisions.get(provider) ?? 0) + 1);
       rememberChainId(provider, chainId);
     });
     chainIdListeners.add(provider);
@@ -174,32 +186,38 @@ function installChainIdListener(provider: Eip1193Provider): void {
 async function readChainId(
   provider: Eip1193Provider,
   request: ProviderRequest | undefined = provider.request,
+  action: "transaction" | "signature" = "transaction",
 ): Promise<number> {
-  const providerChainId = rememberChainId(provider, provider.chainId);
-  if (providerChainId !== undefined) return providerChainId;
+  const known = knownChainId(provider);
+  if (known !== undefined) return known;
+  // A malformed current observation is not permission to reuse an old chain.
+  if (chainIdRevisions.has(provider) || provider.chainId !== undefined) {
+    return unavailableChain(action);
+  }
+  if (typeof request !== "function") return unavailableChain(action);
 
-  const cached = chainIdCache.get(provider);
-  if (cached !== undefined) return cached;
-
+  const revision = chainIdRevisions.get(provider);
+  let timer: number | undefined;
+  let result: unknown;
   try {
-    if (typeof request !== "function") return 1;
-    const result = await Promise.race([
+    result = await Promise.race([
       Reflect.apply(request, provider, [{ method: "eth_chainId" }]),
       new Promise<never>((_, reject) => {
-        window.setTimeout(
+        timer = window.setTimeout(
           () => reject(new Error("Dambi: chainId timeout")),
           1_500,
         );
       }),
     ]);
-    return (
-      rememberChainId(provider, result) ??
-      rememberChainId(provider, provider.chainId) ??
-      1
-    );
   } catch {
-    return rememberChainId(provider, provider.chainId) ?? 1;
+    // A chainChanged event received during a failed read still wins below.
+  } finally {
+    if (timer !== undefined) window.clearTimeout(timer);
   }
+  const chainId = chainIdRevisions.get(provider) !== revision
+    ? chainIdCache.get(provider)
+    : rememberChainId(provider, result);
+  return chainId ?? unavailableChain(action);
 }
 
 async function readConnectedAccount(
@@ -228,12 +246,14 @@ async function readConnectedAccount(
 async function checkTransaction(
   provider: Eip1193Provider,
   params: unknown[],
+  method: string,
   chainIdOverride?: number,
   readRequest?: ProviderRequest,
 ): Promise<boolean> {
   const [transaction] = params;
   const tx = asRecord(transaction);
   if (!tx) return false;
+  const chainId = chainIdOverride ?? (await readChainId(provider, readRequest));
   const from = looksLikeAddress(tx.from)
     ? String(tx.from)
     : await readConnectedAccount(provider, readRequest);
@@ -249,7 +269,8 @@ async function checkTransaction(
 
   const data = {
     type: RequestType.TRANSACTION,
-    chainId: chainIdOverride ?? (await readChainId(provider, readRequest)),
+    method,
+    chainId,
     hostname: location.hostname,
     transaction: policyTransaction,
   } as MessageData;
@@ -268,9 +289,9 @@ async function checkWalletSendCalls(
   if (!calls) return false;
   if (calls.length === 0) return true;
 
-  const chainId =
-    parseChainId(envelope?.chainId) ??
-    (await readChainId(provider, readRequest));
+  const chainId = envelope.chainId === undefined
+    ? await readChainId(provider, readRequest)
+    : parseChainId(envelope.chainId) ?? unavailableChain("transaction");
   const walletFrom = looksLikeAddress(envelope.from)
     ? String(envelope.from)
     : await readConnectedAccount(provider, readRequest);
@@ -292,6 +313,7 @@ async function checkWalletSendCalls(
     const isCallAllowed = await checkTransaction(
       provider,
       [transaction],
+      "wallet_sendCalls",
       chainId,
       readRequest,
     );
@@ -301,49 +323,70 @@ async function checkWalletSendCalls(
   return true;
 }
 
+function signatureParams(
+  method: string,
+  params: unknown[],
+): { address?: `0x${string}`; message: unknown } {
+  const [first, second] = params;
+  // personal_sign is [message, signer]; eth_sign and typed methods are
+  // [signer, message]. When both are addresses, the method's order wins.
+  if (second === undefined || second === null) {
+    return {
+      message: method !== "personal_sign" && looksLikeAddress(first)
+        ? undefined
+        : first,
+    };
+  }
+  const [signer, message] = method === "personal_sign"
+    ? [second, first]
+    : [first, second];
+  if (looksLikeAddress(signer)) return { address: signer, message };
+  // Tolerate the reversed two-parameter form only when there is one address
+  // and an actual other payload, never promote a lone message to a signer.
+  if (signer !== undefined && signer !== null && looksLikeAddress(message)) {
+    return { address: message, message: signer };
+  }
+  return { message: method === "personal_sign" ? first : second };
+}
+
 async function checkTypedSignature(
   provider: Eip1193Provider,
   params: unknown[],
+  method: string,
   readRequest?: ProviderRequest,
 ): Promise<boolean> {
-  const [first, second] = params;
-  // EIP-712 convention is params=[signer, typedData]; tolerate the reversed
-  // order. `typedData` is whichever param is NOT the 40-hex signer address.
-  const typedData = looksLikeAddress(first) ? second : first;
-  // Only skip when there is genuinely no typed-data payload to evaluate. A
-  // missing / non-address signer must NOT waive the verdict (F2-1): the SW
-  // routes on (verifyingContract, primaryType), not `from`, so fall back to the
-  // zero address and still evaluate the payload rather than passing it through.
+  const { address, message: typedData } = signatureParams(method, params);
   if (typedData === undefined || typedData === null) return true;
-  const signer = looksLikeAddress(first)
-    ? first
-    : looksLikeAddress(second)
-      ? second
-      : `0x${"0".repeat(40)}`;
+  const chainId = await readChainId(provider, readRequest, "signature");
 
   return sendRequestAndAwaitVerdict(stream, verdictReceiver, {
     type: RequestType.TYPED_SIGNATURE,
-    chainId: await readChainId(provider, readRequest),
+    // Keep the zero-address routing fallback, but do not publish complete
+    // correlation metadata for a fabricated signer. Absent method remains the
+    // conservative legacy shape; it must not be treated as a normal match.
+    ...(address ? { method } : {}),
+    chainId,
     hostname: location.hostname,
-    address: String(signer) as `0x${string}`,
+    address: address ?? `0x${"0".repeat(40)}`,
     typedData,
   });
 }
 
-function untypedSignatureMessage(params: unknown[]): unknown {
-  const [first, second] = params;
-  if (looksLikeAddress(first)) return second;
-  if (first !== undefined && first !== null) return first;
-  if (!looksLikeAddress(second)) return second;
-  return undefined;
-}
-
-async function checkUntypedSignature(params: unknown[]): Promise<boolean> {
-  const message = untypedSignatureMessage(params);
+async function checkUntypedSignature(
+  provider: Eip1193Provider,
+  params: unknown[],
+  method: string,
+  readRequest?: ProviderRequest,
+): Promise<boolean> {
+  const { address, message } = signatureParams(method, params);
   if (message === undefined || message === null) return true;
+  const chainId = await readChainId(provider, readRequest, "signature");
 
   return sendRequestAndAwaitVerdict(stream, verdictReceiver, {
     type: RequestType.UNTYPED_SIGNATURE,
+    method,
+    ...(address ? { address } : {}),
+    chainId,
     hostname: location.hostname,
     message: String(message),
   });
@@ -381,24 +424,13 @@ async function ensureAllowed(
   params: unknown[],
   readRequest?: ProviderRequest,
 ): Promise<void> {
-  if (method === "eth_sendTransaction") {
+  if (method === "eth_sendTransaction" || method === "eth_signTransaction") {
+    // N8: sign-without-broadcast still requires transaction evaluation, but
+    // retain its actual method rather than claiming it was a send.
     const isOk = await checkTransaction(
       provider,
       params,
-      undefined,
-      readRequest,
-    );
-    if (!isOk) throw REJECT_TX;
-    return;
-  }
-
-  if (method === "eth_signTransaction") {
-    // N8: sign-without-broadcast carries full tx params, and a signed tx can be
-    // raw-broadcast elsewhere. Evaluate it exactly like eth_sendTransaction
-    // rather than letting it through ungated/unlogged.
-    const isOk = await checkTransaction(
-      provider,
-      params,
+      method,
       undefined,
       readRequest,
     );
@@ -418,13 +450,13 @@ async function ensureAllowed(
   }
 
   if (method && TYPED_SIGNATURE_METHODS.has(method)) {
-    const isOk = await checkTypedSignature(provider, params, readRequest);
+    const isOk = await checkTypedSignature(provider, params, method, readRequest);
     if (!isOk) throw REJECT_SIG;
     return;
   }
 
   if (method && UNTYPED_SIGNATURE_METHODS.has(method)) {
-    const isOk = await checkUntypedSignature(params);
+    const isOk = await checkUntypedSignature(provider, params, method, readRequest);
     if (!isOk) throw REJECT_SIG;
     return;
   }
@@ -455,7 +487,11 @@ function chainCaip2(chainId: number): string {
 }
 
 function knownChainId(provider: Eip1193Provider): number | undefined {
-  return chainIdCache.get(provider) ?? rememberChainId(provider, provider.chainId);
+  if (chainIdRevisions.has(provider)) return chainIdCache.get(provider);
+  if (provider.chainId !== undefined) {
+    return rememberChainId(provider, provider.chainId);
+  }
+  return chainIdCache.get(provider);
 }
 
 function resultChainId(
@@ -469,11 +505,8 @@ function resultChainId(
   return knownChainId(provider);
 }
 
-function signatureAddress(params: unknown[]): string | undefined {
-  const [first, second] = params;
-  if (looksLikeAddress(first)) return String(first);
-  if (looksLikeAddress(second)) return String(second);
-  return undefined;
+function signatureAddress(method: string, params: unknown[]): string | undefined {
+  return signatureParams(method, params).address;
 }
 
 function evaluatedTransactionAddress(params: unknown[]): string | undefined {
@@ -505,7 +538,7 @@ function reportWalletId(
       : method &&
           (TYPED_SIGNATURE_METHODS.has(method) ||
             UNTYPED_SIGNATURE_METHODS.has(method))
-        ? signatureAddress(params)
+        ? signatureAddress(method, params)
         : undefined;
   const chainId = resultChainId(provider, method, params);
   if (!address || chainId === undefined) return undefined;

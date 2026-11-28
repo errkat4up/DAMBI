@@ -14,6 +14,7 @@ export enum RequestType {
 
 export interface TransactionPayload {
   type: RequestType.TRANSACTION;
+  method?: string;
   chainId: number;
   hostname: string;
   bypassed?: boolean;
@@ -27,6 +28,7 @@ export interface TransactionPayload {
 
 export interface TypedSignaturePayload {
   type: RequestType.TYPED_SIGNATURE;
+  method?: string;
   chainId: number;
   hostname: string;
   bypassed?: boolean;
@@ -36,6 +38,9 @@ export interface TypedSignaturePayload {
 
 export interface UntypedSignaturePayload {
   type: RequestType.UNTYPED_SIGNATURE;
+  method?: string;
+  address?: Address | undefined;
+  chainId?: number;
   hostname: string;
   bypassed?: boolean;
   message: string;

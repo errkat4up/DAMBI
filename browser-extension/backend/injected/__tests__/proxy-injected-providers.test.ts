@@ -1,6 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Identifier } from "@lib/identifier";
+import { RequestType } from "@lib/types";
+import type { MessageData, TypedSignaturePayload, UntypedSignaturePayload } from "@lib/types";
+
+const SIGNER = "0x1111111111111111111111111111111111111111";
+const ADDRESS_MESSAGE = "0x2222222222222222222222222222222222222222";
+
+interface TestRequest {
+  method?: string;
+  params?: unknown;
+}
+
+function signaturePolicy(index = 0): TypedSignaturePayload | UntypedSignaturePayload {
+  const data = policyWrites()[index]?.data as MessageData;
+  if (data.type !== RequestType.TYPED_SIGNATURE && data.type !== RequestType.UNTYPED_SIGNATURE) {
+    throw new Error("Expected signature policy request");
+  }
+  return data;
+}
 
 const streamState = vi.hoisted(() => ({
   instances: [] as MockStream[],
@@ -110,6 +128,8 @@ describe("inpage provider proxy", () => {
   it.each([
     ["eth_sendTransaction", "transaction"],
     ["eth_signTransaction", "transaction"],
+    ["eth_signTypedData", "signature"],
+    ["eth_signTypedData_v3", "signature"],
     ["eth_signTypedData_v4", "signature"],
     ["personal_sign", "signature"],
     ["eth_sign", "signature"],
@@ -120,7 +140,7 @@ describe("inpage provider proxy", () => {
     const address = "0x1111111111111111111111111111111111111111";
     const params = action === "transaction"
       ? [{ from: address, to: address, data: "0x" }]
-      : method === "eth_signTypedData_v4"
+      : method.startsWith("eth_signTypedData")
         ? [address, { domain: { chainId: 1 }, message: { ok: true } }]
         : method === "eth_sign" ? [address, "sign me"] : ["sign me", address];
     for (const [response, detail] of [
@@ -139,6 +159,10 @@ describe("inpage provider proxy", () => {
     }
     expect(originalRequest).not.toHaveBeenCalled();
     expect(policyWrites()).toHaveLength(6);
+    for (const write of policyWrites()) {
+      expect(write.data).toMatchObject({ method, chainId: 1 });
+      if (action === "signature") expect(write.data).toMatchObject({ address });
+    }
     // A later explicit allow must not inherit any earlier rejection.
     streamState.responses.push(true);
     await expect((window as any).ethereum.request({ method, params })).resolves.toBe("sent");
@@ -506,6 +530,8 @@ describe("inpage provider proxy", () => {
     expect(policyWrites()[0].data).toEqual(
       expect.objectContaining({
         type: "typed-signature",
+        method: "eth_signTypedData",
+        chainId: 1,
         address,
         typedData,
       }),
@@ -542,6 +568,8 @@ describe("inpage provider proxy", () => {
         typedData,
       }),
     );
+    // Routing fallback must not look like a complete normal correlation fact.
+    expect(policyWrites()[0].data).not.toHaveProperty("method");
     expect(
       originalRequest.mock.calls.map(([request]) => request.method),
     ).toEqual(["eth_chainId"]);
@@ -554,6 +582,7 @@ describe("inpage provider proxy", () => {
 
     const originalRequest = vi.fn(async () => "0xsigned");
     (window as any).ethereum = {
+      chainId: "0x1",
       request: originalRequest,
     };
 
@@ -570,8 +599,11 @@ describe("inpage provider proxy", () => {
         type: "untyped-signature",
         hostname: "app.example",
         message: "sign this opaque payload",
+        method: "personal_sign",
+        chainId: 1,
       }),
     );
+    expect(policyWrites()[0].data).not.toHaveProperty("address");
     expect(originalRequest).not.toHaveBeenCalled();
   });
 
@@ -1024,12 +1056,14 @@ describe("inpage provider proxy", () => {
         type: "transaction",
         chainId: 8453,
         hostname: "app.example",
+        method: "wallet_sendCalls",
         transaction: { from, ...firstCall },
       }),
       expect.objectContaining({
         type: "transaction",
         chainId: 8453,
         hostname: "app.example",
+        method: "wallet_sendCalls",
         transaction: { from, ...secondCall },
       }),
     ]);
@@ -1274,6 +1308,209 @@ describe("inpage provider proxy", () => {
       ),
     ).toHaveLength(1);
     expect(policyWrites()).toHaveLength(2);
+  });
+
+  it.each(["personal_sign", "eth_sign"])("keeps %s parameter order, including address-shaped messages", async (method) => {
+    await import("../proxy-injected-providers");
+    const originalRequest = vi.fn(async (_request: TestRequest) => "0xsigned");
+    window.ethereum = { chainId: 91342, request: originalRequest };
+    const cases = [
+      { message: "sign me", reversed: false },
+      { message: "sign me", reversed: true },
+      { message: ADDRESS_MESSAGE, reversed: false },
+    ];
+    for (const [index, { message, reversed }] of cases.entries()) {
+      const normal = method === "personal_sign" ? [message, SIGNER] : [SIGNER, message];
+      const params = reversed ? [...normal].reverse() : normal;
+      await expect(window.ethereum.request!({ method, params })).resolves.toBe("0xsigned");
+      expect(signaturePolicy(index)).toMatchObject({
+        type: RequestType.UNTYPED_SIGNATURE,
+        method,
+        address: SIGNER,
+        chainId: 91342,
+        message,
+      });
+      expect(originalRequest).toHaveBeenNthCalledWith(index + 1, { method, params });
+      expect(executionReportWrites()[index].data).toMatchObject({
+        wallet_id: { address: SIGNER, chains: ["eip155:91342"] },
+      });
+    }
+    expect(originalRequest).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not invent a signer for a lone address-shaped personal_sign message", async () => {
+    await import("../proxy-injected-providers");
+    const originalRequest = vi.fn(async (_request: TestRequest) => "0xsigned");
+    window.ethereum = { chainId: 91342, request: originalRequest };
+    await window.ethereum.request!({ method: "personal_sign", params: [ADDRESS_MESSAGE] });
+    expect(signaturePolicy()).toMatchObject({
+      method: "personal_sign", chainId: 91342, message: ADDRESS_MESSAGE,
+    });
+    expect(signaturePolicy()).not.toHaveProperty("address");
+    expect(executionReportWrites()[0].data).not.toHaveProperty("wallet_id");
+    expect(originalRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["eth_signTypedData", "eth_signTypedData_v3", "eth_signTypedData_v4"])(
+    "keeps %s method and actual provider chain, not the typed domain chain",
+    async (method) => {
+      await import("../proxy-injected-providers");
+      const originalRequest = vi.fn(async (_request: TestRequest) => "0xsigned");
+      window.ethereum = { chainId: 91342, request: originalRequest };
+      const typedData = { domain: { chainId: 1 }, message: { ok: true } };
+      for (const params of [[SIGNER, typedData], [typedData, SIGNER]]) {
+        await window.ethereum.request!({ method, params });
+      }
+      expect(policyWrites()).toHaveLength(2);
+      for (let index = 0; index < 2; index++) {
+        expect(signaturePolicy(index)).toMatchObject({
+          type: RequestType.TYPED_SIGNATURE, method, chainId: 91342,
+          address: SIGNER, typedData,
+        });
+      }
+      expect(originalRequest).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each(["eth_sendTransaction", "eth_signTransaction", "eth_signTypedData_v4", "personal_sign", "eth_sign"])(
+    "fails closed before policy or signing when %s has no confirmed chain, then recovers",
+    async (method) => {
+      await import("../proxy-injected-providers");
+      const tx = method === "eth_sendTransaction" || method === "eth_signTransaction";
+      const params = tx ? [{ from: SIGNER, to: ADDRESS_MESSAGE, data: "0x" }]
+        : method === "eth_signTypedData_v4" ? [SIGNER, { domain: { chainId: 1 }, message: {} }]
+        : method === "personal_sign" ? ["sign me", SIGNER] : [SIGNER, "sign me"];
+      const originalRequest = vi.fn(async (_request: TestRequest): Promise<unknown> => undefined);
+      const provider = { request: originalRequest };
+      window.ethereum = provider;
+      for (const result of [undefined, "0x1garbage", 0, -1, 1.5, true, null, {}, "", "1e3", " 1 ", Number.MAX_SAFE_INTEGER + 1]) {
+        originalRequest.mockResolvedValueOnce(result);
+        await expect(provider.request({ method, params })).rejects.toMatchObject({
+          code: 4001,
+          message: `Dambi: ${tx ? "transaction" : "signature"} blocked: policy evaluation unavailable`,
+        });
+      }
+      originalRequest.mockRejectedValueOnce(new Error("chain read failed"));
+      await expect(provider.request({ method, params })).rejects.toMatchObject({
+        code: 4001, message: expect.stringContaining("policy evaluation unavailable"),
+      });
+      expect(policyWrites()).toHaveLength(0);
+      expect(executionReportWrites()).toHaveLength(0);
+      expect(originalRequest.mock.calls.every(([request]) => request.method === "eth_chainId")).toBe(true);
+      originalRequest.mockResolvedValueOnce("0x164ce").mockResolvedValueOnce("sent");
+      await expect(provider.request({ method, params })).resolves.toBe("sent");
+      expect(policyWrites()).toHaveLength(1);
+      expect(policyWrites()[0].data).toMatchObject({ method, chainId: 91342 });
+    },
+  );
+
+  it("fresh chainChanged events beat stale fields, invalidate unknown chains and recover", async () => {
+    await import("../proxy-injected-providers");
+    let changed: (chainId: unknown) => void = () => { throw new Error("listener missing"); };
+    const originalRequest = vi.fn(async (_request: TestRequest) => "0xsigned");
+    const provider = {
+      chainId: "0x1",
+      request: originalRequest,
+      on: (event: string, listener: (...args: unknown[]) => void) => {
+        if (event === "chainChanged") changed = listener;
+      },
+    };
+    window.ethereum = provider;
+    const request = { method: "eth_signTypedData_v4", params: [SIGNER, { domain: {}, message: {} }] };
+    await provider.request(request);
+    changed("0x164ce");
+    await provider.request(request);
+    expect(signaturePolicy(0).chainId).toBe(1);
+    expect(signaturePolicy(1).chainId).toBe(91342);
+    expect(provider.chainId).toBe("0x1");
+    changed("0x164cegarbage");
+    await expect(provider.request(request)).rejects.toMatchObject({
+      code: 4001, message: "Dambi: signature blocked: policy evaluation unavailable",
+    });
+    expect(policyWrites()).toHaveLength(2);
+    expect(originalRequest).toHaveBeenCalledTimes(2);
+    changed(91342);
+    await provider.request(request);
+    expect(signaturePolicy(2).chainId).toBe(91342);
+    expect(originalRequest).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(["resolve", "reject", "invalid-event"])("does not overwrite a newer chainChanged with an in-flight read: %s", async (completion) => {
+    await import("../proxy-injected-providers");
+    let changed: (chainId: unknown) => void = () => { throw new Error("listener missing"); };
+    let resolveRead!: (value: unknown) => void;
+    let rejectRead!: (reason: Error) => void;
+    const read = new Promise<unknown>((resolve, reject) => { resolveRead = resolve; rejectRead = reject; });
+    const originalRequest = vi.fn(async (request: TestRequest) =>
+      request.method === "eth_chainId" ? read : "0xsigned",
+    );
+    const provider = {
+      chainId: undefined as string | undefined,
+      request: originalRequest,
+      on: (event: string, listener: (...args: unknown[]) => void) => {
+        if (event === "chainChanged") changed = listener;
+      },
+    };
+    window.ethereum = provider;
+    const request = { method: "eth_signTypedData_v4", params: [SIGNER, { domain: {}, message: {} }] };
+    const pending = provider.request(request);
+    expect(originalRequest).toHaveBeenCalledWith({ method: "eth_chainId" });
+    provider.chainId = "0x1";
+    changed("0x164ce");
+    if (completion === "invalid-event") changed(undefined);
+    if (completion === "reject") rejectRead(new Error("old read failed"));
+    else resolveRead("0x1");
+    if (completion === "invalid-event") {
+      await expect(pending).rejects.toMatchObject({ code: 4001, message: expect.stringContaining("evaluation unavailable") });
+      expect(policyWrites()).toHaveLength(0);
+      expect(originalRequest).toHaveBeenCalledTimes(1);
+    } else {
+      await expect(pending).resolves.toBe("0xsigned");
+      await provider.request(request);
+      expect(signaturePolicy(0).chainId).toBe(91342);
+      expect(signaturePolicy(1).chainId).toBe(91342);
+      expect(originalRequest).toHaveBeenCalledTimes(3);
+    }
+  });
+
+  it("rejects malformed current fields instead of using a warm cached chain", async () => {
+    await import("../proxy-injected-providers");
+    const originalRequest = vi.fn(async (_request: TestRequest) => "0xsigned");
+    const provider = { chainId: "0x1", request: originalRequest };
+    window.ethereum = provider;
+    const request = { method: "personal_sign", params: ["sign me", SIGNER] };
+    await provider.request(request);
+    provider.chainId = "0x1junk";
+    await expect(provider.request(request)).rejects.toMatchObject({
+      code: 4001, message: "Dambi: signature blocked: policy evaluation unavailable",
+    });
+    expect(policyWrites()).toHaveLength(1);
+    expect(originalRequest).toHaveBeenCalledTimes(1);
+    provider.chainId = "0x164ce";
+    await provider.request(request);
+    expect(signaturePolicy(1).chainId).toBe(91342);
+  });
+
+  it("preserves an allowed ordinary batch and its per-leg methods with one warm chain read", async () => {
+    await import("../proxy-injected-providers");
+    const originalRequest = vi.fn(async (request: TestRequest) => request.method === "eth_chainId" ? "0x164ce" : "sent");
+    const originalSend = vi.fn((_batch: unknown) => "batch-sent");
+    window.ethereum = { request: originalRequest, send: originalSend };
+    const batch = [
+      { method: "eth_sendTransaction", params: [{ from: SIGNER, to: ADDRESS_MESSAGE, data: "0x" }] },
+      { method: "eth_signTransaction", params: [{ from: SIGNER, to: ADDRESS_MESSAGE, data: "0x" }] },
+      { method: "personal_sign", params: [ADDRESS_MESSAGE, SIGNER] },
+      { method: "eth_sign", params: [SIGNER, ADDRESS_MESSAGE] },
+    ];
+    await expect(window.ethereum.send!(batch)).resolves.toBe("batch-sent");
+    expect(policyWrites().map(({ data }) => {
+      const payload = data as MessageData;
+      return "method" in payload ? payload.method : undefined;
+    })).toEqual(batch.map(({ method }) => method));
+    for (const { data } of policyWrites()) expect(data).toMatchObject({ chainId: 91342 });
+    expect(originalRequest).toHaveBeenCalledTimes(1);
+    expect(originalRequest).toHaveBeenCalledWith({ method: "eth_chainId" });
+    expect(originalSend).toHaveBeenCalledExactlyOnceWith(batch);
   });
 
   it("does not reannounce an EIP-6963 provider that could not be wrapped", async () => {
