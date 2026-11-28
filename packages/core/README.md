@@ -180,6 +180,193 @@ Node; the standalone consumer gate below checks browser behavior with local
 fixtures. Check deployed CORS for your browser origin. The deployment's republishing
 schedule needs separate operational confirmation.
 
+## Onchain policy transport (F5, implementation awaiting verification)
+
+`createOnchainPolicySource` is exported by `@dambi/core/adapters`. It reads the
+F4 `scopeId(string,string)` and `read(bytes32,uint256)` interface. A sequence of
+zero selects the head. The returned tuple is `(head, status, digest, payload,
+signature, keyId)`; status numbers are Missing=0, Active=1, Superseded=2,
+Revoked=3. The adapter preserves the signed UTF-8 payload and converts the raw
+64-byte P1363 signature to padded Base64. Core must still validate the signature,
+signed registry reference, scope, sequence, expiry and policy semantics.
+
+Configuration requires `rpcUrl`, optional `headers`, `chainId`,
+`registryAddress`, independently pinned `expectedRuntimeCode`, `env`,
+`profile: "default"`, `finality: "safe" | "finalized"`, `maxResponseBytes`,
+`timeoutMs`, `maxBlockAgeMs`, `maxStateAgeMs`, `refreshIntervalMs` and
+`allowedClockSkewMs`. Optional `fetch` and `clock` are captured at construction.
+Durations are milliseconds; block timestamps returned to Core are Unix seconds.
+No GIWA finality support or operational timing values are assumed or certified.
+
+Every fetch checks chain ID and exact runtime bytes, then performs both calls at
+one EIP-1898 `{blockHash, requireCanonical:true}` selector. State and body come
+from the same `read` tuple. A final explicit-height header comparison and chain
+ID recheck precede publication. Unsupported hash selectors fail explicitly;
+there is no number-only or latest fallback. This is consistency checking against
+one trusted RPC, not a light client, independent finality proof or code-proxy
+implementation attestation. Do not pin a proxy's wrapper code as if it attested
+its implementation.
+
+The one-entry memory cache retains same-block identity and first-observation
+metadata only. Every explicit fetch performs network reads and rejects failures;
+it never substitutes a cached envelope for a chain mismatch, missing policy,
+unsupported method or outage. Reobserving the same block cannot extend its
+observation deadline. A new instance must check the chain again. Changing
+endpoint/authentication requires a new source, with no inherited cache or
+in-flight work. Revoked is returned as state, not converted into a fetch error.
+Missing and RPC failures remain distinct adapter errors.
+
+`refreshDue()` is a host scheduling hint, not permission to evaluate a cached
+policy. Hosts should create a fresh source/Core on startup, refresh on resume,
+and consult the hint before subsequent checks. `refreshPolicies()` remains the
+installation API. F1 must enforce the last accepted state's deadline during
+both planning and evaluation, including after failed refreshes; the transport
+cannot replace that enforcement. Registry RPC settings are independent from
+`createEvmFactProvider`'s transaction-chain settings. A GIWA policy source does
+not authorize Ethereum Facts from a GIWA RPC.
+
+The pinned F5 base does not contain F1's policy port, registry trust configuration,
+signed `registry_ref` schema, or runtime/Rust implementation. The integration gate
+therefore requires an explicitly supplied **real installed F1 SDK**, including its
+matching production WASM, plus JSON inputs from that F1 contract. It does not copy
+F1, inject an engine stub, replace the onchain source with an HTTP envelope, or
+accept an arbitrary validation error as successful signature verification.
+Missing integration inputs fail the gate; they do not produce a skipped/pass result.
+F1 approval and final F1/F4 compatibility remain open until separately verified.
+
+Reproduction commands for the new tests, after obtaining matching built Core
+WASM assets (the commands below have not been run as part of this change):
+
+```sh
+node scripts/sdk/verify-consumers.mjs --workspace-types &&
+node --test packages/core/tests/adapters/onchain-policy.test.mjs
+```
+
+`--workspace-types` is an explicit preparation/type-check mode. It runs the
+source TypeScript check, TypeScript output, the existing decoder packaging
+script, and the standalone strict NodeNext consumer check **in that order**,
+stopping on the first failure. It does not import runtime fixtures, build WASM,
+install dependencies, run adapter tests or verify a tarball. It writes workspace
+build output; ordinary tarball consumer modes still never build implicitly.
+To use the compiler location from the supplied QA environment:
+
+```sh
+node scripts/sdk/verify-consumers.mjs --workspace-types --tsc /toolchain/bin/tsc
+```
+
+The `--tsc` argument identifies an existing JavaScript compiler entry point run
+with Node. Without it, the mode resolves Core's installed TypeScript dependency.
+
+`tsc -p packages/core/tsconfig.build.json` alone is not the package build:
+`@dambi/core/decoders` resolves to `dist/decoders.js` and
+`dist/decoders.d.ts`, which the existing `build-decoders.mjs` step produces.
+The reported QA TS2307 for that subpath must not be suppressed or worked around
+with a source alias or hand-written declaration. Run the generator before the
+consumer type check; if it fails, retain that failure and check its selected
+snapshot prerequisites. This sequence does not rebuild WASM. A full
+`npm run core:build` already includes both decoder packaging and WASM generation.
+No generated decoder bytes or metadata are supplied by this change.
+
+### F1/F5 integration inputs
+
+The transport-only command above is separate from the integration gate below.
+The fake RPC compares complete ABI calldata against independent F4 `3fab6d8b`
+solc 0.8.28 identifiers: `scopeId(string,string)=c8121043` and
+`read(bytes32,uint256)=3d301c91`. Negative controls exercise wrong selectors,
+wrong offsets/lengths, aliasing, padding, scope/version and truncated/trailing data.
+Its synthetic code and scope are not deployed Registry evidence.
+
+Prepare a local consumer directory containing an installed F1 `@dambi/core`
+package with matching production JS/WASM. Do not substitute the F5 base's legacy
+engine or a test stub. The runner resolves the package's public ESM export from
+that directory; F5's adapter is imported from this checkout's compiled output.
+No test installs or builds either SDK automatically.
+
+Supply `DAMBI_F1_INPUT` as a local JSON file with these required source inputs:
+
+- `f1Sha`: the full F1 source SHA used for the installed package.
+- `registryRef`: F1's actual signed `registry_ref` object for chain **91342** and
+  Registry **0x1111111111111111111111111111111111111111**. Copy the approved wire
+  shape, including any required scope fields; do not invent camel/snake aliases.
+- `trust.registry`: F1's public Registry trust configuration for that same
+  Registry, finalized observations, a **20,000ms observation lifetime** and
+  **30,000ms block age**. Its nested wire fields are not included in the supplied
+  F5 source baseline and remain explicit input rather than guessed aliases.
+  `trust.env` and `trust.profile` default to staging/default; conflicting scope
+  is rejected. The repository's official test-only public key is installed by
+  the fixture, so operators need not supply keys. `limits` is optional: ordinary
+  size/deadline limits are already fixed by the fixture.
+- `denyDraft` and `allowDraft`: complete F1 policy payload drafts in staging/default
+  scope for the same supported approve request. The first must actually deny via
+  `denyPolicyId`; the second must evaluate allow. Use selected F1 policy source
+  fixtures, not a fake verdict. The runner signs each draft in memory using the
+  existing `test-only-keys.json` P-256 key, sets sequence 42/43, explicit issuance/
+  expiry, and inserts `registryRef` before signing. It never rewrites a signature
+  envelope after transport or contacts policy HTTP.
+- `request`: an Ethereum `eip155:1` raw transaction supported by the existing
+  `snapshot-approve.json`, with no required Facts; `denyPolicyId`: its matching
+  deny policy ID. This tests policy-chain/transaction-chain distinction, **not**
+  Ethereum Fact retrieval or its separate integration acceptance.
+The following fields have test-only defaults and need not be supplied:
+
+- `stateDeadlineMs: 20000`, `planRule: "invalidate-on-new-active"`.
+- `replacedPlan` and `revokedPlan`: both exactly
+  `{ "kind": "fail_closed", "code": "trust_expired" }`.
+- `revokedRefresh: "resolves"`: confirmed revocation installs successfully;
+  subsequent planning rejects with `CoreError("POLICY_EXPIRED")` and evaluation
+  of a still-live pending plan returns `deny + fail_closed + trust_expired`.
+
+If provided, these fields must match those exact expectations. They cannot
+select alternative error outcomes. The deadline regression likewise requires
+`POLICY_EXPIRED` from new planning and `trust_expired` from pending evaluation,
+both at the exact state deadline and one millisecond afterwards. Separate live
+handles are used because evaluation consumes each handle once.
+
+Lifecycle codes now follow the supplied F1 review contract rather than arbitrary
+operator expectations. This source baseline still does not include the nested
+`trust.registry` type, signed `registry_ref` schema, or F1 authorization-policy
+fixture contents. Those remaining inputs must use the existing reviewed JSON;
+this patch does not invent defaults for their unknown wire shapes. Completing
+those source defaults requires their exact definitions, not credentials or a
+new live-chain check. Initialization expectations remain fixed independently of
+input configuration: active succeeds and evaluates deny, bad P-256 is exactly
+`INVALID_SIGNATURE`, and the identical valid signed payload with revoked status
+is exactly `POLICY_EXPIRED`.
+
+For the review regression, retain the same installed F1 package and existing
+input JSON and rerun the entire official entry below without a name filter.
+Do not substitute another engine or alter policy drafts to address a diagnostic
+mismatch. Supply the installed package's F1 SHA and the revised F5 source SHA:
+
+```sh
+DAMBI_F1_CONSUMER=/absolute/installed-f1-consumer \
+DAMBI_F1_INPUT=/absolute/f1-onchain-input.json \
+DAMBI_F1_SHA=<full-F1-source-SHA> \
+DAMBI_F5_SHA=<full-F5-source-SHA> \
+node --test packages/core/tests/adapters/onchain-policy-core.test.mjs
+```
+
+The same suite can be invoked directly as
+`node --test fixtures/sdk/onchain-policy/lifecycle.test.mjs`; do not list both
+entry points in one run. It exercises actual source → public Core creation,
+deny, v2 allow/v1-plan invalidation, confirmed revocation, outage grace and exact
+deadline cutoff, unchanged-body recovery, restart, resume, reorg and chain mismatch.
+The source's fetch guard permits only its loopback JSON-RPC endpoint. Deadline
+assertions remain in Core, not in a host shim. No background timer is introduced.
+
+Retain the Node TAP output (including failures) with both source SHAs, the input
+file used and the installed package/build provenance for independent integration
+review. The diagnostic SHA labels are operator-supplied, not artifact attestation.
+This change supplies executable tests, **not execution logs or review evidence**.
+F1 pre-approval gates remain open even if a development integration run succeeds.
+
+The existing `core:test:adapters` script has an explicit file list and does not
+include these new files. Use the explicit commands above. The fake server binds
+loopback and accepts only policy-read JSON-RPC methods; it is not an EVM chain.
+Real local-chain plus consumer deny acceptance, QA execution logs and independent
+review remain pending. No remote RPC, deployment or credentials are required by
+these tests.
+
 ## Optional ERC-20 Fact adapter (development)
 
 `createEvmFactProvider` implements `FactProvider` for `portfolio.balance` calls
@@ -827,6 +1014,21 @@ npm run core:test:runtime
 
 Consumer checks import the built package declarations (no source aliases) and
 also compile the policy wire types. Build first to avoid stale declarations.
+A TypeScript-only build does not generate the decoder subpath: when reusing
+matching WASM assets, follow it with `node scripts/sdk/build-decoders.mjs`
+before running consumer checks. Missing generated declarations remain a hard
+failure. The standalone tarball gate also copies the full
+`packages/core/tests/consumer-types.ts` contract into the external consumer and
+compiles it with strict NodeNext resolution, in addition to checking the example.
+Neither check substitutes workspace source types for installed declarations.
+The installed Node/type gate also temporarily removes both decoder exports from
+its disposable installation and requires the real compiler to report TS2307 for
+`@dambi/core/decoders`. It restores the original files in `finally`, then requires
+the unchanged full contract and example to compile. This regression distinguishes
+missing decoder packaging from a successful TypeScript-only build; it never
+modifies the candidate tarball or workspace output. Run it with
+`node scripts/sdk/verify-consumers.mjs --node-only` after preparing the package
+and installing the documented consumer tooling.
 The runtime checks load actual packaged WASM and compare plan/evaluate output
 against the Native session runner. They fail if artifacts are absent and never
 build them implicitly. No legacy extension WASM package is loaded.

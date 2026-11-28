@@ -31,6 +31,9 @@ import "@dambi/core/internal";
 import { decoderSnapshot, decoderSnapshotInfo } from "@dambi/core/decoders";
 import {
   AdapterError,
+  createOnchainPolicySource,
+  type OnchainPolicySource,
+  type OnchainPolicySourceOptions,
   createPolicyApiSource,
   createScamBundleApiSource,
   createEvmFactProvider,
@@ -49,6 +52,26 @@ import {
 const packagedSnapshot: DecoderSnapshot = decoderSnapshot;
 const packagedBytes: number = decoderSnapshotInfo.bytes;
 void [packagedSnapshot, packagedBytes];
+
+// Compile-only: exercise the optional onchain public entry point without
+// replacing the packaged decoder import or weakening its declaration check.
+function consumeOnchainPolicy(options: OnchainPolicySourceOptions): void {
+  const source: OnchainPolicySource = createOnchainPolicySource(options);
+  const port: PolicySource = source;
+  const due: boolean = source.refreshDue();
+  const bundle: Promise<SignedPolicyBundle> = port.fetch({ signal: new AbortController().signal });
+  const finality: "safe" | "finalized" = options.finality;
+  // @ts-expect-error Onchain finality cannot silently fall back to latest.
+  createOnchainPolicySource({ ...options, finality: "latest" });
+  // @ts-expect-error Whole-refresh deadlines must be numeric milliseconds.
+  createOnchainPolicySource({ ...options, timeoutMs: "1000" });
+  // @ts-expect-error Runtime code is independently pinned, not optional.
+  createOnchainPolicySource({ ...options, expectedRuntimeCode: undefined });
+  // @ts-expect-error Captured source configuration is read-only.
+  options.chainId = "eip155:1";
+  void [due, bundle, finality];
+}
+void consumeOnchainPolicy;
 
 const policyApiOptions: PolicyApiSourceOptions = {
   baseUrl: "https://policies.example",
@@ -232,6 +255,25 @@ const signed: SignedPolicyBundle = {
   keyId: "telemetry-only",
 };
 const noTelemetry: SignedPolicyBundle = { payload: signed.payload, signature: signed.signature };
+const registryTrust: import("@dambi/core").RegistryTrust = {
+  chainId: 91342, registryAddress: "0x1111111111111111111111111111111111111111",
+  finality: "finalized", maxStateAgeMs: 60000,
+};
+const registryObservation: import("@dambi/core").RegistryObservation = {
+  status: "active", chainId: 91342, registryAddress: registryTrust.registryAddress,
+  env: "staging", profile: "default", version: 42, payloadDigest: "0x00",
+  finality: "finalized", blockNumber: 100, blockHash: "0x00",
+  blockTimestamp: 1800000000, observedAtMs: 1800000000000,
+};
+const registryBundle: SignedPolicyBundle = { ...signed, registryState: registryObservation };
+const unavailableRegistry: SignedPolicyBundle = {
+  payload: "", signature: "", registryState: { status: "unavailable" },
+};
+// @ts-expect-error No silent latest-block fallback is part of Registry trust.
+const latestRegistry: import("@dambi/core").RegistryTrust = { ...registryTrust, finality: "latest" };
+// @ts-expect-error Registry state is immutable observation data.
+registryObservation.version = 43;
+void [registryBundle, unavailableRegistry, latestRegistry];
 // @ts-expect-error The signature covers the original string, not a parsed object.
 const parsedBundle: SignedPolicyBundle = { payload: { sequence: 42 }, signature: signed.signature };
 

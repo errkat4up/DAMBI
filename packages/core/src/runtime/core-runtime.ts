@@ -174,7 +174,13 @@ function policyJson(input: SignedPolicyBundle, maxBytes: number): string {
       throw new CoreError("INVALID_POLICY_BUNDLE", "Policy payload, signature and key ID must be strings.");
     }
     textBytes(payload, "INVALID_POLICY_BUNDLE", maxBytes);
-    const selected = keyId === undefined ? { payload, signature } : { payload, signature, keyId };
+    const registryState = field(source, "registryState", false, "INVALID_POLICY_BUNDLE");
+    const selected = { payload, signature,
+      ...(keyId === undefined ? {} : { keyId }),
+      ...(registryState === undefined ? {} : {
+        registryState: copyJson(registryState, "INVALID_POLICY_BUNDLE", 4096),
+      }),
+    };
     return JSON.stringify(copyJson(selected, "INVALID_POLICY_BUNDLE", Number.MAX_SAFE_INTEGER));
   } catch (error) {
     if (error instanceof CoreError) throw error;

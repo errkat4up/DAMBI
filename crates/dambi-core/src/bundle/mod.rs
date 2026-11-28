@@ -12,8 +12,9 @@ mod structure;
 
 pub use decoder_signature::SignatureVerifiedDecoderBundle;
 pub use semantics::{
-    validate_policy_bundle, PolicySemanticError, PolicySemanticErrorKind, PolicyUpdate,
-    PolicyValidationConfig, ValidatedPolicyBundle, DEFAULT_MAX_BUNDLE_AGE_SEC,
+    validate_policy_bundle, validate_policy_bundle_with_registry, PolicySemanticError,
+    PolicySemanticErrorKind, PolicyUpdate, PolicyValidationConfig, RegistryRef,
+    ValidatedPolicyBundle, DEFAULT_MAX_BUNDLE_AGE_SEC,
 };
 pub use signature::{
     KeyRole, SignatureError, SignatureErrorKind, SignatureVerifiedPolicyBundle, TrustedKeys,

@@ -31,13 +31,16 @@ export interface PolicyPayloadWireV1 {
   policies: PolicyEntryWireV1[];
   sequence: Sequence;
   issued_at: UnixSeconds;
-  /** Null does not bypass Core's future maximum-age checks. */
+  /** HTTP null does not bypass maximum age; Registry mode requires explicit expiry. */
   expires_at: UnixSeconds | null;
   env: "staging" | "production";
   /** Non-empty string structurally; v0.1 expects default in semantic validation. */
   profile: string;
-  /** Non-null strings are structurally valid but semantically unsupported in v0.1. */
-  registry_ref: string | null;
+  /** HTTP remains null. Registry mode signs its chain/address here and binds
+   * env/profile above plus sequence as the Registry version. Legacy strings
+   * retain their distinct UNSUPPORTED_REGISTRY_REF error in HTTP mode.
+   */
+  registry_ref: { chainId: number; registryAddress: `0x${string}` } | string | null;
 }
 
 export interface PolicyEnvelopeWireV1 {

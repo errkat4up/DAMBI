@@ -1,5 +1,86 @@
 # SDK 정책 입력과 Native 회귀
 
+## F5 — 동일 인정 블록 온체인 어댑터 진행 기록
+
+### F1 공개 진단 계약 교정 — 검증 대기
+
+- 작업: `t_18cd83b0` / 담당 D / 실제 branch 미확인 / 제공 parent `90afe501163476fcb922b97bc92adff526f8d621` / 상태: 수정안 작성·검증 대기.
+- 변경 범위: lifecycle의 기한 만료 pending evaluate 기대값을 `trust_expired`로 교정했다. 새 plan의 `CoreError(POLICY_EXPIRED)`와 구분하며 정확한 기한 및 기한+1ms에 별도 live handle을 평가한다. deny·fail_closed·진단 assertion과 기존 복구/재시작 경로는 유지한다.
+- 기본값: replacedPlan/revokedPlan은 `fail_closed + trust_expired`, revokedRefresh는 `resolves`로 고정했다. 다른 기대값은 거절한다. scope·일반 limits·공식 test-only key는 fixture에서 제공하며 독립 패키지 선택과 입력/F1 SHA 결속은 유지한다.
+- 남은 입력 기본값: 제공 소스에는 F1의 nested `trust.registry` 정의·signed `registry_ref` schema·권한 시험 정책 원문이 없어 이 세 항목은 기존 검증 입력을 유지한다. 이 부분의 기본값 요청은 미완료이며 임의 wire alias나 정책을 만들지 않았다.
+- 검증: 이번 수정의 빌드·시험·QA·독립 리뷰·커밋·푸시는 수행하지 않았다. 신규 통과/실패 수 및 실행 로그 없음.
+- 다음: 동일 F1 설치 패키지와 기존 JSON으로 `packages/core/tests/adapters/onchain-policy-core.test.mjs` 전체를 이름 필터 없이 실행하고 TAP 및 패키지 provenance를 독립 검토에 전달한다. 실행 절차는 Core README를 따른다. 실제 로컬 체인 소비자 deny와 F5 전체 수용은 별도 통합 대기다.
+
+### Reviewer #71 — ABI 음성 대조 및 실제 F1 주입 회귀
+
+- 작업: `t_18cd83b0` / 담당 D / 지정 작업 경로 `sdk/t_18cd83b0` / 제공 parent `e09fd66342a711251e9d4728442eeabe0d3c617b` / 상태: 수정안 작성·검증 대기. 실제 branch·작업 트리는 확인하지 않았다.
+- 변경 범위: fake RPC의 길이 기반 eth_call 분기를 제거하고 F4 `3fab6d8b`의 solc 0.8.28 methodIdentifiers와 전체 canonical calldata를 대조한다. 잘못된 selector·offset·length·padding·scope·version·truncation·trailing byte 음성 대조를 추가했다. fixture 자체 assertion 오류의 teardown 실패는 유지한다.
+- 실제 Core 경로: 기존 HTTP-envelope 양성 대조와 임의 오류 허용 검사를 실제 F1 SDK 주입 통합 진입점으로 교체했다. 공식 테스트 전용 키로 registry_ref 포함 원문을 서명하고 실제 F5 source를 공개 createCore에 직접 전달한다. active deny·INVALID_SIGNATURE·동일 원문의 revoked POLICY_EXPIRED를 구분한다. v2/v1 plan 교체·폐기·장애 유예/기한 중단/복구·재시작·재개·reorg·chain mismatch 회귀를 작성했다.
+- 필요한 입력: F1의 production JS/WASM 설치 패키지, 동일 SHA의 실제 registry_ref·Core trust/limits·deny/allow 정책 draft·원문 요청·정확한 plan 오류/폐기 refresh 계약. 이 기준선에 없는 F1을 복제하지 않으며 입력 누락은 실패다. HTTP/stub/skip 대체는 없다. 실행 변수·JSON 입력 계약은 Core README의 F1/F5 integration inputs 절에 있다.
+- 검증: 제공 리뷰의 독립 VM 60/60은 이전 SHA의 전달받은 결과다. 이번 수정에 대해 빌드·시험·QA·독립 리뷰·커밋·푸시·체인 연결은 수행하지 않았다. 신규 통과·실패 수와 재현 로그 없음.
+- 다음: 실제 F1/F5 두 전체 SHA와 입력/패키지 provenance를 지정해 독립 통합 실행 후 TAP 결과를 인수한다. F1 승인 전 대기·실제 로컬 체인 소비자 deny·Ethereum Fact 연결·F5 전체 수용은 계속 열어 둔다. 아래 HTTP 양성 대조 관련 기록은 이전 구현 이력이며 현재 통합 게이트의 근거가 아니다.
+
+### F1 RegistryObservation 반환 형식 후속 수정
+
+- 작업: `t_18cd83b0` / 담당 D / branch 정보 미제공 / 제공 parent: `2a6748a92b6034f54821c89aa4221a7eb9784271` / 상태: 수정안 작성·검증 대기.
+- 변경 범위: 실제 어댑터 반환의 `chainId`·`blockNumber`를 범위 검증한 숫자로, `sequence`를 숫자 `version`으로 교정했다. 동일 hash-bound `read(bytes32,0)`의 `digest`를 `payloadDigest`로 전달하고 설정한 `finality`를 포함한다. 서명 원문, 초/ms 단위, 첫 관측 시각, 캐시 기한과 오류 의미는 유지한다. 별도 범용 port 계약은 추가하지 않았다.
+- 회귀: fake RPC의 기본 digest는 원문 UTF-8의 SHA-256으로 생성한다. 정확한 반환 구조, safe/finalized, 0·최대 안전 정수 경계, 초과 chain 설정·블록 응답·버전 거절, 최종 블록 재확인, digest 변경 reorg와 폐기 상태를 검사한다. 기존 실제 WASM 양성 대조 및 잘못된 서명 거절 assertion은 보존했다.
+- 검증: 이번 응답에서 시험·빌드·QA·독립 리뷰·커밋·푸시·체인 연결을 수행하지 않았다. 통과·실패 건수 없음. 재현은 Core README의 workspace-types 후 두 onchain-policy 시험 파일 실행 순서를 따른다.
+- 다음: 제공 리뷰의 F1 `17a7dfae43726e838284a714afd38b88a26c4300` 실제 엔진과 유효한 signed registry_ref 양성 대조·잘못된 서명·scope·폐기 교차검증을 별도로 수행해야 한다. 현재 baseline의 HTTP 양성 대조를 F1 온체인 양성 설치로 간주하지 않는다. 실제 로컬 체인 소비자 deny 및 F5 전체 수용은 별도 통합 대기다.
+
+### QA 재후속 — 실행 가능한 타입 검사 선행 단계
+
+- 작업: `t_18cd83b0` / 담당 D / branch 정보 미제공 / 제공 parent·검토 SHA: `a89832ca00958fd1a5ff3ecdbb78369ca3673ac7` / 상태: 수정안 작성·검증 대기.
+- 전달받은 QA: 프로젝트 타입 검사·TypeScript 출력은 각각 종료 0, 독립 소비자 검사는 종료 2이며 decoder subpath TS2307이 다시 보고됐다. 앞선 문서 수정만으로 QA 실행 순서가 바뀌지는 않았다.
+- 변경 범위: `verify-consumers.mjs --workspace-types [--tsc 경로]`에 소스 검사 → TS 출력 → 기존 decoder packaging → 원래 strict NodeNext 소비자 검사를 직렬 연결했다. 첫 실패에서 중단하며 runtime fixture는 이 모드에서 import하지 않는다. 기존 tarball 검사에는 자동 빌드를 추가하지 않았다.
+- 회귀: 저장소 밖의 실제 설치 패키지에서 decoder JS·선언을 일시 이동해 실제 compiler의 해당 subpath TS2307을 요구하고, 원본 복구 후 기존 전체 계약·예제 검사를 그대로 실행한다. assertion·decoder import를 삭제하지 않으며 ambient 선언·source alias·생성 snapshot 제출로 우회하지 않는다.
+- 재현: QA compiler를 사용하는 명령은 `node scripts/sdk/verify-consumers.mjs --workspace-types --tsc /toolchain/bin/tsc`. 설치 패키지 회귀는 기존 도구와 완성된 패키지를 준비한 뒤 `node scripts/sdk/verify-consumers.mjs --node-only`로 실행한다. 이들은 실행 예정 명령이며 결과 로그가 아니다.
+- 제한: 기존 두 `tsc -p` 뒤에 decoder 생성 없이 독립 `tsc`만 실행하는 명령열은 여전히 불완전하다. package export·생성기·tsconfig는 이번 허용 수정 경로가 아니며, compiler 자체가 별도 생성기를 실행한다고 가정하지 않는다. QA는 위 명시적 gate 또는 동일한 생성 선행 순서를 사용해야 한다.
+- 검증: 이번 응답에서 빌드·시험·QA·독립 리뷰·커밋·푸시·체인 연결을 수행하지 않았다. 통과·실패 건수 없음. F1/F4 최종 계약 연결, 긍정 수명주기·미완료 plan 무효화, 실제 로컬 체인 소비자 deny 및 F5 전체 수용은 아래 기록대로 대기다.
+
+### QA 후속 — decoder 선언 생성 선행 단계
+
+- 작업: `t_18cd83b0` / 담당 D / branch 정보 미제공 / 제공 parent·검토 SHA: `45596b966ace5f5b21c1cbe041459aef973f4e78` / 상태: 수정안 작성·재검증 대기.
+- 제공 QA 결과: TypeScript 프로젝트 검사와 TypeScript 출력 명령은 각각 종료 0, 독립 소비자 타입 검사는 종료 2이며 `@dambi/core/decoders`의 TS2307이 보고됐다. 이는 전달받은 결과이며 이번 응답에서 실행한 검사가 아니다.
+- 변경 범위: Core README의 F5 재현 순서에 기존 `build-decoders.mjs`를 추가했다. package export는 `dist/decoders.d.ts`를 가리키며 단독 `tsc`는 이 생성 단계를 대신하지 않는다. decoder import·기존 assertion은 유지하고 ambient 선언이나 source alias로 우회하지 않는다. 생성 snapshot·metadata는 제출하지 않는다.
+- 회귀: 공개 onchain 옵션·PolicySource 호환성의 양성/음성 타입 사례를 추가했다. 독립 소비자 검사기는 전체 Core 타입 회귀도 저장소 밖에 복사해 실제 설치 tarball에 대해 QA와 같은 strict NodeNext 옵션으로 검사한다. 기존 예제 타입·Node/Chromium 실행 검사는 유지한다.
+- 검증: 이번 수정 후 실행 건수 없음. 빌드·시험·QA·독립 리뷰·커밋·푸시·RPC 연결을 수행하지 않았다. 다음은 Core README의 생성 단계 포함 재현 명령과 `node scripts/sdk/verify-consumers.mjs --node-only` 실행이다. 후자는 이미 빌드된 패키지와 기존 소비자 도구가 필요하며 자동 빌드하지 않는다.
+- 남은 범위: 아래 F1/F4 계약·긍정 수명주기 연결 제한은 해소했다고 주장하지 않는다. 소비자 타입 검사 보완은 실제 로컬 체인 deny 전파나 F5 전체 수용의 대체물이 아니다.
+
+- 작업: `t_18cd83b0` / 담당 D / branch 정보 미제공 / 제공 parent: `214273829df6e1a6f4b87f589bcf4e08a011c5a0`.
+- 이번 변경: 실제 `onchain-policy.ts`, adapter export/오류, loopback fake RPC, transport 회귀와 `onchain-policy-core.test.mjs`의 실제 Core 음성 신뢰 경계 회귀. F4 tuple·scope 호출, hash 고정·재확인, 원문/base64, chain/code 검증, 취소·timeout·동일 블록 기한·재시작을 구현했다.
+- 실행 상태: 빌드·시험·QA·독립 리뷰 미실행. 통과/실패 수 없음. 커밋·푸시·RPC 실연결·배포를 수행하지 않았다. 재현 명령과 제한은 Core README의 F5 절에 있다.
+- 남은 계약: 제공 소스에는 F1 policy port·registry trust 설정·signed registry_ref schema·Core/Rust 집행부가 없다. 리뷰가 명시한 registryState 시간 필드를 연결했지만, 최종 F1 타입/단위/설정과의 컴파일·실행 일치는 아직 검증하지 못했다. 긍정 설치, 교체/폐기의 미완료 plan 무효화, 장애 중 기한 내 사용/기한 후 중단, 독립 소비자 deny를 통과했다고 표시하지 않는다.
+- 다음: F1/F4 최종 소스에서 계약을 대조하고 위 긍정 수명주기 회귀를 연결한다. 현재 Core 시험은 손상 서명이 네트워크 성공만으로 승인되지 않는 음성 시험이며 전체 수용 대체물이 아니다. 실제 로컬 체인 통합·QA 재현 로그·독립 리뷰는 별도 대기다.
+
+### 이전 인계 기록 — 아래는 구현 전 기준선의 차단 사항
+
+아래 기록의 “이번 변경은 기록뿐”과 “구현 미완료”는 이전 제출을 설명한다. 위 신규 구현·남은 계약 상태와 구분한다.
+
+- 작업: `t_18cd83b0` / 담당 D / branch 정보 미제공 / 상태: 선행 인터페이스 확인 대기, 구현 미완료.
+- 제공 기준: `3e5804144fbb5f18bc62448e70c892c02c016645`. 실제 작업 트리·커밋 포함 여부는 확인하지 않았다. 이번 변경은 이 인계 기록뿐이다.
+- 검증: 빌드·시험·RPC·QA·독립 리뷰 미실행. 통과·실패 건수는 없으며 커밋·푸시·배포도 수행하지 않았다.
+
+### 제공 기준선과 승인 계획의 연결 문제
+
+제공된 `packages/core/src/adapters/policy-api.ts`는 기존 `PolicySource`로 서명 envelope를 반환한다. 제공된 Core README와 `packages/core/tests/adapters/policy-api-core.test.mjs`는 갱신 실패 시 기존 정책 유지 및 교체 후 기존 plan의 snapshot 고정을 명시한다. 반면 F5에는 조회 불가와 확인된 폐기의 구분, 인정 블록에 결속된 사용 가능 기한, 새 활성 버전 확인 시 구버전 plan 무효화가 필요하다. 이 차이는 HTTP 동작을 변경해 해결하면 안 된다.
+
+구체적으로 `v1 plan → v2 활성 확인 → v1 evaluate`는 현재 HTTP 회귀에서 v1 평가 성공을 요구한다. 온체인 경로에는 별도의 무효화 집행이 필요하다. 또한 폐기를 단순 fetch rejection으로 전달하면 기존 정책 보존 동작 때문에 폐기가 집행되지 않는다. 어댑터가 조회 시각만 갱신하거나 envelope에 임의 metadata를 붙여도 Core의 기한 집행을 대신할 수 없다.
+
+제공 자료에는 다음 구현 계약이 없다.
+
+1. **F1/F3 Core 연결:** 활성·폐기 상태와 인정 블록·최종 사용 기한을 받는 공개 port 타입, TS runtime→WASM→Rust 전달 및 plan 무효화 인터페이스. 관련 `ports/policy.ts`, `core-runtime.ts`, Rust session과 WASM bridge는 이번 수정 허용 경로에도 없다. 제공된 공개 export만으로 후속 구현의 존재나 형식을 가정하지 않는다.
+2. **F4 Registry 연결:** 고정 ABI, scope 인코딩, 활성 버전·폐기 상태·서명 envelope 조회 함수 및 반환 형식, 기대 runtime code 또는 검증 가능한 인터페이스 식별 계약. 이 자료 없이 selector나 ABI tuple을 임의로 정하지 않는다.
+3. **공동 wire 계약:** 서명 원문의 `registry_ref` 형식과 버전·scope 결속 방식. parser·schema·publisher의 합의된 변경이 필요하며 기존 HTTP의 `registry_ref: null`은 유지해야 한다.
+
+### 필요한 인계와 권장 처리
+
+**확인 요청:** F1/F3·F4의 위 인터페이스를 포함하는 후속 기준 커밋과 해당 소스를 제공해 이 카드에 연결할지, 아직 없다면 A/B가 공동 계약을 먼저 인계하도록 이 카드의 해당 부분을 대기시킬지 확인한다. 승인된 F0의 구버전 plan 무효화 방향 자체를 다시 결정해 달라는 요청은 아니다.
+
+권장안은 A/B의 실제 타입·ABI를 인계받아 D가 `onchain-policy.ts`와 공개 adapter export, fake RPC 및 소비자 회귀를 구현하는 것이다. 기존 HTTP 시험의 snapshot 고정 assertion은 그대로 보존한다. 미지원 hash 기반 조회는 명시적으로 거절하고 `latest`로 폴백하지 않는다. 확정성 tag·허용 블록 지연·갱신 주기는 명시적 주입 설정으로 받고 GIWA에서 검증된 수치라고 주장하지 않는다.
+
+이 인계 전에는 기존 Core에 연결 가능한 온체인 `PolicySource`를 제공했다고 표시하지 않는다. fake RPC 회귀 실행 로그와 독립 리뷰는 구현 후 대기 항목이며, 실제 로컬 체인에서 소비자 deny까지 전달하는 검증은 별도 통합 카드다. 문서 작성이나 fake RPC 성공만으로 F5 전체 수용을 선언하지 않는다.
+
 ## Scam Filter — SF0 연결 정보 확인
 
 2026-10-19, [계획서 SF0-1](../../docs/scam-filter/mvp-design-plan.md#sf0-1--연결-대상측정-근거-확인) 범위에서 전달받은 연결 정보와 대표 거래를 공개 RPC에 읽기 전용으로 대조했다. **수동 RPC 확인 6개 항목 일치·0개 불일치:** 체인 ID, pair의 factory, factory의 getPair, token0·token1 구성, 대표 거래의 블록·성공 상태, pair의 Sync→Swap 순서. 자동화 시험 통과 수나 전체 DEX 검증을 뜻하지 않는다.
