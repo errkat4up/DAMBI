@@ -163,8 +163,16 @@ impl AlgorithmModule for WindowRulesModule {
                     .saturating_add(m.saturating_mul(m).saturating_mul(2))
             };
             work = work.saturating_add(base);
-            if matches!(rule, RuleSpec::SwitchDensity { .. }) {
-                work = work.saturating_add(n.saturating_mul(n).saturating_mul(8));
+            if let RuleSpec::SwitchDensity { lookback_sec, .. } = rule {
+                // Each snapshot can confirm at most one switch. r2_evidence only
+                // compares switches in (T - lookback, T]; the linear cost above
+                // still includes the warm-up and all missing ranges.
+                let lookback_ms = lookback_sec.saturating_mul(1000);
+                let before_window = request.pool_history.points.partition_point(|point| {
+                    request.as_of.t_ms.saturating_sub(point.t_ms) >= lookback_ms
+                });
+                let candidates = n - before_window as u64;
+                work = work.saturating_add(candidates.saturating_mul(candidates).saturating_mul(8));
             }
             if work > limits.max_work_units {
                 return Err(AlgorithmError::ResourceLimit);

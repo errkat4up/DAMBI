@@ -161,6 +161,64 @@ fn real_window_rules_map_drop_counts_admin_evidence_and_work_limits() {
 }
 
 #[test]
+fn r2_work_budget_counts_only_lookback_points_for_the_quadratic_search() {
+    const DAY_SEC: u64 = 86_400;
+    let mut req = request();
+    req.as_of.t_ms = 2 * DAY_SEC * 1000;
+    req.pool_history.from_ms = 0;
+    req.pool_history.warmup.from_ms = 0;
+    if let RuleSpec::ChangeCount {
+        change_mode,
+        lookback_sec,
+        ..
+    } = &mut req.rules[0]
+    {
+        *change_mode = ChangeMode::Cumulative;
+        *lookback_sec = DAY_SEC;
+    }
+    req.rules.push(RuleSpec::SwitchDensity {
+        id: "r2".into(),
+        enabled: true,
+        lookback_sec: DAY_SEC,
+        metric: Metric::QuoteReserve,
+        window_sec: 3600,
+        reversal_bps: 500,
+        switch_kind: SwitchKind::DirectionReversal,
+        count: 2,
+    });
+    let seed = req.pool_history.points[0].clone();
+    // 273 warm-up points including the boundary, then 269 lookback points.
+    req.pool_history.points = (0..=272)
+        .map(|i| i * DAY_SEC / 272)
+        .chain((1..=269).map(|i| DAY_SEC + i * DAY_SEC / 269))
+        .enumerate()
+        .map(|(i, seconds)| PoolSnapshot {
+            t_ms: seconds * 1000,
+            reserve_quote: if i % 2 == 0 { "100" } else { "150" }.into(),
+            ..seed.clone()
+        })
+        .collect();
+
+    let module = window_rules::WindowRulesModule;
+    let mut budget = limits();
+    budget.max_points = 20_000;
+    budget.max_work_units = 3_000_000;
+    let expected = module.analyze(&req, &budget).unwrap();
+    assert_eq!(expected.rules[1].outcome, RuleState::Fired);
+    budget.max_work_units = 1_000_000;
+    assert_eq!(module.analyze(&req, &budget).unwrap(), expected);
+
+    // The same number of observations inside the lookback can exceed the cap.
+    for (index, point) in req.pool_history.points.iter_mut().enumerate() {
+        point.t_ms = (DAY_SEC + (index as u64 + 1) * DAY_SEC / 542) * 1000;
+    }
+    assert_eq!(
+        module.analyze(&req, &budget),
+        Err(AlgorithmError::ResourceLimit)
+    );
+}
+
+#[test]
 fn real_cumulative_requires_its_own_prefix_and_evidence_caps_keep_counts() {
     let mut req = request();
     if let RuleSpec::ChangeCount { change_mode, .. } = &mut req.rules[0] {
