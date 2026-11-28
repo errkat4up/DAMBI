@@ -2,12 +2,11 @@ import Browser from "webextension-polyfill";
 import { Identifier } from "@lib/identifier";
 import { sendToPortAndDisregard } from "@lib/messages";
 import { RequestType } from "@lib/types";
+import { signatureFields, walletChainId, walletQuantity } from "@lib/wallet-request-fields";
 
-let metamaskChainId = 1;
-
-function checkMethod(item: any, method: string): boolean {
-  return String(item?.method).toLowerCase().includes(method.toLowerCase());
-}
+// Zero records that the wallet has not reported a usable chain yet.
+let metamaskChainId = 0;
+const typedMethods = new Set(["eth_signTypedData", "eth_signTypedData_v3", "eth_signTypedData_v4"]);
 
 function forwardBypassed(data: any): void {
   // `Browser.runtime.connect` throws "Extension context invalidated" when the
@@ -33,17 +32,19 @@ function checkMetaMaskBypass(messageData: any): void {
   const hostname = location.hostname;
   for (const item of items) {
     if (!item) continue;
-    if (checkMethod(item, "eth_sendTransaction")) {
+    const method = item.method;
+    if (method === "eth_sendTransaction" || method === "eth_signTransaction") {
       const [transaction] = item.params ?? [];
       forwardBypassed({
         type: RequestType.TRANSACTION,
+        method,
         bypassed: true,
         hostname,
         chainId: metamaskChainId,
         transaction,
       });
-    } else if (checkMethod(item, "eth_signTypedData")) {
-      const [address, typedDataStr] = item.params ?? [];
+    } else if (typedMethods.has(method)) {
+      const { address, message: typedDataStr } = signatureFields(method, item.params ?? []);
       try {
         const typedData =
           typeof typedDataStr === "string"
@@ -51,6 +52,7 @@ function checkMetaMaskBypass(messageData: any): void {
             : typedDataStr;
         forwardBypassed({
           type: RequestType.TYPED_SIGNATURE,
+          method,
           bypassed: true,
           hostname,
           chainId: metamaskChainId,
@@ -60,15 +62,13 @@ function checkMetaMaskBypass(messageData: any): void {
       } catch {
         /* ignore malformed typed data */
       }
-    } else if (
-      checkMethod(item, "eth_sign") ||
-      checkMethod(item, "personal_sign")
-    ) {
-      const [first, second] = item.params ?? [];
-      const message =
-        String(first).replace(/^0x/, "").length === 40 ? second : first;
+    } else if (method === "eth_sign" || method === "personal_sign") {
+      const { address, message } = signatureFields(method, item.params ?? []);
       forwardBypassed({
         type: RequestType.UNTYPED_SIGNATURE,
+        method,
+        address,
+        chainId: metamaskChainId,
         bypassed: true,
         hostname,
         message: String(message ?? ""),
@@ -95,9 +95,9 @@ window.addEventListener("message", (event) => {
       checkMetaMaskBypass(inner.data);
     if (
       target === Identifier.METAMASK_INPAGE &&
-      inner.data?.method?.includes("chainChanged")
+      (inner.data?.method === "metamask_chainChanged" || inner.data?.method === "chainChanged")
     ) {
-      metamaskChainId = Number(inner.data?.params?.chainId ?? metamaskChainId);
+      metamaskChainId = walletChainId(inner.data?.params?.chainId ?? inner.data?.params) ?? 0;
     }
   }
 });
@@ -108,18 +108,22 @@ window.addEventListener("message", (event) => {
   if (type !== Identifier.COINBASE_WALLET_REQUEST || !data) return;
   const hostname = location.hostname;
   if (data.request?.method === "signEthereumTransaction") {
+    const params = data.request.params;
+    if (!params) return;
+    const wei = walletQuantity(params.weiValue ?? 0);
     forwardBypassed({
       type: RequestType.TRANSACTION,
+      method: typeof params.shouldSubmit === "boolean"
+        ? (params.shouldSubmit ? "eth_sendTransaction" : "eth_signTransaction")
+        : undefined,
       bypassed: true,
       hostname,
-      chainId: Number(data.request.params.chainId ?? 1),
+      chainId: walletChainId(params.chainId) ?? 0,
       transaction: {
         from: data.request.params.fromAddress,
         to: data.request.params.toAddress,
         data: data.request.params.data,
-        value: Number.parseInt(data.request.params.weiValue ?? "0").toString(
-          16,
-        ),
+        value: wei?.toString() ?? params.weiValue,
       },
     });
   } else if (data.request?.method === "signEthereumMessage") {
@@ -131,7 +135,8 @@ window.addEventListener("message", (event) => {
           type: RequestType.TYPED_SIGNATURE,
           bypassed: true,
           hostname,
-          chainId: Number(typedData?.domain?.chainId ?? 1),
+          // This transport exposes no EIP-712 version or connected chain.
+          chainId: walletChainId(data.request.params.chainId) ?? 0,
           address: data.request.params.address,
           typedData,
         });
@@ -141,6 +146,10 @@ window.addEventListener("message", (event) => {
     } else {
       forwardBypassed({
         type: RequestType.UNTYPED_SIGNATURE,
+        method: typeof data.request.params.addPrefix === "boolean"
+          ? (data.request.params.addPrefix ? "personal_sign" : "eth_sign") : undefined,
+        address: data.request.params.address,
+        chainId: walletChainId(data.request.params.chainId) ?? 0,
         bypassed: true,
         hostname,
         message: String(data.request.params.message ?? ""),

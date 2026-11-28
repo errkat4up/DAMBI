@@ -134,7 +134,8 @@ export async function sendRequestAndAwaitDecision(
 ): Promise<MessageResponse> {
   const requestId = generateRequestId(data);
   try {
-    stream.write({ requestId, data });
+    const requests = stream as Duplex<StreamResponse, { requestId: string; data: MessageData }>;
+    requests.write({ requestId, data });
     return await receiver.awaitDecision(requestId, {
       phase1Ms: PHASE1_MS,
       phase2Ms: PHASE2_MS,

@@ -10,15 +10,15 @@
  *
  *  - A fingerprint is stored only when the wrapper request was answered `ok`.
  *    A blocked request never reaches the wallet, so nothing is stored for it.
- *  - Fingerprint: tab, page origin, and the request itself (from, to, data,
- *    value for a transaction; signer and payload for a signature). The chain id
- *    is left out — the observer's chain id is a guess that defaults to 1.
+ *  - Positive correlation requires matching browser tab/frame/origin and known
+ *    chain, method, signer and request fields. Incomplete context is observed.
  *  - Lifetime two minutes; one bypass message consumes one fingerprint, so the
  *    same request sent twice is matched twice.
  *
  * Kept in memory only. If the worker restarts in between, the copy is treated
  * as a genuine bypass row, which is observe-only anyway.
  */
+import { walletAddress, walletChainId, walletQuantity } from "@lib/wallet-request-fields";
 import { RequestType, type MessageData } from "@lib/types";
 
 export const FORWARDED_TTL_MS = 120_000;
@@ -27,62 +27,29 @@ const MAX_ENTRIES = 256;
 /** Where a message came from, as the browser reports it (not the page). */
 export interface RequestSource {
   readonly tabId: number;
+  readonly frameId: number;
   readonly origin: string;
 }
 
-export function sourceOf(sender: { tab?: { id?: number | undefined } | undefined; url?: string | undefined; origin?: string | undefined } | undefined): RequestSource | undefined {
+export function sourceOf(sender: { tab?: { id?: number | undefined } | undefined; frameId?: number | undefined; url?: string | undefined; origin?: string | undefined } | undefined): RequestSource | undefined {
   const tabId = sender?.tab?.id;
-  if (typeof tabId !== "number") return undefined;
+  const frameId = sender?.frameId;
+  if (typeof tabId !== "number" || !Number.isSafeInteger(frameId) || frameId === undefined || frameId < 0) return undefined;
   let origin = typeof sender?.origin === "string" ? sender.origin : undefined;
   if (!origin && typeof sender?.url === "string") {
     try { origin = new URL(sender.url).origin; } catch { /* no origin */ }
   }
   if (!origin || origin === "null") return undefined;
-  return { tabId, origin };
+  return { tabId, frameId, origin };
 }
 
 interface Fingerprint {
-  readonly kind: "tx" | "typed" | "untyped";
-  /** Lowercased sender / signer. `undefined` when the request carries none. */
-  readonly from: string | undefined;
+  readonly method: string;
+  readonly chainId: number;
+  readonly signer: string;
   readonly to: string;
-  /** Calldata, or the canonical signature payload. */
   readonly payload: string;
-  /** Every amount the `value` field can mean, as decimal strings. */
-  readonly values: readonly string[];
-}
-
-const address = (v: unknown): string | undefined =>
-  typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v.trim()) ? v.trim().toLowerCase() : undefined;
-
-const hexData = (v: unknown): string => {
-  if (typeof v !== "string") return "0x";
-  const s = v.trim().toLowerCase();
-  return s === "" || s === "0x" ? "0x" : s.startsWith("0x") ? s : `0x${s}`;
-};
-
-/**
- * The amounts a `value` can stand for. Missing or empty is 0. A `0x` string is
- * hex. A bare string is ambiguous — the Coinbase observer forwards hex without
- * the prefix, a dApp may pass decimal — so both readings are kept and two
- * requests agree when any reading does.
- */
-export function valueReadings(v: unknown): string[] {
-  if (v === undefined || v === null) return ["0"];
-  if (typeof v === "bigint") return [v.toString()];
-  if (typeof v === "number") return Number.isSafeInteger(v) && v >= 0 ? [String(v)] : [];
-  if (typeof v !== "string") return [];
-  const s = v.trim().toLowerCase();
-  if (s === "" || s === "0x") return ["0"];
-  try {
-    if (s.startsWith("0x")) return /^0x[0-9a-f]+$/.test(s) ? [BigInt(s).toString()] : [];
-    const out = new Set<string>();
-    if (/^[0-9]+$/.test(s)) out.add(BigInt(s).toString());
-    if (/^[0-9a-f]+$/.test(s)) out.add(BigInt(`0x${s}`).toString());
-    return [...out];
-  } catch {
-    return [];
-  }
+  readonly value: string;
 }
 
 /** JSON with object keys sorted, so key order does not change the text. */
@@ -104,24 +71,31 @@ function typedPayload(typedData: unknown): string {
 }
 
 function fingerprintOf(data: MessageData): Fingerprint | undefined {
+  if (data.type !== RequestType.TRANSACTION && data.type !== RequestType.TYPED_SIGNATURE
+      && data.type !== RequestType.UNTYPED_SIGNATURE) return undefined;
+  const chainId = walletChainId(data.chainId);
+  const method = data.method;
+  if (chainId === undefined || !method) return undefined;
   if (data.type === RequestType.TRANSACTION) {
-    const tx = (data.transaction ?? {}) as Record<string, unknown>;
-    const values = valueReadings(tx.value);
-    if (values.length === 0) return undefined;
-    return { kind: "tx", from: address(tx.from), to: address(tx.to) ?? "", payload: hexData(tx.data ?? tx.input), values };
+    const tx = data.transaction;
+    if (!tx || !walletAddress(tx.from) || (tx.to != null && !walletAddress(tx.to))) return undefined;
+    const raw = tx as Record<string, unknown>;
+    const dataHex = raw.data ?? raw.input ?? "0x";
+    if (typeof dataHex !== "string" || !/^0x(?:[a-f0-9]{2})*$/i.test(dataHex)) return undefined;
+    const amount = walletQuantity(tx.value ?? 0);
+    if (amount === undefined) return undefined;
+    return { method, chainId, signer: tx.from.toLowerCase(), to: tx.to?.toLowerCase() ?? "", payload: dataHex.toLowerCase(), value: amount.toString() };
   }
-  if (data.type === RequestType.TYPED_SIGNATURE) {
-    return { kind: "typed", from: address(data.address), to: "", payload: typedPayload(data.typedData), values: ["0"] };
-  }
-  if (data.type === RequestType.UNTYPED_SIGNATURE) {
-    // The wrapper's untyped payload carries no signer; only the message is compared.
-    return { kind: "untyped", from: undefined, to: "", payload: String(data.message ?? ""), values: ["0"] };
-  }
-  return undefined;
+  if (!walletAddress(data.address)) return undefined;
+  const signer = data.address.toLowerCase();
+  const payload = data.type === RequestType.TYPED_SIGNATURE ? typedPayload(data.typedData) : data.message;
+  return { method, chainId, signer, to: "", payload, value: "" };
 }
 
 interface Entry extends Fingerprint {
+  readonly requestId: string | undefined;
   readonly tabId: number;
+  readonly frameId: number;
   readonly origin: string;
   readonly expiresAtMs: number;
 }
@@ -129,22 +103,20 @@ interface Entry extends Fingerprint {
 let entries: Entry[] = [];
 
 /** Remember a wrapper request that was just allowed through to the wallet. */
-export function rememberForwarded(source: RequestSource | undefined, data: MessageData, nowMs = Date.now()): void {
+export function rememberForwarded(source: RequestSource | undefined, data: MessageData, nowMs = Date.now(), requestId?: string): void {
   if (!source) return;
   const fp = fingerprintOf(data);
   if (!fp) return;
   entries = entries.filter((e) => e.expiresAtMs > nowMs);
   if (entries.length >= MAX_ENTRIES) entries.shift();
-  entries.push({ ...fp, tabId: source.tabId, origin: source.origin, expiresAtMs: nowMs + FORWARDED_TTL_MS });
+  entries.push({ ...fp, requestId, tabId: source.tabId, frameId: source.frameId, origin: source.origin, expiresAtMs: nowMs + FORWARDED_TTL_MS });
 }
 
 /**
  * True when this bypass message is the wallet-side copy of a request the
  * wrapper allowed. The matching fingerprint is removed.
  *
- * The wrapper fills in a missing `from` with the connected account before it
- * asks for a verdict, but hands the wallet the dApp's original object. So a
- * copy without `from` matches on the remaining fields.
+ * Missing signer, chain or method leaves an observation available for audit.
  */
 export function consumeForwarded(source: RequestSource | undefined, data: MessageData, nowMs = Date.now()): boolean {
   entries = entries.filter((e) => e.expiresAtMs > nowMs);
@@ -152,13 +124,19 @@ export function consumeForwarded(source: RequestSource | undefined, data: Messag
   const fp = fingerprintOf(data);
   if (!fp) return false;
   const index = entries.findIndex((e) =>
-    e.tabId === source.tabId && e.origin === source.origin && e.kind === fp.kind
-    && (fp.from === undefined || e.from === undefined || e.from === fp.from)
-    && e.to === fp.to && e.payload === fp.payload
-    && e.values.some((v) => fp.values.includes(v)));
+    e.tabId === source.tabId && e.frameId === source.frameId && e.origin === source.origin
+    && e.chainId === fp.chainId && e.method === fp.method && e.signer === fp.signer
+    && e.to === fp.to && e.payload === fp.payload && e.value === fp.value);
   if (index < 0) return false;
   entries.splice(index, 1);
   return true;
+}
+
+/** Retract only the unused correlation for a decision whose wallet handoff was cancelled. */
+export function discardForwarded(source: RequestSource | undefined, requestId: string): void {
+  if (!source || !requestId) return;
+  entries = entries.filter((e) => e.requestId !== requestId || e.tabId !== source.tabId
+    || e.frameId !== source.frameId || e.origin !== source.origin);
 }
 
 /** Tests only. */

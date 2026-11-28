@@ -209,6 +209,7 @@ vi.mock("../dashboard/current-user", () => ({
   getCurrentUserId: vi.fn(async () => "u-test"),
 }));
 vi.mock("../policy-rpc", () => ({
+  SYSTEM_POLICY_ID: "__system__",
   dispatchCallsV2: mocks.dispatchCallsV2,
   // Pass-through so the orchestrator's audit-log builder behaves like
   // the real `formatAuditMatched` for synthetic diagnostics.
@@ -309,7 +310,7 @@ function txMessage(requestId = "req-1"): Message {
   return {
     requestId,
     data: {
-      type: RequestType.TRANSACTION,
+      type: RequestType.TRANSACTION, method: "eth_sendTransaction",
       chainId: 1,
       hostname: "app.example",
       transaction: {
@@ -594,12 +595,12 @@ describe("orchestrator", () => {
   // as `bypassed`, including the ones the wrapper just allowed. Those copies
   // are dropped by fingerprint; a genuine bypass row is observed only.
   describe("bypass observer rows", () => {
-    const PAGE = { tabId: 7, origin: "https://app.example" };
+    const PAGE = { tabId: 7, frameId: 0, origin: "https://app.example" };
     const failVerdict = {
       kind: "fail" as const,
       matched: [{ policy_id: "deny-policy", reason: "blocked by policy", severity: "deny", origin: "tx" }],
     };
-    /** The wallet-side copy: same transaction, the observer's own chain id guess. */
+    /** The wallet-side observation carries the chain known to that observer. */
     const bypassCopy = (m: Message, requestId: string, chainId = 1): Message =>
       ({ requestId, data: { ...(m.data as object), chainId, bypassed: true } }) as Message;
     const onChain = (m: Message, chainId: number): Message =>
@@ -644,12 +645,30 @@ describe("orchestrator", () => {
       expect(mocks.auditAppend).toHaveBeenCalledTimes(1);
     });
 
-    it("the copy still matches when the dApp is on another chain (the observer reports chain 1)", async () => {
+    it("keeps a different-chain observation without consuming the approved chain's handoff", async () => {
       passes();
       const wrapped = onChain(txMessage("fw-base"), 8453);
       expect(await decideWalletRequest(wrapped, PAGE, {})).toMatchObject({ ok: true });
-      expect(await decideWalletRequest(bypassCopy(wrapped, "fw-base-copy", 1), PAGE, {})).toBeNull();
-      expect(mocks.auditAppend).toHaveBeenCalledTimes(1);
+      expect(await decideWalletRequest(bypassCopy(wrapped, "fw-eth-observation", 1), PAGE, {})).not.toBeNull();
+      expect(mocks.auditAppend).toHaveBeenLastCalledWith(expect.objectContaining({
+        requestId: "fw-eth-observation", bypassed: true,
+      }));
+      expect(await decideWalletRequest(bypassCopy(wrapped, "fw-base-copy", 8453), PAGE, {})).toBeNull();
+      expect(mocks.auditAppend).toHaveBeenCalledTimes(2);
+    });
+
+    it("records an unknown-chain observation without evaluating chain policies or adding a wallet decision", async () => {
+      const result = await decideWalletRequest(bypassCopy(txMessage(), "bypass-unknown-chain", 0), PAGE, {});
+      expect(result).toMatchObject({ ok: false, verdict: {
+        kind: "warn", matched: [expect.objectContaining({ policy_id: "__engine::chain_unknown" })],
+      } });
+      expect(result).not.toHaveProperty("rejection");
+      expect(snapshot()).toEqual({ route: 0, scam: 0, windows: 0, audit: 1 });
+      expect(mocks.auditAppend).toHaveBeenCalledWith(expect.objectContaining({
+        requestId: "bypass-unknown-chain", bypassed: true,
+        declarativeV3: expect.objectContaining({ reason: "chain_unknown" }),
+      }));
+      expect(mocks.localStore.get("verdicts:log")).toBeUndefined();
     });
 
     it("a genuine bypass row is observed only: no scam check, no window, one audit row, one notification on fail", async () => {
@@ -658,6 +677,7 @@ describe("orchestrator", () => {
       const onAwaitingUser = vi.fn();
       const result = await decideWalletRequest(bypassCopy(txMessage("real-bypass-fail"), "real-bypass-fail"), PAGE, { onRiskyVerdict, onAwaitingUser });
       expect(result).toMatchObject({ ok: false, verdict: { kind: "fail" } });
+      expect(result).not.toHaveProperty("rejection");
       expect(mocks.beginScamChecks).not.toHaveBeenCalled();
       expect(mocks.browser.windows.create).not.toHaveBeenCalled();
       expect(onAwaitingUser).not.toHaveBeenCalled();
@@ -670,6 +690,7 @@ describe("orchestrator", () => {
       const onRiskyVerdict = vi.fn();
       const result = await decideWalletRequest(bypassCopy(txMessage("real-bypass-warn"), "real-bypass-warn"), PAGE, { onRiskyVerdict });
       expect(result).toMatchObject({ ok: false, verdict: { kind: "warn" } });
+      expect(result).not.toHaveProperty("rejection");
       expect(mocks.browser.windows.create).not.toHaveBeenCalled();
       expect(mocks.beginScamChecks).not.toHaveBeenCalled();
       expect(mocks.auditAppend).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ bypassed: true, verdict: "warn" }));
@@ -760,7 +781,10 @@ describe("orchestrator", () => {
         requestId: message.requestId, display: scamDisplay, expiresAtMs: expect.any(Number),
       });
       approve(message.requestId, ok);
-      expect(await pending).toMatchObject({ ok, verdict: { kind: "pass" } });
+      const result = await pending;
+      expect(result).toMatchObject({ ok, verdict: { kind: "pass" } });
+      if (ok) expect(result).not.toHaveProperty("rejection");
+      else expect(result).toHaveProperty("rejection", "user_cancelled");
     }
     expect(mocks.cancelScam).toHaveBeenCalledTimes(2);
   });
@@ -772,7 +796,7 @@ describe("orchestrator", () => {
     mocks.beginScamChecks.mockReturnValueOnce(scamChecks({ scam: scamDisplay }));
     const onAwaitingUser = vi.fn();
     const result = await decideMessage(txMessage("scam-deny"), { onAwaitingUser });
-    expect(result).toEqual({ ok: false, verdict });
+    expect(result).toEqual({ ok: false, verdict, rejection: "policy_denied" });
     expect(onAwaitingUser).not.toHaveBeenCalled();
     expect(mocks.runtimeMessageListeners).toHaveLength(0);
     expect(lastConfirmUrl().searchParams.get("scam")).toBe("1");
@@ -792,8 +816,9 @@ describe("orchestrator", () => {
     mocks.tryDeclarativeRouteV3.mockResolvedValueOnce(v3HitOutcome);
     mocks.resolveBundlesForWallet.mockRejectedValueOnce(new mocks.MockEngineError("route_failed", "legacy route miss"));
     mocks.beginScamChecks.mockReturnValueOnce(scamChecks({ scam: scamDisplay }));
+    mocks.auditAppend.mockRejectedValueOnce(new Error("audit storage unavailable"));
     const result = await decideAndApprove(txMessage("scam-legacy-pass"), false);
-    expect(result).toMatchObject({ ok: false, verdict: { kind: "pass" } });
+    expect(result).toMatchObject({ ok: false, verdict: { kind: "pass" }, rejection: "user_cancelled" });
     expect(mocks.evaluateActionV2).not.toHaveBeenCalled();
     expect(lastConfirmUrl().searchParams.get("scam")).toBe("1");
     expect(lastConfirmUrl().searchParams.get("review")).toBe("1");
@@ -879,9 +904,8 @@ describe("orchestrator", () => {
 
     const result = await decideMessage(txMessage("v2-fail-1"));
 
-    // Fail verdicts surface as a non-ok decision via the v2 path.
-    expect(result.verdict.kind).toBe("fail");
-    expect(result.ok).toBe(false);
+    // Missing required RPC data is a system failure in the v2 verdict.
+    expect(result).toMatchObject({ ok: false, verdict: { kind: "fail" }, rejection: "unavailable" });
     expect(mocks.auditAppend).toHaveBeenCalledWith(
       expect.objectContaining({ verdictSource: "declarative-v2" }),
     );
@@ -924,8 +948,7 @@ describe("orchestrator", () => {
     const result = await decideMessage(txMessage("wasm1-fail-survives"));
 
     // The computed FAIL from leg 0 survives leg 1's fault (was "warn" pre-fix).
-    expect(result.verdict.kind).toBe("fail");
-    expect(result.ok).toBe(false);
+    expect(result).toMatchObject({ ok: false, verdict: { kind: "fail" }, rejection: "policy_denied" });
     expect(mocks.evaluateActionV2).toHaveBeenCalledOnce();
   });
 
@@ -1176,8 +1199,39 @@ describe("orchestrator", () => {
 
   it("p3: a user-cancelled fail-close yields a non-ok decision", async () => {
     const result = await decideAndApprove(txMessage("p3-cancel-1"), false);
-    expect(result.ok).toBe(false);
-    expect(result.verdict.kind).toBe("warn");
+    expect(result).toMatchObject({ ok: false, verdict: { kind: "warn" }, rejection: "user_cancelled" });
+  });
+
+  it("reports unavailable when the browser cannot open the confirmation window", async () => {
+    mocks.browser.windows.create.mockRejectedValueOnce(new Error("Window unavailable"));
+    const onAwaitingUser = vi.fn();
+    const result = await decideMessage(txMessage("unavailable-window"), { onAwaitingUser });
+    expect(result).toMatchObject({ ok: false, verdict: { kind: "warn" }, rejection: "unavailable" });
+    expect(onAwaitingUser).not.toHaveBeenCalled();
+    expect(mocks.browser.windows.create).toHaveBeenCalledOnce();
+  });
+
+  it("reports unavailable when the confirmation expires without a user decision", async () => {
+    vi.useFakeTimers();
+    const onAwaitingUser = vi.fn();
+    const pending = decideMessage(txMessage("unanswered-window"), { onAwaitingUser });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onAwaitingUser).toHaveBeenCalledOnce();
+    vi.setSystemTime(Date.now() + 6 * 60_000);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(await pending).toMatchObject({ ok: false, verdict: { kind: "warn" }, rejection: "unavailable" });
+    expect(mocks.runtimeMessageListeners).toHaveLength(0);
+    await vi.waitFor(() => expect(mocks.localStore.get("verdicts:log")).toEqual([
+      expect.objectContaining({ delta_id: "unanswered-window", user_decision: null }),
+    ]));
+  });
+
+  it("preserves an explicit cancellation if writing the audit row fails", async () => {
+    mocks.auditAppend.mockRejectedValueOnce(new Error("Audit write failed"));
+    const result = await decideAndApprove(txMessage("audit-failed-after-cancel"), false);
+    expect(result).toMatchObject({ ok: false, verdict: { kind: "warn" }, rejection: "user_cancelled" });
+    expect(mocks.auditAppend).toHaveBeenCalledOnce();
+    expect(mocks.browser.windows.create).toHaveBeenCalledOnce();
   });
 
   it("p3: a v3 fault fails closed (verdictSource=fail_closed)", async () => {
@@ -1686,8 +1740,7 @@ describe("orchestrator", () => {
       await Promise.resolve();
       const result = await pending;
 
-      expect(result.ok).toBe(false);
-      expect(result.verdict.kind).toBe("fail");
+      expect(result).toMatchObject({ ok: false, verdict: { kind: "fail" }, rejection: "unavailable" });
       expect(result.verdict.matched?.[0]).toMatchObject({
         policy_id: "__venue::deny_closed",
         severity: "deny",

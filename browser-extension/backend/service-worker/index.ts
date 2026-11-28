@@ -15,7 +15,7 @@ import {
   type Ps2Request,
 } from "./policy-store/api";
 import { decideWalletRequest } from "./orchestrator";
-import { sourceOf } from "./forwarded-requests";
+import { discardForwarded, sourceOf } from "./forwarded-requests";
 import {
   handleScamSettingsRequest,
   isScamSettingsRequest,
@@ -214,6 +214,12 @@ async function handleMessage(
   message: Message,
   port: Browser.Runtime.Port,
 ): Promise<void> {
+  if (message.data.type === "discard-forwarded") {
+    discardForwarded(sourceOf(port.sender), message.data.originalRequestId);
+    // Release the isolated bridge waiter. This advisory cannot approve a wallet request.
+    port.postMessage({ requestId: message.requestId, data: false });
+    return;
+  }
   // Advisory messages: log only, no verdict.
   if (message.data.type === "raw-transaction-advisory") {
     console.warn("[Dambi] raw-tx advisory", message.data);
@@ -274,6 +280,7 @@ async function handleMessage(
     const response: MessageResponse = {
       requestId: message.requestId,
       data: decision.ok,
+      ...(decision.rejection ? { rejection: decision.rejection } : {}),
     };
     try {
       port.postMessage(response);

@@ -391,11 +391,9 @@ function render(): void {
   });
 }
 
-// On window close (X button), treat as cancel — already-failed verdicts
-// just dismiss; requests awaiting review treat close as "user did not approve".
+// Closing the window without a decision leaves the wallet request unapproved.
 window.addEventListener("beforeunload", () => {
-  // Persist a final "decided: ok=false" so the SW poll loop sees the
-  // close intent if the runtime message racing with unload doesn't land.
+  // Keep an explicit Cancel distinct from a window that simply disappeared.
   void Browser.storage.session
     .get(PENDING_DECISION_KEY)
     .then((stored) => {
@@ -403,7 +401,7 @@ window.addEventListener("beforeunload", () => {
         | Record<string, { status: string; ok?: boolean }>
         | undefined;
       if (all && all[requestId] && all[requestId].status === "awaiting") {
-        all[requestId] = { ...all[requestId], status: "decided", ok: false };
+        all[requestId] = { ...all[requestId], status: "dismissed", ok: false };
         return Browser.storage.session.set({ [PENDING_DECISION_KEY]: all });
       }
       return undefined;

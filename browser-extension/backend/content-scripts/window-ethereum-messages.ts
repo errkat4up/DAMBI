@@ -51,7 +51,8 @@ stream.on("data", async (message: Message) => {
         "transaction blocked. Reload this tab to restore policy evaluation.",
       err,
     );
-    verdictSender.send({ requestId: message.requestId, data: false, rejection: "unavailable" });
+    // A legacy false with no decision origin is normalized to unavailable by the receiver.
+    verdictSender.send({ requestId: message.requestId, data: false });
     return;
   }
   const data: Message["data"] = {

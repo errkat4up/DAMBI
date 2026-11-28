@@ -31,6 +31,7 @@ import {
 import {
   dispatchCallsV2,
   formatAuditMatched,
+  SYSTEM_POLICY_ID,
   type PolicyRpcAuditMeta,
 } from "./policy-rpc";
 import {
@@ -59,6 +60,7 @@ import {
   isUntypedSignature,
   isVenueOrder,
   type Message,
+  type MessageResponse,
 } from "@lib/types";
 import { hlOrderToAction, HL_TO_SENTINEL } from "./hl-order-to-action";
 import { reportPermitIfApplicable } from "./permit-report";
@@ -111,9 +113,26 @@ export function classifyMessage(message: Message): ActionNatureKind {
 // (or an `awaiting-user` extension request) before the proxy gives up.
 const HARD_TIMEOUT_MS = 8_000;
 
-interface DecisionResult {
+type UserDecision = "trusted" | "cancelled" | null;
+
+interface DecisionResult extends Pick<MessageResponse, "rejection"> {
   ok: boolean;
   verdict: VerdictDto;
+}
+
+function decisionResult(
+  ok: boolean,
+  verdict: VerdictDto,
+  userDecision: UserDecision,
+  observeOnly: boolean,
+  source?: VerdictSource,
+): DecisionResult {
+  if (ok || observeOnly) return { ok, verdict };
+  if (userDecision === "cancelled") return { ok, verdict, rejection: "user_cancelled" };
+  const policyDenied = source === "declarative-v2" && verdict.kind === "fail"
+    && verdict.matched.some((match) => match.severity === "deny"
+      && match.origin !== "engine_error" && match.policy_id !== SYSTEM_POLICY_ID);
+  return { ok, verdict, rejection: policyDenied ? "policy_denied" : "unavailable" };
 }
 
 interface DecisionOptions {
@@ -240,7 +259,7 @@ export async function decideWalletRequest(
   const decision = await decideMessage(message, options);
   // Only a request that is about to be handed to the wallet leaves a fingerprint.
   if (!bypassed && decision.ok && reachesWallet(message)) {
-    rememberForwarded(source, message.data);
+    rememberForwarded(source, message.data, Date.now(), message.requestId);
   }
   return decision;
 }
@@ -323,7 +342,7 @@ async function decideInner(
     const { verdict } = lifecycle;
     // Nothing decoded (venue / signature / route miss) → no check was started.
     scamChecks.close();
-    // Each is present only for a warning; anything else opens no window.
+    // These are the results selected for pre-sign display.
     const { scam, backdoor, window: windowRules } = await scamChecks.promise;
 
     // 표시 전용 advisory 데스크톱 알림 — 라이브 위험(fail|warn) verdict 에서만.
@@ -361,17 +380,19 @@ async function decideInner(
     let ok = false;
     // A scam warning also requires review of an otherwise passing
     // transaction. The original policy verdict remains unchanged.
-    let userDecision: "trusted" | "cancelled" | null = null;
+    let userDecision: UserDecision = null;
     if (observeOnly) {
       // Nothing is asked and nothing is answered; `ok` only mirrors the verdict.
       ok = verdict.kind === "pass";
     } else if (verdict.kind === "pass") {
       const review = scam !== undefined || backdoor !== undefined || windowRules !== undefined;
-      ok = !review || await openVerdictWindowAndAwait(
-        message.requestId, message.data.hostname, verdict,
-        confirmDetailsForMessage(message), options.onAwaitingUser, scam, backdoor, windowRules,
-      );
-      if (review) userDecision = ok ? "trusted" : "cancelled";
+      if (review) {
+        userDecision = await openVerdictWindowAndAwait(
+          message.requestId, message.data.hostname, verdict,
+          confirmDetailsForMessage(message), options.onAwaitingUser, scam, backdoor, windowRules,
+        );
+      }
+      ok = !review || userDecision === "trusted";
     } else if (verdict.kind === "fail") {
       // Surface the matched policies in a popup so the user understands
       // why the dApp's transaction returned 4001. The popup is
@@ -393,7 +414,7 @@ async function decideInner(
       // FAIL 차단에는 영향 없음(위 분기에서 항상 모달+차단).
       await ensureNotifySettings();
       if (scam !== undefined || backdoor !== undefined || windowRules !== undefined || shouldWarnModal()) {
-        ok = await openVerdictWindowAndAwait(
+        userDecision = await openVerdictWindowAndAwait(
           message.requestId,
           message.data.hostname,
           verdict,
@@ -403,7 +424,7 @@ async function decideInner(
           backdoor,
           windowRules,
         );
-        userDecision = ok ? "trusted" : "cancelled";
+        ok = userDecision === "trusted";
       } else {
         // 모달 생략 → 사용자 입력 없이 자동 진행. 결정이 없었으므로 audit 의
         // user_decision 은 null 로 둔다(quiet 모드 자동 통과를 정확히 기록).
@@ -411,7 +432,7 @@ async function decideInner(
       }
     }
 
-    decided = { ok, verdict };
+    decided = decisionResult(ok, verdict, userDecision, observeOnly, lifecycle.verdictSource);
     await appendAudit(
       message,
       pending.type,
@@ -421,7 +442,7 @@ async function decideInner(
       lifecycle.declarativeV3,
       userDecision,
     );
-    return { ok, verdict };
+    return decided;
   } catch (err) {
     // An audit write failure must not undo a completed cancellation or approval.
     if (decided) return decided;
@@ -477,28 +498,32 @@ async function decideInner(
     scamChecks.close();
     const { scam, backdoor, window: windowRules } = await scamChecks.promise;
     let ok = verdict.kind === "pass";
-    let userDecision: "trusted" | "cancelled" | null = null;
+    let userDecision: UserDecision = null;
     // A legacy route miss can become pass here. It must still display an
     // opted-in scam result instead of silently bypassing pre-sign review.
-    if (scam !== undefined || backdoor !== undefined || windowRules !== undefined) {
+    if (!observeOnly && (scam !== undefined || backdoor !== undefined || windowRules !== undefined)) {
       if (verdict.kind === "fail") {
         await openVerdictWindow(message.requestId, message.data.hostname,
           verdict, confirmDetailsForMessage(message), scam, backdoor, windowRules);
       } else {
-        ok = await openVerdictWindowAndAwait(message.requestId, message.data.hostname,
+        userDecision = await openVerdictWindowAndAwait(message.requestId, message.data.hostname,
           verdict, confirmDetailsForMessage(message), options.onAwaitingUser, scam, backdoor, windowRules);
-        userDecision = ok ? "trusted" : "cancelled";
+        ok = userDecision === "trusted";
       }
     }
-    await appendAudit(message, pending.type, verdict, undefined, undefined, undefined, userDecision);
+    await appendAudit(message, pending.type, verdict, undefined, undefined, undefined, userDecision)
+      .catch((auditError) => console.warn("[Dambi] fallback decision audit failed", auditError));
     // `engineErrorVerdict` may downgrade some failures (e.g. route_failed)
     // to a pass — in that case the inpage proxy must be told to forward the
     // request to the wallet, so `ok` has to track the verdict, not be
     // hard-coded to false.
-    return { ok, verdict };
+    return decisionResult(ok, verdict, userDecision, observeOnly);
   } finally {
     scamChecks.cancel();
-    await pendingDelete(message.requestId);
+    // Housekeeping must not replace the decision already made for this request.
+    await pendingDelete(message.requestId).catch((err) =>
+      console.warn("[Dambi] pending decision cleanup failed", err),
+    );
   }
 }
 
@@ -560,6 +585,10 @@ async function appendAudit(
     ...(verdictSource ? { verdictSource } : {}),
     decidedAtMs: Date.now(),
   });
+
+  // The audit row above records observations. The wallet decision history
+  // describes enforced requests, so a passive observation ends here.
+  if ("bypassed" in message.data && message.data.bypassed) return;
 
   // Keep the user-facing verdict log on-device. The server returns simulated
   // state for policy evaluation; the extension owns policy verdicts and audit
@@ -774,6 +803,18 @@ async function runLifecycle(
   /** Receives the decoded `Action[]` as soon as the route produces it. */
   onDecoded?: (actions: readonly unknown[]) => void,
 ): Promise<LifecycleResult> {
+  if ((isTransaction(message) || isTypedSignature(message)) && message.data.bypassed &&
+      (!Number.isSafeInteger(message.data.chainId) || message.data.chainId <= 0)) {
+    return {
+      verdict: { kind: "warn", matched: [{
+        policy_id: "__engine::chain_unknown", severity: "warn", origin: "engine_error",
+        reason: "Observed request without a confirmed chain; chain policies were not evaluated.",
+      }] },
+      verdictSource: "fail_closed",
+      declarativeV3: { outcome: "miss", nature: classifyMessage(message), reason: "chain_unknown" },
+    };
+  }
+
   // Venue request (Hyperliquid `/exchange`, ...) — its own v2 path. It never
   // carries EVM calldata, so it does not go through the `tryDeclarativeRouteV3`
   // calldata branch below; instead the JSON intent is converted to
@@ -2083,7 +2124,7 @@ async function openVerdictWindowAndAwait(
   scam?: ScamDisplay,
   backdoor?: BackdoorDisplay,
   windowRules?: WindowDisplay,
-): Promise<boolean> {
+): Promise<UserDecision> {
   const all =
     ((
       (await Browser.storage.session.get(PENDING_DECISION_KEY)) as Record<
@@ -2110,14 +2151,14 @@ async function openVerdictWindowAndAwait(
       focused: true,
     });
   } catch {
-    return false;
+    return null;
   }
 
-  return new Promise<boolean>((resolve) => {
+  return new Promise<UserDecision>((resolve) => {
     let settled = false;
     let pollHandle: ReturnType<typeof setInterval> | undefined;
 
-    const settle = (ok: boolean): void => {
+    const settle = (choice: UserDecision): void => {
       if (settled) return;
       settled = true;
       Browser.runtime.onMessage.removeListener(messageListener);
@@ -2127,7 +2168,7 @@ async function openVerdictWindowAndAwait(
       if (win.id !== undefined) {
         Browser.windows.remove(win.id).catch(() => {});
       }
-      resolve(ok);
+      resolve(choice);
     };
 
     const messageListener = (msg: unknown): void => {
@@ -2138,10 +2179,14 @@ async function openVerdictWindowAndAwait(
       } | null;
       if (!m || m.type !== "dambi:verdict-decision") return;
       if (m.requestId !== requestId) return;
-      settle(!!m.ok);
+      if (typeof m.ok === "boolean") settle(m.ok ? "trusted" : "cancelled");
     };
     const closeListener = (closedId: number): void => {
-      if (closedId === win.id) settle(false);
+      if (closedId === win.id) {
+        // The popup persists an explicit choice before closing. Recover it
+        // if its runtime message was lost; a bare dismissal has no choice.
+        void readChoice().then((choice) => settle(choice ?? null));
+      }
     };
     Browser.runtime.onMessage.addListener(messageListener);
     Browser.windows.onRemoved.addListener(closeListener);
@@ -2151,22 +2196,23 @@ async function openVerdictWindowAndAwait(
     // forever if the user walked away.
     const POLL_DEADLINE_MS = 5 * 60_000;
     const pollDeadline = Date.now() + POLL_DEADLINE_MS;
+    async function readChoice(): Promise<UserDecision | undefined> {
+      try {
+        const stored = await Browser.storage.session.get(PENDING_DECISION_KEY);
+        const rec = (stored[PENDING_DECISION_KEY] as
+          Record<string, { status: string; ok?: boolean }> | undefined)?.[requestId];
+        if (rec?.status === "dismissed") return null;
+        if (rec?.status === "decided" && typeof rec.ok === "boolean") {
+          return rec.ok ? "trusted" : "cancelled";
+        }
+      } catch { /* the direct runtime message may still arrive */ }
+      return undefined;
+    }
+
     pollHandle = setInterval(async () => {
-      if (Date.now() > pollDeadline) {
-        settle(false);
-        return;
-      }
-      const fresh =
-        ((
-          (await Browser.storage.session.get(PENDING_DECISION_KEY)) as Record<
-            string,
-            unknown
-          >
-        )[PENDING_DECISION_KEY] as
-          | Record<string, { status: string; ok?: boolean }>
-          | undefined) ?? {};
-      const rec = fresh[requestId];
-      if (rec?.status === "decided") settle(!!rec.ok);
+      if (Date.now() > pollDeadline) return settle(null);
+      const choice = await readChoice();
+      if (choice !== undefined) settle(choice);
     }, 250);
 
     // Extend the inpage stream timer so the user has time to read and decide.

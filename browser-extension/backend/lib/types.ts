@@ -268,7 +268,8 @@ export type MessageData =
   | VenueOrderPayload
   | ExecutionReportPayload
   | RawTransactionAdvisoryPayload
-  | FrozenProviderWarningPayload;
+  | FrozenProviderWarningPayload
+  | { type: "discard-forwarded"; hostname: string; originalRequestId: string };
 
 export interface Message {
   requestId: string;

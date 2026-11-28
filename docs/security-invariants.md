@@ -62,10 +62,14 @@ own window; cross-frame messages cannot inject them.
 **Violation.** A foreign frame could post a forged wallet relay message and
 create misleading bypass state.
 
-**Enforcement.** Both listeners in
-`browser-extension/backend/content-scripts/bypass-check.ts:84-108` reject an
-event unless `event.source === window` (N7).  The accepted same-page residual
-is explicitly limited to observe-only rows and never gates a verdict.
+**Enforcement.** The wallet observer accepts events only from the current window.
+An unmatched observation can produce an audit entry or notification, without
+opening a signing prompt or determining whether the wallet proceeds. A forwarded
+copy is consumed once within two minutes only when the browser tab, frame and
+origin and the known chain, method, signer and request contents agree. Worker
+restart clears the cache. Missing correlation data leaves the observation in the
+audit. This cache cannot authenticate a relay event or establish that no other
+wallet activity occurred. Same-page relay provenance remains a limitation.
 
 ## Production distribution requires signing
 

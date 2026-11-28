@@ -73,7 +73,7 @@ class MockStream {
     this.writes.push(message);
     // Execution-report writes are fire-and-forget (no verdict). Only policy
     // requests receive a verdict — delivered over the authenticated port (C1).
-    if ((message.data as { type?: string } | undefined)?.type === "execution-report") {
+    if (["execution-report", "discard-forwarded"].includes((message.data as { type?: string } | undefined)?.type ?? "")) {
       return true;
     }
     const data = streamState.responses.shift() ?? true;
@@ -95,7 +95,7 @@ function streamWrites(): Array<{ requestId: string; data: unknown }> {
 
 function policyWrites(): Array<{ requestId: string; data: unknown }> {
   return streamWrites().filter(
-    (write) => (write.data as { type?: string }).type !== "execution-report",
+    (write) => !["execution-report", "discard-forwarded"].includes((write.data as { type?: string }).type ?? ""),
   );
 }
 
@@ -1445,7 +1445,6 @@ describe("inpage provider proxy", () => {
       request.method === "eth_chainId" ? read : "0xsigned",
     );
     const provider = {
-      chainId: undefined as string | undefined,
       request: originalRequest,
       on: (event: string, listener: (...args: unknown[]) => void) => {
         if (event === "chainChanged") changed = listener;
@@ -1455,7 +1454,7 @@ describe("inpage provider proxy", () => {
     const request = { method: "eth_signTypedData_v4", params: [SIGNER, { domain: {}, message: {} }] };
     const pending = provider.request(request);
     expect(originalRequest).toHaveBeenCalledWith({ method: "eth_chainId" });
-    provider.chainId = "0x1";
+    Object.assign(provider, { chainId: "0x1" });
     changed("0x164ce");
     if (completion === "invalid-event") changed(undefined);
     if (completion === "reject") rejectRead(new Error("old read failed"));
@@ -1471,6 +1470,25 @@ describe("inpage provider proxy", () => {
       expect(signaturePolicy(1).chainId).toBe(91342);
       expect(originalRequest).toHaveBeenCalledTimes(3);
     }
+  });
+
+  it("requires a new verdict if the wallet changes chain while confirmation is pending", async () => {
+    await import("../proxy-injected-providers");
+    let notifyChain!: (value: unknown) => void;
+    const downstream = vi.fn(async (_request: TestRequest) => "signed");
+    const provider = { chainId: "0x1", request: downstream, on: (event: string, fn: (...args: unknown[]) => void) => {
+      if (event === "chainChanged") notifyChain = fn;
+    } };
+    window.ethereum = provider;
+    streamState.beforeVerdict = () => { notifyChain("0x164ce"); };
+    await expect(provider.request({ method: "personal_sign", params: ["message", SIGNER] }))
+      .rejects.toMatchObject({ code: 4001, message: expect.stringContaining("evaluation unavailable") });
+    expect(downstream).not.toHaveBeenCalled();
+    expect(streamWrites().at(-1)?.data).toMatchObject({ type: "discard-forwarded", originalRequestId: policyWrites()[0]?.requestId });
+    streamState.beforeVerdict = null;
+    await expect(provider.request({ method: "personal_sign", params: ["message", SIGNER] })).resolves.toBe("signed");
+    expect(signaturePolicy(1).chainId).toBe(91342);
+    expect(downstream).toHaveBeenCalledOnce();
   });
 
   it("rejects malformed current fields instead of using a warm cached chain", async () => {

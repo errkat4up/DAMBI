@@ -7,6 +7,7 @@ import {
 } from "@lib/messages";
 import { createVerdictReceiver } from "@lib/verdict-channel";
 import { RequestType } from "@lib/types";
+import { walletAddress as looksLikeAddress, walletChainId as parseChainId, signatureFields } from "@lib/wallet-request-fields";
 import type {
   ExecutionReportOutcome,
   ExecutionReportPayload,
@@ -81,22 +82,33 @@ const stream = new WindowPostMessageStream({
 const verdictReceiver = createVerdictReceiver(Identifier.VERDICT_PORT_INIT);
 
 const REJECT_TX = ethErrors.provider.userRejectedRequest(
-  "Dambi: transaction blocked by policy",
+  "Dambi: transaction blocked: policy evaluation unavailable",
 );
 const REJECT_SIG = ethErrors.provider.userRejectedRequest(
-  "Dambi: signature blocked by policy",
+  "Dambi: signature blocked: policy evaluation unavailable",
 );
 
 // Throw at the individual decision site so batch legs and concurrent requests
 // keep their own reason and action kind; never store a process-wide last reason.
-async function sendRequestAndAwaitVerdict(
-  requestStream: WindowPostMessageStream,
-  receiver: typeof verdictReceiver,
-  data: MessageData,
+async function confirmWalletAction(
+  provider: Eip1193Provider,
+  data: Extract<MessageData, { type: RequestType.TRANSACTION | RequestType.TYPED_SIGNATURE | RequestType.UNTYPED_SIGNATURE }>,
 ): Promise<boolean> {
-  const decision = await sendRequestAndAwaitDecision(requestStream, receiver, data);
-  if (decision.data === true) return true;
+  const revision = chainIdRevisions.get(provider);
+  const initialChain = knownChainId(provider);
+  const decision = await sendRequestAndAwaitDecision(stream, verdictReceiver, data);
   const action = data.type === RequestType.TRANSACTION ? "transaction" : "signature";
+  if (decision.data === true) {
+    const currentChain = knownChainId(provider);
+    if (revision !== chainIdRevisions.get(provider) || currentChain !== initialChain
+        || (data.method !== "wallet_sendCalls" && currentChain !== data.chainId)) {
+      sendToStreamAndDisregard(stream, {
+        type: "discard-forwarded", hostname: location.hostname, originalRequestId: decision.requestId,
+      });
+      return unavailableChain(action);
+    }
+    return true;
+  }
   const detail = decision.rejection === "user_cancelled"
     ? "rejected by user"
     : decision.rejection === "policy_denied"
@@ -138,19 +150,6 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
-}
-
-function looksLikeAddress(value: unknown): value is `0x${string}` {
-  return typeof value === "string" && /^0x[0-9a-fA-F]{40}$/.test(value);
-}
-
-function parseChainId(value: unknown): number | undefined {
-  if (
-    typeof value !== "number" &&
-    !(typeof value === "string" && /^(?:0x[0-9a-fA-F]+|[0-9]+)$/.test(value))
-  ) return undefined;
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function unavailableChain(action: "transaction" | "signature"): never {
@@ -273,9 +272,9 @@ async function checkTransaction(
     chainId,
     hostname: location.hostname,
     transaction: policyTransaction,
-  } as MessageData;
+  } as Extract<MessageData, { type: RequestType.TRANSACTION }>;
 
-  return sendRequestAndAwaitVerdict(stream, verdictReceiver, data);
+  return confirmWalletAction(provider, data);
 }
 
 async function checkWalletSendCalls(
@@ -323,43 +322,17 @@ async function checkWalletSendCalls(
   return true;
 }
 
-function signatureParams(
-  method: string,
-  params: unknown[],
-): { address?: `0x${string}`; message: unknown } {
-  const [first, second] = params;
-  // personal_sign is [message, signer]; eth_sign and typed methods are
-  // [signer, message]. When both are addresses, the method's order wins.
-  if (second === undefined || second === null) {
-    return {
-      message: method !== "personal_sign" && looksLikeAddress(first)
-        ? undefined
-        : first,
-    };
-  }
-  const [signer, message] = method === "personal_sign"
-    ? [second, first]
-    : [first, second];
-  if (looksLikeAddress(signer)) return { address: signer, message };
-  // Tolerate the reversed two-parameter form only when there is one address
-  // and an actual other payload, never promote a lone message to a signer.
-  if (signer !== undefined && signer !== null && looksLikeAddress(message)) {
-    return { address: message, message: signer };
-  }
-  return { message: method === "personal_sign" ? first : second };
-}
-
 async function checkTypedSignature(
   provider: Eip1193Provider,
   params: unknown[],
   method: string,
   readRequest?: ProviderRequest,
 ): Promise<boolean> {
-  const { address, message: typedData } = signatureParams(method, params);
+  const { address, message: typedData } = signatureFields(method, params);
   if (typedData === undefined || typedData === null) return true;
   const chainId = await readChainId(provider, readRequest, "signature");
 
-  return sendRequestAndAwaitVerdict(stream, verdictReceiver, {
+  return confirmWalletAction(provider, {
     type: RequestType.TYPED_SIGNATURE,
     // Keep the zero-address routing fallback, but do not publish complete
     // correlation metadata for a fabricated signer. Absent method remains the
@@ -378,11 +351,11 @@ async function checkUntypedSignature(
   method: string,
   readRequest?: ProviderRequest,
 ): Promise<boolean> {
-  const { address, message } = signatureParams(method, params);
+  const { address, message } = signatureFields(method, params);
   if (message === undefined || message === null) return true;
   const chainId = await readChainId(provider, readRequest, "signature");
 
-  return sendRequestAndAwaitVerdict(stream, verdictReceiver, {
+  return confirmWalletAction(provider, {
     type: RequestType.UNTYPED_SIGNATURE,
     method,
     ...(address ? { address } : {}),
@@ -506,7 +479,7 @@ function resultChainId(
 }
 
 function signatureAddress(method: string, params: unknown[]): string | undefined {
-  return signatureParams(method, params).address;
+  return signatureFields(method, params).address;
 }
 
 function evaluatedTransactionAddress(params: unknown[]): string | undefined {
