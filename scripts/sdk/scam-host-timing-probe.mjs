@@ -11,7 +11,7 @@
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { collectScamHostTrials, observeScamHost } from "./scam-host-timing.mjs";
-export { measureScamHostRequest } from "./scam-host-timing.mjs";
+export { measureScamHostRequest, observeScamHostGate } from "./scam-host-timing.mjs";
 
 export async function probeScamHost(endpoint, extensionId, durationMs, onReady = () => {}) {
   const url = new URL(endpoint);

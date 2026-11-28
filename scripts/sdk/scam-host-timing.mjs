@@ -75,114 +75,154 @@ export function observeScamHost(scope, publish) {
   };
 }
 
-/**
- * Equivalent ordinary unsigned-test-harness boundary, NOT the worker CDP
- * publication boundary above. requestHost must stop at the host's final reply,
- * before forwarding anything to a wallet. Never pass a wallet request promise.
- *
- * readFinalReply adapts the harness's existing receiver, returning
- * { requestId, verdict, workerLifetime }. It must return undefined for progress,
- * publication, transport acknowledgements and unobservable replies. No Chrome
- * wire-envelope layout is assumed here. workerLifetime is receiver provenance,
- * not a field to add to the production verdict stream.
- *
- * lifecycle is optional read-only harness observation:
- *   current(): { absent: true } | { lifetime: opaqueIdentity } | undefined
- *   subscribe(listener): unsubscribe
- * Notifications are { event: "activated", lifetime } for a freshly observed
- * activation, or { event: "disconnected", lifetime }. An initial enumeration
- * of an already-running worker is NOT an activation notification. The source
- * must cover the same worker as requestHost and deliver ordered observations.
- * Without this source, completion can still be observed but a worker-matched
- * duration and a cold classification cannot be established.
- *
- * All timestamps are sampled here on one monotonic clock. This measures reply
- * availability, not worker CPU time. A confirmation path can include user wait;
- * only an ordinary no-confirmation fixture excludes that wait. Missing popup
- * publication is never used to classify that fixture or its verdict.
- */
-export async function measureScamHostRequest({ request, requestHost, readFinalReply,
-  lifecycle, captureMs, now = () => performance.now() }) {
-  if (typeof request?.requestId !== "string" || !request.requestId ||
-      typeof requestHost !== "function" || typeof readFinalReply !== "function" ||
-      !Number.isSafeInteger(captureMs) || captureMs < 1 || captureMs > 300_000) {
-    throw Error("Specify an ordinary host request, final-reply receiver and bounded capture duration.");
+// Install only in the isolated content-script world of a controlled local dApp.
+// Its synthetic dApp dispatches this marker immediately before ethereum.request.
+// Arm one request in one document; finish or dispose the observer before the next trial.
+// Observe the native port without consuming, altering or synthesizing its messages.
+export function observeScamHostGate(scope, markEvent, publish) {
+  const { runtime } = scope.chrome;
+  const original = runtime.connect;
+  let trial, observedPort;
+  const awaitingPost = new Set();
+  const emit = row => { try { publish(row); } catch { /* Observer only. */ } };
+  function release() {
+    observedPort?.();
+    observedPort = undefined;
+    for (const restore of awaitingPost) restore();
+    awaitingPost.clear();
+    trial = undefined;
   }
-  const requestId = request.requestId;
-  let started, initial, activation, ended = false, clockFailed = false;
-  let lastTime = -Infinity, unsubscribe, timer, stop;
-  const clock = () => {
-    try {
-      const value = now();
-      if (!Number.isFinite(value) || value < 0 || value < lastTime) throw Error();
-      lastTime = value;
-      return value;
-    } catch { clockFailed = true; return undefined; }
-  };
-  const base = { boundary: "ordinary_host_request_to_final_reply", clock: "harness_monotonic",
-    cold: false };
-  const missing = reason => ({ ...base, outcome: "missing", reason });
-  const stopped = new Promise(resolve => { stop = resolve; });
-  let lifetimeLost = false, lifecycleReliable = !!lifecycle;
-  try {
-    if (lifecycle) {
-      try {
-        unsubscribe = lifecycle.subscribe(event => {
-          if (ended || started === undefined) return;
-          if (event?.event === "activated" && event.lifetime != null) {
-            // A second activation cannot lend a new worker's reply to this trial.
-            if (activation || initial?.lifetime != null) {
-              lifetimeLost = true;
-              stop(missing("worker_lifetime_changed"));
-            } else activation = { lifetime: event.lifetime, at: clock() };
-          } else if (event?.event === "disconnected" && event.lifetime != null &&
-              [initial?.lifetime, activation?.lifetime].includes(event.lifetime)) {
-            lifetimeLost = true;
-            stop(missing("worker_disconnected"));
+  function missing(reason) { release(); emit({ event: "missing", reason }); }
+  function begin() {
+    if (trial) { missing("ambiguous_request"); return; }
+    trial = { start: scope.performance.now(), awaited: false };
+    emit({ event: "started" });
+  }
+  function connect(...args) {
+    const port = Reflect.apply(original, this, args);
+    if (!trial || port.name !== "dambi-contentscript") return port;
+    const owner = trial;
+    const post = port.postMessage;
+    const restore = () => { if (port.postMessage === onPost) port.postMessage = post; };
+    // Ignore unrelated advisory and bypass traffic. Bind a real id only when the
+    // content script sends its normal transaction on this particular native port.
+    function onPost(message, ...rest) {
+      restore();
+      awaitingPost.delete(restore);
+      if (trial === owner && message?.data?.type === "transaction" && !message.data.bypassed &&
+          typeof message.requestId === "string" && message.requestId) {
+        if (observedPort) missing("ambiguous_request");
+        else {
+          const id = message.requestId;
+          function onReply(reply) {
+            if (trial !== owner || reply?.requestId !== id) return;
+            if (reply.kind === "awaiting-user") { trial.awaited = true; return; }
+            if (reply.kind !== undefined || typeof reply.data !== "boolean") return;
+            if (reply.rejection !== undefined && (reply.data ||
+                !["user_cancelled", "policy_denied", "unavailable"].includes(reply.rejection))) {
+              missing("invalid_final_reply"); return;
+            }
+            const durationMs = scope.performance.now() - trial.start;
+            const row = { event: "final", gate: reply.data ? "forward_permitted" : "forward_denied",
+              ...(reply.rejection ? { rejection: reply.rejection } : {}),
+              observedAwaitingUser: trial.awaited, durationMs };
+            release();
+            emit(row);
           }
-        });
-        if (typeof unsubscribe !== "function") throw Error();
-        initial = lifecycle.current();
-      } catch { lifecycleReliable = false; }
+          const disconnected = () => missing("port_disconnected");
+          port.onMessage.addListener(onReply);
+          port.onDisconnect.addListener(disconnected);
+          observedPort = () => {
+            port.onMessage.removeListener(onReply);
+            port.onDisconnect.removeListener(disconnected);
+          };
+        }
+      }
+      return Reflect.apply(post, this, [message, ...rest]);
     }
-    started = clock();
+    try { port.postMessage = onPost; awaitingPost.add(restore); }
+    catch { missing("port_unobservable"); }
+    return port;
+  }
+  runtime.connect = connect;
+  scope.document.addEventListener(markEvent, begin);
+  return () => {
+    scope.document.removeEventListener(markEvent, begin);
+    if (runtime.connect === connect) runtime.connect = original;
+    release();
+  };
+}
+
+// The controlled dApp starts an ordinary request. Its real id is generated by
+// the production proxy after that start. The isolated observer matches the
+// genuine final reply on the very port that carried the id; neither is exported.
+// Lifecycle comes from observation of this extension in one browser profile.
+// Report cold only after a positively stopped/absent worker and a unique fresh
+// activation in event order. The elapsed time is sampled in the document alone.
+export async function measureScamHostRequest({ startRequest, subscribeGate, lifecycle, captureMs }) {
+  if (typeof startRequest !== "function" || typeof subscribeGate !== "function" ||
+      !Number.isSafeInteger(captureMs) || captureMs < 1 || captureMs > 300_000) {
+    throw Error("Specify the local dApp trigger, content-port observer and bounded capture duration.");
+  }
+  const base = { boundary: "dapp_request_to_content_port_final_reply", clock: "document_performance_now", cold: false };
+  const missing = reason => ({ ...base, outcome: "missing", reason });
+  const current = () => { try { return lifecycle?.current(); } catch { return undefined; } };
+  let stop, initial, activation, started = false, issued = false, settled = false;
+  let unsubscribeGate, unsubscribeLife, timer, deadline, activeBeforeMarker = false;
+  const done = new Promise(resolve => { stop = result => { settled = true; resolve(result); }; });
+  try {
+    function lifecycleChanged(change) {
+      if (!issued || settled || change?.lifetime == null) return;
+      if (change.event === "activated") {
+        if (initial?.lifetime != null || activation != null) { stop(missing("worker_lifetime_changed")); return; }
+        activation = change.lifetime;
+        activeBeforeMarker = !started;
+      } else if (change.event === "disconnected" &&
+          (change.lifetime === initial?.lifetime || change.lifetime === activation)) {
+        stop(missing("worker_disconnected"));
+      }
+    }
+    try { unsubscribeLife = lifecycle?.subscribe(lifecycleChanged); } catch { /* Incomplete lifetime evidence. */ }
+    unsubscribeGate = subscribeGate(row => {
+      if (!issued || settled || !row) return;
+      if (performance.now() >= deadline) { stop(missing("final_reply_not_observed")); return; }
+      if (row.event === "started") {
+        if (started) stop(missing("ambiguous_request"));
+        started = true;
+        return;
+      }
+      if (row.event === "missing") {
+        stop(missing(["port_disconnected", "port_unobservable", "ambiguous_request", "invalid_final_reply"].includes(row.reason)
+          ? row.reason : "final_reply_unobservable"));
+        return;
+      }
+      if (!started || row.event !== "final" ||
+          !["forward_permitted", "forward_denied"].includes(row.gate) ||
+          typeof row.observedAwaitingUser !== "boolean" || !Number.isFinite(row.durationMs) ||
+          row.durationMs < 0 || row.durationMs >= captureMs) return;
+      if (row.rejection !== undefined && (row.gate !== "forward_denied" ||
+          !["user_cancelled", "policy_denied", "unavailable"].includes(row.rejection))) return;
+      const result = { ...base, outcome: "completed", gate: row.gate,
+        ...(row.rejection ? { rejection: row.rejection } : {}), observedAwaitingUser: row.observedAwaitingUser };
+      const lifetime = initial?.lifetime ?? activation;
+      if (lifetime == null || current()?.lifetime !== lifetime || typeof unsubscribeLife !== "function") {
+        stop({ ...result, missingStage: "matched_worker_lifetime_unobserved" }); return;
+      }
+      const cold = initial?.absent === true && initial?.lifetime == null && !activeBeforeMarker;
+      stop({ ...result, cold, durationMs: row.durationMs,
+        ...(initial?.lifetime == null && !cold ? { missingStage: "worker_absent_at_request_start_unconfirmed" } : {}) });
+    });
+    initial = current();
+    deadline = performance.now() + captureMs;
     timer = setTimeout(() => stop(missing("final_reply_not_observed")), captureMs);
-    // Invoke directly after the start observation, not after a debugger round
-    // trip. Observation expiry never cancels or changes the ordinary request.
-    const completion = (async () => {
-      let reply;
-      try { reply = await requestHost(request); }
-      catch { return missing("host_request_failed"); }
-      if (ended) return missing("final_reply_not_observed");
-      const finished = clock();
-      if (!clockFailed && finished - started >= captureMs) return missing("final_reply_not_observed");
-      let final;
-      try { final = readFinalReply(reply); }
-      catch { return missing("final_reply_unobservable"); }
-      if (!final || final.requestId !== requestId || !final.verdict ||
-          typeof final.verdict !== "object" || Array.isArray(final.verdict) ||
-          !["allow", "warn", "block"].includes(final.verdict.decision)) {
-        return missing("final_reply_unobservable");
-      }
-      const result = { ...base, outcome: "completed", decision: final.verdict.decision };
-      // Preserve actual completion even when timing provenance is missing.
-      // Neither input, request IDs nor raw verdict payloads leave this boundary.
-      if (clockFailed) return { ...result, missingStage: "monotonic_clock_unavailable" };
-      const lifetime = initial?.lifetime ?? activation?.lifetime;
-      if (!lifecycleReliable || lifetime == null || final.workerLifetime !== lifetime || lifetimeLost) {
-        return { ...result, missingStage: "matched_worker_lifetime_unobserved" };
-      }
-      const cold = initial?.absent === true && initial?.lifetime == null &&
-        activation?.lifetime === lifetime && activation.at >= started && activation.at <= finished;
-      return { ...result, cold, durationMs: finished - started,
-        ...(cold ? { activationObservedAfterMs: activation.at - started }
-          : initial?.lifetime == null ? { missingStage: "worker_absent_at_request_start_unconfirmed" } : {}) };
-    })();
-    return await Promise.race([stopped, completion]);
+    issued = true;
+    try { Promise.resolve(startRequest()).catch(() => { if (!settled) stop(missing("host_request_failed")); }); }
+    catch { stop(missing("host_request_failed")); }
+    return await done;
   } finally {
-    ended = true;
     clearTimeout(timer);
-    try { unsubscribe?.(); } catch { /* Observation cleanup cannot alter a request. */ }
+    unsubscribeGate?.();
+    unsubscribeLife?.();
   }
 }
 

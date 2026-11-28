@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { collectScamHostTrials, observeScamHost } from "../../../../scripts/sdk/scam-host-timing.mjs";
-import { probeScamHost, measureScamHostRequest } from "../../../../scripts/sdk/scam-host-timing-probe.mjs";
+import { probeScamHost, measureScamHostRequest, observeScamHostGate } from "../../../../scripts/sdk/scam-host-timing-probe.mjs";
 
 const event = () => {
   const listeners = new Set();
@@ -31,137 +31,101 @@ function worker(capture) {
 const warning = { kind: "report", report: { status: "warn", scopeNotice: "patterns_only_no_sellability_guarantee",
   targets: [{ subject: { token: "private-address" } }] } };
 
-// Equivalent ordinary unsigned host harness, not a claimed Chrome wire schema.
-// Its receiver resolves only the requestId-matched final host response. Wallet
-// forwarding is deliberately outside this boundary; no popup/storage observer
-// participates. Lifetime metadata belongs to the harness, not to the verdict.
-function ordinaryHost({ absent = false, observable = true } = {}) {
-  const changes = event();
-  let time = 10, lifetime = absent ? undefined : "worker-1", receiver;
-  let resolveReply, requested, subscriptions = 0;
-  const input = { requestId: "private-request", data: { type: "transaction", bypassed: false,
-    transaction: { to: "unsigned-test-destination", value: "0" } } };
-  const lifecycle = {
-    current: () => lifetime === undefined ? { absent: true } : { lifetime },
-    subscribe(fn) {
-      subscriptions++;
-      changes.addListener(fn);
-      return () => { subscriptions--; changes.removeListener(fn); };
-    },
+function ordinaryHost({ absent = false } = {}) {
+  const doc = new EventTarget(), rows = event(), changes = event();
+  let time = 0, lifetime = absent ? undefined : "first", counter = 0;
+  const ports = [];
+  const native = () => {
+    const port = { name: "dambi-contentscript", sent: [], onMessage: event(), onDisconnect: event(),
+      postMessage(message) { this.sent.push(message); } };
+    ports.push(port);
+    return port;
   };
-  const options = { request: input, captureMs: 100, now: () => time, lifecycle,
-    requestHost(request) {
-      requested = request;
-      return new Promise(resolve => {
-        resolveReply = resolve;
-        receiver = reply => {
-          if (reply.requestId === request.requestId) resolve({ reply, lifetime });
-        };
-      });
-    },
-    readFinalReply(observed) {
-      if (!observable) return undefined;
-      return { requestId: observed.reply.requestId, verdict: observed.reply.result,
-        workerLifetime: observed.lifetime };
-    },
-  };
-  return { options, input, get requested() { return requested; },
-    get subscriptions() { return subscriptions; },
-    activate(at, next = "worker-2") {
-      time = at; lifetime = next;
-      changes.fire({ event: "activated", lifetime });
-    },
-    disconnect(at) {
-      time = at;
-      changes.fire({ event: "disconnected", lifetime });
-      lifetime = undefined;
-    },
-    reply(at, requestId = input.requestId) {
-      time = at;
-      receiver({ requestId, result: { decision: "allow", scam: { status: "quiet" }, private: "SECRET" } });
-    },
-    acknowledge(at) { time = at; resolveReply({ reply: { requestId: input.requestId }, lifetime }); },
+  const runtime = { connect: native };
+  const cleanup = observeScamHostGate({ chrome: { runtime }, performance: { now: () => time }, document: doc },
+    "start", row => rows.fire(row));
+  function send(bypassed = false) {
+    const port = runtime.connect({ name: "dambi-contentscript" });
+    port.postMessage({ requestId: "private-" + ++counter, data: { type: "transaction", bypassed } });
+    return port;
+  }
+  const options = { captureMs: 100, startRequest() { doc.dispatchEvent(new Event("start")); send(); },
+    subscribeGate(fn) { rows.addListener(fn); return () => rows.removeListener(fn); },
+    lifecycle: { current: () => lifetime ? { lifetime } : { absent: true },
+      subscribe(fn) { changes.addListener(fn); return () => changes.removeListener(fn); } } };
+  return { options, ports, send, runtime, native, cleanup,
+    activate(next) { lifetime = next; changes.fire({ event: "activated", lifetime }); },
+    disconnect() { changes.fire({ event: "disconnected", lifetime }); lifetime = undefined; },
+    reply(port, offset, fields) { time = offset; port.onMessage.fire({ requestId: port.sent[0].requestId, ...fields }); },
   };
 }
 
-test("ordinary no-confirmation completion uses the matched final reply without a window or wallet processing", async () => {
-  const host = ordinaryHost();
+test("normal dApp timing ends on its own port and generated id; an approved warning grants forwarding without claiming a policy allow", async (t) => {
+  const host = ordinaryHost(); t.after(host.cleanup);
   const pending = measureScamHostRequest(host.options);
-  assert.equal(host.requested, host.input, "The ordinary unsigned input is passed unchanged");
-  host.reply(15, "unrelated-request");
-  let settled = false;
-  void pending.then(() => { settled = true; });
-  await Promise.resolve();
-  assert.equal(settled, false, "An unrelated final reply cannot complete the request");
-  host.reply(35);
+  const [port] = host.ports;
+  const observation = host.send(true);
+  observation.onMessage.fire({ requestId: port.sent[0].requestId, data: false });
+  host.reply(port, 8, { requestId: "unrelated", data: false });
+  host.reply(port, 12, { kind: "awaiting-user" });
+  host.reply(port, 20, { kind: "ack", data: true });
+  host.reply(port, 30, { data: true, secret: "private payload" });
   const result = await pending;
-  assert.deepEqual(result, { boundary: "ordinary_host_request_to_final_reply", clock: "harness_monotonic",
-    cold: false, outcome: "completed", decision: "allow", durationMs: 25 });
-  assert.equal(host.subscriptions, 0);
-  assert.doesNotMatch(JSON.stringify(result), /SECRET|private-request|unsigned-test-destination/);
+  assert.deepEqual(result, { boundary: "dapp_request_to_content_port_final_reply", clock: "document_performance_now",
+    cold: false, outcome: "completed", gate: "forward_permitted", observedAwaitingUser: true, durationMs: 30 });
+  assert.doesNotMatch(JSON.stringify(result), /private|quiet|allow/);
+  assert.deepEqual(port.sent, [{ requestId: "private-1", data: { type: "transaction", bypassed: false } }]);
+  host.cleanup();
+  assert.equal(host.runtime.connect, host.native);
 });
 
-test("unobservable, acknowledged and late host replies remain missing rather than no-window verdicts", async () => {
-  const hidden = ordinaryHost({ observable: false });
-  const hiddenPending = measureScamHostRequest(hidden.options);
-  hidden.reply(20);
-  const hiddenResult = await hiddenPending;
-  assert.equal(hiddenResult.reason, "final_reply_unobservable");
-  assert.equal(hiddenResult.durationMs, undefined);
+test("a marked request from a stopped worker needs a fresh matched lifetime; a lost port or worker has no duration", async (t) => {
+  const cold = ordinaryHost({ absent: true }); t.after(cold.cleanup);
+  const result = measureScamHostRequest(cold.options);
+  cold.activate("second");
+  cold.reply(cold.ports[0], 40, { data: false, rejection: "policy_denied" });
+  assert.deepEqual(await result, { boundary: "dapp_request_to_content_port_final_reply", clock: "document_performance_now",
+    cold: true, outcome: "completed", gate: "forward_denied", rejection: "policy_denied", observedAwaitingUser: false, durationMs: 40 });
 
-  const acknowledged = ordinaryHost();
-  const ackPending = measureScamHostRequest(acknowledged.options);
-  acknowledged.acknowledge(20);
-  assert.equal((await ackPending).reason, "final_reply_unobservable");
+  const early = ordinaryHost({ absent: true }); t.after(early.cleanup);
+  const before = measureScamHostRequest({ ...early.options, startRequest() {
+    early.activate("already-awake"); early.options.startRequest();
+  } });
+  early.reply(early.ports[0], 25, { data: true });
+  const unconfirmed = await before;
+  assert.equal(unconfirmed.cold, false);
+  assert.equal(unconfirmed.missingStage, "worker_absent_at_request_start_unconfirmed");
 
-  const late = ordinaryHost();
-  const latePending = measureScamHostRequest({ ...late.options, captureMs: 1 });
-  const expired = await latePending;
-  assert.equal(expired.reason, "final_reply_not_observed");
-  assert.equal(expired.durationMs, undefined);
-  late.reply(50);
-  await Promise.resolve();
-  assert.equal(expired.outcome, "missing", "A late real verdict cannot rewrite an expired observation");
-  assert.equal(late.subscriptions, 0);
-
-  const noLifetime = ordinaryHost();
-  const unqualified = measureScamHostRequest({ ...noLifetime.options, lifecycle: undefined });
-  noLifetime.reply(20);
-  const completed = await unqualified;
-  assert.equal(completed.outcome, "completed", "Missing lifecycle evidence does not erase a genuine verdict");
-  assert.equal(completed.missingStage, "matched_worker_lifetime_unobserved");
-  assert.equal(completed.durationMs, undefined);
-  assert.equal(completed.cold, false);
+  for (const reason of ["worker_disconnected", "worker_lifetime_changed", "port_disconnected", "ambiguous_request", "invalid_final_reply"]) {
+    const host = ordinaryHost({ absent: true }); t.after(host.cleanup);
+    const pending = measureScamHostRequest(host.options);
+    host.activate("second");
+    if (reason === "worker_disconnected") host.disconnect();
+    if (reason === "worker_lifetime_changed") host.activate("replacement");
+    if (reason === "port_disconnected") host.ports[0].onDisconnect.fire();
+    if (reason === "ambiguous_request") host.send();
+    if (reason === "invalid_final_reply") host.reply(host.ports[0], 10, { data: true, rejection: "policy_denied" });
+    host.reply(host.ports[0], 20, { data: true });
+    const missing = await pending;
+    assert.equal(missing.reason, reason);
+    assert.equal(missing.durationMs, undefined);
+  }
 });
 
-test("controlled cold start includes pre-activation time only with absent-at-start and matched fresh lifetime", async () => {
-  const host = ordinaryHost({ absent: true });
-  const pending = measureScamHostRequest(host.options);
-  host.activate(30);
-  host.reply(70);
-  assert.deepEqual(await pending, { boundary: "ordinary_host_request_to_final_reply", clock: "harness_monotonic",
-    cold: true, outcome: "completed", decision: "allow", durationMs: 60, activationObservedAfterMs: 20 });
+test("a genuine result does not acquire timing from an unproven worker or a reply after expiry", async (t) => {
+  const host = ordinaryHost(); t.after(host.cleanup);
+  const partial = measureScamHostRequest({ ...host.options, lifecycle: undefined });
+  host.reply(host.ports[0], 15, { data: true });
+  assert.deepEqual(await partial, { boundary: "dapp_request_to_content_port_final_reply", clock: "document_performance_now",
+    cold: false, outcome: "completed", gate: "forward_permitted", observedAwaitingUser: false,
+    missingStage: "matched_worker_lifetime_unobserved" });
 
-  const unknown = ordinaryHost({ absent: true });
-  unknown.options.lifecycle.current = () => undefined;
-  const unknownPending = measureScamHostRequest(unknown.options);
-  unknown.activate(30);
-  unknown.reply(70);
-  const result = await unknownPending;
-  assert.equal(result.cold, false);
-  assert.equal(result.missingStage, "worker_absent_at_request_start_unconfirmed");
-
-  const lost = ordinaryHost({ absent: true });
-  const lostPending = measureScamHostRequest(lost.options);
-  lost.activate(20);
-  lost.disconnect(25);
-  lost.activate(30, "replacement-worker");
-  lost.reply(40);
-  const disconnected = await lostPending;
-  assert.equal(disconnected.reason, "worker_disconnected");
-  assert.equal(disconnected.durationMs, undefined);
-  assert.equal(disconnected.cold, false);
-  assert.equal(lost.subscriptions, 0);
+  const stalled = ordinaryHost(); t.after(stalled.cleanup);
+  const pending = measureScamHostRequest({ ...stalled.options, captureMs: 1 });
+  const missing = await pending;
+  stalled.reply(stalled.ports[0], 20, { data: true });
+  assert.equal(missing.reason, "final_reply_not_observed");
+  assert.equal(missing.durationMs, undefined);
 });
 
 test("measures concurrent confirmations on their own worker clock without logging input or user response times", () => {
