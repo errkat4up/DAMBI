@@ -5,6 +5,7 @@ const doc = "qa-scam-owner.html";
 const channel = "dambi-qa-facts:";
 const waiting = new Map();
 let generation = 0;
+let epochController = new AbortController();
 let lifecycle = Promise.resolve();
 
 function serialize(work) {
@@ -20,6 +21,9 @@ async function hasOwner() {
 }
 export function invalidateComparisonScope() {
   generation++;
+  const previous = epochController;
+  epochController = new AbortController();
+  previous.abort();
   void serialize(async () => {
     if (await hasOwner()) await chrome.offscreen.closeDocument();
   }).catch(() => {});
@@ -40,10 +44,31 @@ function traceOwner(path, method, epoch) {
     console.debug("[Dambi] QA raw owner", path, method, epoch);
   }
 }
-function remote(scope, raw, method, calls, context, lifetime, version, onMetrics) {
+// Bound both transport and ordinary-provider completions to the caller's scope.
+// Do not replace the context passed to the ordinary provider: its signal and
+// timeout are the Core's existing cancellation and budget interfaces.
+function scoped(work, signals) {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const finish = (fn, value) => {
+      if (done) return;
+      done = true;
+      for (const signal of signals) signal.removeEventListener("abort", cancel);
+      fn(value);
+    };
+    const cancel = () => finish(reject, aborted());
+    if (signals.some(signal => signal.aborted)) return cancel();
+    for (const signal of signals) signal.addEventListener("abort", cancel, { once: true });
+    Promise.resolve().then(() => {
+      if (done) throw aborted();
+      return work();
+    }).then(value => finish(resolve, value), error => finish(reject, error));
+  });
+}
+function remote(scope, raw, method, calls, context, lifetime, epochSignal, version, onMetrics) {
   const id = crypto.randomUUID();
   return new Promise((resolve, reject) => {
-    const signals = [context.signal, lifetime].filter(Boolean);
+    const signals = [context.signal, lifetime, epochSignal].filter(Boolean);
     let port, connectionTimer, done = false;
     const finish = (fn, value) => {
       if (done) return;
@@ -101,23 +126,26 @@ function remote(scope, raw, method, calls, context, lifetime, version, onMetrics
 export function createComparisonProvider(config, lifetime, options) {
   const direct = createScamFactProvider(options);
   const version = generation;
+  const epochSignal = epochController.signal;
   lifetime.addEventListener("abort", () => {
     if (version === generation) invalidateComparisonScope();
   }, { once: true });
   // Bind all signed-source, user, factory, endpoint and budget settings.
   const scope = crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(config)))
     .then((bytes) => Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, "0")).join(""));
-  async function run(method, calls, context) {
-    if (method === "fetch" && !calls.some(c => c.method?.startsWith("scam."))) return direct.fetch(calls, context);
-    try {
-      return await remote(await scope, config.facts.scam, method, calls, context, lifetime, version, options.onMetrics);
-    } catch (error) {
-      if (error !== transport) throw error;
-      if (lifetime.aborted || context.signal?.aborted || version !== generation) throw aborted();
-      // Owner loss can fall back to the original provider in this Core's live budget.
-      traceOwner("fallback", method);
-      return direct[method](calls, context);
-    }
+  function run(method, calls, context) {
+    return scoped(async () => {
+      if (method === "fetch" && !calls.some(c => c.method?.startsWith("scam."))) return direct.fetch(calls, context);
+      try {
+        return await remote(await scope, config.facts.scam, method, calls, context, lifetime, epochSignal, version, options.onMetrics);
+      } catch (error) {
+        if (error !== transport) throw error;
+        if (lifetime.aborted || context.signal?.aborted || version !== generation) throw aborted();
+        // Owner loss can fall back to the original provider in this Core's live budget.
+        traceOwner("fallback", method);
+        return direct[method](calls, context);
+      }
+    }, [context.signal, lifetime, epochSignal].filter(Boolean));
   }
   return { fetch: (calls, context) => run("fetch", calls, context), prepare: (calls, context) => run("prepare", calls, context) };
 }
