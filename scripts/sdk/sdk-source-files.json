@@ -23,6 +23,8 @@
     { "from": "scripts/sdk/scam-data-probe.mjs" },
     { "from": "scripts/sdk/scam-data-probe-session.mjs" },
     { "from": "scripts/sdk/scam-sw-diagnostic.mjs" },
+    { "from": "scripts/sdk/scam-host-timing.mjs" },
+    { "from": "scripts/sdk/scam-host-timing-probe.mjs" },
     { "from": "policy-bundles/day1-safety" },
     { "from": "fixtures/sdk/resolved-decoders" },
     { "from": "fixtures/sdk/giwa-sf0/rpc-evidence.json" },

@@ -22,6 +22,7 @@ const runtimeTests = [
   "packages/core/tests/adapters/scam-analysis-probe.test.mjs",
   "packages/core/tests/adapters/scam-data-probe.test.mjs",
   "packages/core/tests/adapters/scam-sw-diagnostic.test.mjs",
+  "packages/core/tests/adapters/scam-host-timing.test.mjs",
   "packages/core/tests/adapters/policy-api.test.mjs",
   "packages/core/tests/adapters/policy-api-core.test.mjs",
   "packages/core/tests/adapters/evm-rpc.test.mjs",
