@@ -581,6 +581,194 @@ test("AH1-2 final preflight includes later profile evidence before dispatching a
   }
 });
 
+test("S2b paced delayed final headers overlap within the bound without moving the reference barrier", { timeout: 20_000 }, async (t) => {
+  // Synthetic transport latency only, not a GIWA/GCP performance observation.
+  // Compare the ordinary source at concurrency 1 and 2 with identical work.
+  const runs = [];
+  for (const concurrency of [1, 2]) {
+    const starts = [], completed = [], reports = [];
+    let final = false, active = 0, peak = 0, beforeFinal, finalStarted;
+    const f = fixture({ head: 25, limits: { concurrency, minRequestIntervalMs: 40, maxRequests: 17 },
+      handle: async (rpc) => {
+        if (!final) return undefined;
+        assert.equal(rpc.method, "eth_getBlockByNumber");
+        const n = Number(BigInt(rpc.params[0]));
+        starts.push({ n, at: performance.now() });
+        if (n === 23) {
+          assert.equal(active, 0, "Reference cannot overlap any earlier response");
+          assert.deepEqual([...completed].sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 25]);
+          assert.equal(reports.length, 0, "No terminal success before the reference response");
+        }
+        active++;
+        peak = Math.max(peak, active);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          completed.push(n);
+          return ok(rpc, header(n));
+        } finally { active--; }
+      } });
+    const result = await f.source.withBatch(request({ onMetrics: (metric) => reports.push(metric) }), async (batch) => {
+      for (let n = 1; n <= 6; n++) await batch.block(String(n));
+      batch.preflightHeaders([]);
+      beforeFinal = f.calls.length;
+      finalStarted = performance.now();
+      final = true;
+      return "complete draft";
+    });
+    const elapsed = performance.now() - finalStarted;
+    assert.equal(result.value, "complete draft");
+    assert.equal(peak, concurrency, "Original serial final verification fails the concurrency-2 regression");
+    assert.deepEqual(starts.map(({ n }) => n), [25, 1, 2, 3, 4, 5, 6, 23]);
+    for (let i = 1; i < starts.length; i++) {
+      assert.ok(starts[i].at - starts[i - 1].at >= 37, "40 ms launch pacing survives overlap (3 ms tolerance)");
+    }
+    if (concurrency === 2) assert.ok(starts[1].at < starts[0].at + 150,
+      "The second independent header starts during the first header's controlled delay");
+    assert.equal(beforeFinal, 9);
+    assert.equal(result.metrics.requests, 17);
+    assert.equal(f.calls.length, 17);
+    assert.equal(result.metrics.retries, 0);
+    assert.equal(result.metrics.preflight.finalRecheckRequests, 8);
+    assert.equal(result.metrics.preflight.minimumRemainingRequests, 8);
+    assert.equal(result.metrics.preflight.remainingRequestBudget, 8);
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0].outcome, "success");
+    runs.push({ concurrency, finalDurationMs: elapsed, peak });
+  }
+  // Report measured local elapsed time without a flaky machine-speed upper
+  // bound or claiming a host p95. Overlap and pacing assertions are the oracle.
+  t.diagnostic(JSON.stringify({ controlledHeaderDelayMs: 150, minRequestIntervalMs: 40, runs }));
+});
+
+test("S2b a slow earlier header cannot be bypassed by faster completions or a retried sibling", { timeout: 10_000 }, async () => {
+  const entered = deferred(), release = deferred(), siblingsDone = deferred();
+  const starts = [], reports = [];
+  let final = false, headDone = false, attempts = 0, completedSiblings = 0;
+  const f = fixture({ head: 25, limits: { concurrency: 2, minRequestIntervalMs: 40,
+    maxRetries: 1, retryDelayMs: 10, maxRequests: 14 }, handle: async (rpc) => {
+    if (!final) return undefined;
+    const n = Number(BigInt(rpc.params[0]));
+    starts.push(n);
+    if (n === 25) {
+      entered.resolve();
+      await release.promise;
+      headDone = true;
+    } else if (n === 1 && ++attempts === 1) {
+      return new Response("transient", { status: 503 });
+    } else if (n === 23) {
+      assert.equal(headDone, true);
+      assert.equal(completedSiblings, 4);
+    } else if (++completedSiblings === 4) siblingsDone.resolve();
+    return ok(rpc, header(n));
+  } });
+  const pending = f.source.withBatch(request({ onMetrics: (metric) => reports.push(metric) }), async (batch) => {
+    for (let n = 1; n <= 4; n++) await batch.block(String(n));
+    final = true;
+    return "verified";
+  });
+  // Attach a rejection handler while exercising the controlled transport gate.
+  void pending.catch(() => {});
+  let watchdog;
+  try {
+    await entered.promise;
+    const progressed = await Promise.race([
+      siblingsDone.promise.then(() => true),
+      new Promise((resolve) => { watchdog = setTimeout(() => resolve(false), 1_500); }),
+    ]);
+    assert.equal(progressed, true, "Independent reads must progress while the first header is held");
+    assert.deepEqual(starts, [25, 1, 1, 2, 3, 4]);
+    assert.equal(reports.length, 0);
+    assert.equal(headDone, false);
+  } finally {
+    clearTimeout(watchdog);
+    release.resolve();
+    await pending.catch(() => {});
+  }
+  const result = await pending;
+  assert.equal(result.value, "verified");
+  assert.deepEqual(starts, [25, 1, 1, 2, 3, 4, 23]);
+  assert.equal(result.metrics.requests, 14);
+  assert.equal(result.metrics.retries, 1);
+  assert.equal(result.metrics.preflight.finalRecheckRequests, 6);
+  assert.equal(result.metrics.preflight.minimumRemainingRequests, 6);
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].outcome, "success");
+});
+
+test("S2b failed concurrent verification never launches the reference early or installs cache drafts", { timeout: 20_000 }, async () => {
+  for (const mode of ["http", "decode", "reorg", "timestamp", "time_order", "timeout", "abort", "reference_reorg"]) {
+    const reports = [], starts = [], completed = [];
+    const lateHead = deferred();
+    const controller = new AbortController();
+    let final = false, inject = true, time = NOW, delayedRpc;
+    const heldHead = !["time_order", "reference_reorg"].includes(mode);
+    const f = fixture({ head: 25, historyCache: historyCacheOptions(), clock: { now: () => time },
+      limits: { concurrency: 2 }, handle: async (rpc) => {
+        if (rpc.method === "eth_getLogs") return ok(rpc, [rawLog(10)]);
+        if (!final || !inject) return undefined;
+        const n = Number(BigInt(rpc.params[0]));
+        starts.push(n);
+        if (n === 25 && heldHead) {
+          delayedRpc = rpc;
+          return lateHead.promise;
+        }
+        if (n === 23) {
+          assert.equal(mode, "reference_reorg", "All earlier checks, including time ordering, must pass first");
+          assert.deepEqual([...completed].sort((a, b) => a - b), [9, 10, 12, 25]);
+          return ok(rpc, { ...header(n), hash: blockHash(999) });
+        }
+        if (n === 10) {
+          if (mode === "http") return new Response("unavailable", { status: 500 });
+          if (mode === "decode") return ok(rpc, { ...header(n), number: q(11) });
+          if (mode === "reorg") return ok(rpc, { ...header(n), hash: blockHash(999) });
+          // No log timestamp was supplied: this conflicts with the already
+          // collected boundary at 12 only when the final time set is checked.
+          if (mode === "time_order") return ok(rpc, { ...header(n), timestamp: q(1013) });
+          if (mode === "timeout") time = NOW + 5_000;
+          if (mode === "abort") controller.abort();
+        }
+        if (n === 9 && mode === "timestamp") return ok(rpc, { ...header(n), timestamp: q(1008) });
+        completed.push(n);
+        return ok(rpc, header(n));
+      } });
+    const collect = async (batch) => {
+      const scan = await batch.logs(await batch.pool(0), query("9", "12"));
+      final = inject;
+      return scan;
+    };
+    const expected = { http: "rpc_error", decode: "invalid_response", reorg: "reorg",
+      timestamp: "invalid_response", time_order: "invalid_response", timeout: "timeout",
+      abort: "aborted", reference_reorg: "reorg" }[mode];
+    await assert.rejects(f.source.withBatch(request({ signal: controller.signal,
+      onMetrics: (metric) => reports.push(metric) }), collect), failure(expected), mode);
+    assert.equal(starts.includes(23), mode === "reference_reorg", mode);
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0].outcome, "failed");
+    assert.equal(reports[0].reason, expected);
+    assert.equal(reports[0].preflight.finalRecheckRequests, 5);
+    assert.equal(reports[0].requests, f.calls.length);
+    const terminal = JSON.stringify(reports);
+    if (delayedRpc) lateHead.resolve(ok(delayedRpc, header(25)));
+    await turn();
+    assert.equal(JSON.stringify(reports), terminal, "Late siblings cannot mutate or republish terminal metrics");
+    inject = false;
+    final = false;
+    time = NOW;
+    const beforeFresh = f.calls.length;
+    const fresh = await f.source.withBatch(request(), collect);
+    assert.equal(fresh.value.provenance, undefined, `${mode}: no failed draft becomes a cache hit`);
+    assert.deepEqual(fresh.value.missing, []);
+    assert.deepEqual(fresh.value.logs.map((log) => log.blockNumber), ["10"]);
+    assert.equal(f.calls.slice(beforeFresh).filter(({ rpc }) => rpc.method === "eth_getLogs").length, 1);
+    const beforeReuse = f.calls.length;
+    const reused = await f.source.withBatch(request(), collect);
+    assert.deepEqual(reused.value.provenance, { reuse: "interval_cache", rawObservedAt: { fromMs: NOW, toMs: NOW } });
+    assert.deepEqual(reused.value.logs, fresh.value.logs);
+    assert.deepEqual(reused.value.missing, []);
+    assert.equal(f.calls.slice(beforeReuse).filter(({ rpc }) => rpc.method === "eth_getLogs").length, 0);
+  }
+});
+
 test("scam RPC cancellation and deadlines reject late fetches without poisoning the next batch", async () => {
   const entered = deferred(), late = deferred();
   let firstRequest;

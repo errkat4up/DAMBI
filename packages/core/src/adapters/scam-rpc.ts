@@ -422,7 +422,7 @@ export function createScamRpcSource(options: ScamRpcOptions) {
         check();
       };
       const rpc = async <R = unknown>(rpcStage: ScamRpcDiagnostic["stage"], method: NonNullable<ScamRpcDiagnostic["method"]>,
-        params: readonly unknown[], decode?: (value: unknown) => R): Promise<R> => {
+        params: readonly unknown[], decode?: (value: unknown) => R, onFirstLaunch?: () => void): Promise<R> => {
         pending++;
         let admitted = false;
         let wake: (() => void) | undefined;
@@ -453,6 +453,9 @@ export function createScamRpcSource(options: ScamRpcOptions) {
             metrics.requests++;
             attempted = attempt + 1;
             const id = `scam:${++sequence}`;
+            // Internal final-check scheduling observes actual first dispatch,
+            // not admission or reservation of a future pacing slot.
+            if (attempt === 0) onFirstLaunch?.();
             let retryAfterMs: number | undefined;
             try {
               const response = await fetchText(async (url, init) => {
@@ -533,8 +536,9 @@ export function createScamRpcSource(options: ScamRpcOptions) {
       };
       const collectedTimes = (): [string, number][] => [...evidence].flatMap(([number, entry]) =>
         entry.timestampMs === undefined ? [] : [[number, entry.timestampMs] as [string, number]]);
-      const readBlock = (number: bigint, rpcStage: ScamRpcDiagnostic["stage"] = "block_header"): Promise<RpcBlock> =>
-        rpc(rpcStage, "eth_getBlockByNumber", [quantity(number), false], (value) => decodeBlock(value, number));
+      const readBlock = (number: bigint, rpcStage: ScamRpcDiagnostic["stage"] = "block_header",
+        onFirstLaunch?: () => void): Promise<RpcBlock> =>
+        rpc(rpcStage, "eth_getBlockByNumber", [quantity(number), false], (value) => decodeBlock(value, number), onFirstLaunch);
       const enforcePreflight = (checks: readonly FinalCheck[], additionalHeaders: number): void => {
         try {
           check();
@@ -559,15 +563,52 @@ export function createScamRpcSource(options: ScamRpcOptions) {
         // Retain log-only times too: later profile headers must not hide a
         // timestamp-order conflict merely because those logs are not rechecked.
         const verifiedTimes = new Map(collectedTimes());
-        for (const target of checks) {
+        const reference = checks[checks.length - 1];
+        if (!reference?.roles.includes("reference")) return fail("invalid_request");
+        const verify = async (target: FinalCheck, onFirstLaunch?: () => void): Promise<void> => {
           if (target.hash === undefined) return fail("invalid_request");
-          const current = await readBlock(BigInt(target.number), "final_recheck");
+          const current = await readBlock(BigInt(target.number), "final_recheck", onFirstLaunch);
           if (current.hash !== target.hash) return stop("reorg");
           if (target.timestampMs !== undefined && current.timestampMs !== target.timestampMs) return stop("invalid_response");
           // Header times complete the private verification set only. Do not
           // collect new roles/blocks or change the already selected targets.
           verifiedTimes.set(target.number, current.timestampMs);
-        }
+        };
+        // Only independent non-reference checks overlap. Keep at most one
+        // logical read per worker, including its pacing waits and retries;
+        // never allocate a promise for every selected evidence height.
+        let next = 0, failed = false;
+        let launchTurn = Promise.resolve();
+        await Promise.all(Array.from({ length: Math.min(config.limits.concurrency, checks.length - 1) }, async () => {
+          while (!failed && next < checks.length - 1) {
+            const target = checks[next++];
+            const previousLaunch = launchTurn;
+            let releaseLaunch!: () => void;
+            launchTurn = new Promise<void>((resolve) => { releaseLaunch = resolve; });
+            try {
+              // Preserve selected first-launch order even if a fast sibling
+              // finishes while another worker is waiting at the pacing gate.
+              // Retries still use the original shared RPC pacing/cooldown.
+              await previousLaunch;
+              if (failed) return;
+              check();
+              await verify(target, releaseLaunch);
+            } catch (error) {
+              failed = true;
+              throw error;
+            } finally {
+              // Also release workers if this read failed before dispatch.
+              releaseLaunch();
+            }
+          }
+        }));
+        // The pinned reference is a completion/validation barrier, not merely
+        // the last request enqueued. Even cross-header time conflicts must
+        // reject before it starts. The outer lifecycle gate still owns cache
+        // commit, verifiedAt and publication after the reference succeeds.
+        check();
+        validateTimes([...verifiedTimes]);
+        await verify(reference);
         validateTimes([...verifiedTimes]);
       };
       try {
